@@ -9,7 +9,10 @@
 import assert from 'node:assert/strict';
 import { test, report } from './harness.mjs';
 import { FeastWorld } from '../src/world.js';
+import { loadDishes } from '../src/dishes.js';
 import { DEFAULTS } from '../src/config.js';
+
+const lib = await loadDishes();
 
 // --------------------------------------------------------------------------
 // 极简 DOM
@@ -238,9 +241,9 @@ test('菜单面板：挂载后拉到菜、画出卡片、注入了样式', async
   assert.equal(invocations[0].method, 'list');
   assert.ok(root.querySelector('style'), '没注入样式');
   const cards = root.querySelectorAll('.feast-card');
-  assert.equal(cards.length, 200, `只画了 ${cards.length} 张卡`);
+  assert.equal(cards.length, lib.dishes.length, `只画了 ${cards.length} 张卡`);
   assert.ok(root.texts('feast-card-n').includes('麻婆豆腐'));
-  assert.ok(root.texts('feast-count')[0].includes('共 200 道'));
+  assert.ok(root.texts('feast-count')[0].includes(`共 ${lib.dishes.length} 道`));
   assert.ok(root.texts('feast-tag').length > 0, '标签没画出来');
   await world.stop();
 });
@@ -281,17 +284,52 @@ test('菜单面板：点「端给她」会真的推到世界，并回到菜单�
   await world.stop();
 });
 
+test('菜单面板：先选类别，菜系下拉跟着收窄，换类别会清掉对不上的菜系', async () => {
+  const { mount, invocations, world } = await mountPanels();
+  const root = await mount('menu');
+  const [cat, cuisine] = root.findAll((n) => n.tagName === 'SELECT');
+  assert.ok(cat && cuisine, '应该有类别和菜系两个下拉');
+
+  // 一上来菜系列的是全部菜系
+  assert.ok(root.findAll((n) => n.tagName === 'OPTION').length > 20);
+
+  // 选「汤羹」→ 菜系下拉只剩汤羹里真有的那几个
+  cat.value = '汤羹';
+  cat.fire('change');
+  await waitFor(() => invocations.filter((i) => i.method === 'list').pop()?.args[0]?.category === '汤羹',
+    '请求带上类别');
+  const last = invocations.filter((i) => i.method === 'list').pop();
+  assert.equal(last.args[0].category, '汤羹');
+
+  // 再选一个菜系，两个条件一起带上
+  // 重拉期间面板会先清成"载入中"，那儿没有下拉——要等它画回来再取。
+  await waitFor(() => root.findAll((n) => n.tagName === 'SELECT').length === 2, '下拉画回来');
+  const after = root.findAll((n) => n.tagName === 'SELECT')[1];
+  const opts = after.childNodes.filter((n) => n.tagName === 'OPTION').map((n) => n.value).filter(Boolean);
+  assert.ok(opts.length > 0 && opts.length < 20, `汤羹下的菜系应该收窄了，现在是 ${opts.length} 个`);
+  after.value = opts[0];
+  after.fire('change');
+  await waitFor(() => {
+    const l = invocations.filter((i) => i.method === 'list').pop()?.args[0];
+    return l?.category === '汤羹' && l?.cuisine === opts[0];
+  }, '类别和菜系一起带上');
+  await world.stop();
+});
+
 test('菜单面板：筛选下拉真的会带上条件再请求', async () => {
   const { mount, invocations, world } = await mountPanels();
   const root = await mount('menu');
   const selects = root.findAll((n) => n.tagName === 'SELECT');
-  assert.equal(selects.length, 2, '应该有菜系和类别两个下拉');
-  selects[0].value = '川菜';
-  selects[0].fire('change');
-  await waitFor(() => root.querySelectorAll('.feast-card').length === 8, '筛出 8 道川菜');
+  assert.equal(selects.length, 2, '应该有类别和菜系两个下拉');
+  // 顺序是「先类别、后菜系」，所以菜系是第二个
+  selects[1].value = '川菜';
+  selects[1].fire('change');
+  // 不写死道数：菜会一直加，跟库里实际数对上就行。
+  const chuanCount = lib.dishes.filter((d) => d.cuisine === '川菜').length;
+  await waitFor(() => root.querySelectorAll('.feast-card').length === chuanCount, `筛出 ${chuanCount} 道川菜`);
   const last = invocations.filter((i) => i.method === 'list').pop();
   assert.equal(last.args[0].cuisine, '川菜');
-  assert.equal(root.querySelectorAll('.feast-card').length, 8);
+  assert.equal(root.querySelectorAll('.feast-card').length, chuanCount);
   await world.stop();
 });
 
@@ -348,7 +386,7 @@ test('英文界面：文案切过去，数据还是同一份', async () => {
   const { mount, world } = await mountPanels({ language: 'en' });
   const root = await mount('menu');
   assert.equal(root.findByText('Surprise me')?.textContent, 'Surprise me');
-  assert.ok(root.texts('feast-count')[0].includes('200 dishes'));
+  assert.ok(root.texts('feast-count')[0].includes(`${lib.dishes.length} dishes`));
   await world.stop();
 });
 

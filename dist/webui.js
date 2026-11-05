@@ -251,7 +251,7 @@ const menuPanel = {
     style.textContent = CSS;
     root.appendChild(style);
 
-    const state = { filter: {}, cuisines: [], categories: [], detail: null, pending: null };
+    const state = { filter: {}, cuisines: [], categories: [], categoryCuisines: {}, detail: null, pending: null };
     /** 等待条右边那个"还剩多久"的节点，随钟走。 */
     let pendingBox = null;
     const wrap = el('div');
@@ -276,6 +276,7 @@ const menuPanel = {
       }
       state.cuisines = data.cuisines ?? [];
       state.categories = data.categories ?? [];
+      state.categoryCuisines = data.categoryCuisines ?? {};
       // 每次重拉都跟着服务端走：端来的菜可能是在别处端的，也可能已经被吃掉/过期收走。
       state.pending = data.pending ?? null;
       render(data);
@@ -301,25 +302,35 @@ const menuPanel = {
       };
       bar.appendChild(search);
 
-      const cuisine = el('select');
-      cuisine.appendChild(option(t.allCuisines, ''));
-      for (const c of state.cuisines) cuisine.appendChild(option(c, c));
-      cuisine.value = state.filter.cuisine ?? '';
-      cuisine.onchange = () => {
-        state.filter.cuisine = cuisine.value;
-        void load();
-      };
-      bar.appendChild(cuisine);
-
+      // 先形态，后菜系。菜系下拉跟着已选类别收窄——选了「汤羹」就不该再列「墨西哥菜」，
+      // 那种选项按下去必然是空的。菜系轴上 0.3.0 起只有地域/传统，形态全在这边。
       const cat = el('select');
       cat.appendChild(option(t.allCats, ''));
       for (const c of state.categories) cat.appendChild(option(c, c));
       cat.value = state.filter.category ?? '';
       cat.onchange = () => {
         state.filter.category = cat.value;
+        // 换类别后原来选的菜系可能已经不在这一类里了，直接清掉，别让她看到空结果。
+        const allowed = state.filter.category
+          ? (state.categoryCuisines[state.filter.category] ?? [])
+          : state.cuisines;
+        if (state.filter.cuisine && !allowed.includes(state.filter.cuisine)) state.filter.cuisine = '';
         void load();
       };
       bar.appendChild(cat);
+
+      const cuisine = el('select');
+      cuisine.appendChild(option(t.allCuisines, ''));
+      const pool = state.filter.category
+        ? (state.categoryCuisines[state.filter.category] ?? [])
+        : state.cuisines;
+      for (const c of pool) cuisine.appendChild(option(c, c));
+      cuisine.value = state.filter.cuisine ?? '';
+      cuisine.onchange = () => {
+        state.filter.cuisine = cuisine.value;
+        void load();
+      };
+      bar.appendChild(cuisine);
 
       const dice = el('button', 'feast-btn-primary', t.random);
       dice.onclick = async () => {

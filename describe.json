@@ -2,13 +2,13 @@
   "tools": [
     {
       "name": "feast_menu",
-      "description": "看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料·寿司/意菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。",
+      "description": "看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料/意菜/中东菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。",
       "parameters": {
         "type": "object",
         "properties": {
           "cuisine": {
             "type": "string",
-            "description": "菜系，例如 川菜 / 粤菜 / 日料·寿司 / 意菜 / 甜品。"
+            "description": "菜系（地域/传统），例如 川菜 / 粤菜 / 日料 / 意菜 / 中东菜。⚠ 这里只说从哪来，不管是什么形态；想按汤/面/小吃挑请用 category。"
           },
           "category": {
             "type": "string",

@@ -21,6 +21,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { GROUPS } from './validate-dishes.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ONLINE = process.argv.includes('--online');
@@ -232,7 +233,16 @@ if (!existsSync(join(ROOT, 'CHANGELOG.md'))) {
   if (!heads.includes(pkg.version)) {
     warn(`CHANGELOG.md 没有 ${pkg.version} 的二级标题：这一版在市场上不会显示更新说明`);
   } else pass(`CHANGELOG.md 有 ${pkg.version} 一节（共 ${heads.length} 个版本）`);
-  if (md.length > 4000) warn('CHANGELOG 每段会被截到 2000 字，当前版本那节写太长会显示不全');
+
+  // 市场把**当前版本那一节**截到 2000 字，所以量的是这一节，不是整个文件。
+  const secStart = md.indexOf(`## ${pkg.version}`);
+  if (secStart >= 0) {
+    const nextHead = md.indexOf('\n## ', secStart + 1);
+    const section = md.slice(secStart, nextHead < 0 ? undefined : nextHead);
+    if (section.length > 2000) {
+      warn(`CHANGELOG 的 ${pkg.version} 一节 ${section.length} 字，市场只显示前 2000 字，后面会被截掉`);
+    } else pass(`CHANGELOG 的 ${pkg.version} 一节 ${section.length} 字，市场上能完整显示`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +289,8 @@ const walk = (dir, out = []) => {
   else pass(`发布清单 ${paths.length} 个文件、${(total / 1024).toFixed(0)}KB`);
 
   const dataFiles = paths.filter((f) => /^src\/data\/.+\.json$/.test(f));
-  if (dataFiles.length !== 25) fail(`菜品数据只带 ${dataFiles.length} 个，应为 25 个`);
+  const wantFiles = Object.keys(GROUPS).length;
+  if (dataFiles.length !== wantFiles) fail(`菜品数据只带 ${dataFiles.length} 个，应为 ${wantFiles} 个（GROUPS 里的组数）`);
   else pass(`菜品数据 ${dataFiles.length} 个文件全在清单里`);
 
   const leaked = paths.filter((f) => /^(test|tools)\//.test(f) || /\.bak-/.test(f) || f === 'install.ps1' || f.startsWith('.tmp'));

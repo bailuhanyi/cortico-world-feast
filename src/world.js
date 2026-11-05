@@ -3,7 +3,8 @@
  *
  * 做的是"让她真的吃到东西"这件事：
  *
- *   · 库里 200 道菜（25 个菜系组 × 8 道），每道带九维口味分值 + 香气/口感/余韵 + 3-5 句实吃描写；
+ *   · 库里 500 道菜（24 个菜系组），每道带九维口味分值 + 香气/口感/余韵 + 实吃描写；
+ *     cuisine 只说地域/传统，形态一律看 category（没有例外组）；
  *   · feast_eat 不是把档案贴出来，而是叠一层"这一口"（温度、状态、配的那口），
  *     同一道菜连着吃三次说的不一样；
  *   · 主人可以从 WebUI 面板点一道菜"端给她"，那是一条约她来吃的 internal 事件；
@@ -47,11 +48,11 @@ export const FEAST_TOOL_DECLS = [
   {
     name: 'feast_menu',
     tags: ['read', 'snapshot'],
-    description: '看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料·寿司/意菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。',
+    description: '看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料/意菜/中东菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。',
     parameters: {
       type: 'object',
       properties: {
-        cuisine: { type: 'string', description: '菜系，例如 川菜 / 粤菜 / 日料·寿司 / 意菜 / 甜品。' },
+        cuisine: { type: 'string', description: '菜系（地域/传统），例如 川菜 / 粤菜 / 日料 / 意菜 / 中东菜。⚠ 这里只说从哪来，不管是什么形态；想按汤/面/小吃挑请用 category。' },
         category: { type: 'string', description: '类别，例如 热菜 / 汤羹 / 甜品 / 饮品。' },
         keyword: { type: 'string', description: '标签，例如 下饭 / 解腻 / 滚烫 / 夏天。' },
         query: { type: 'string', description: '自由搜：菜名、产地、食材都行，例如 花椒 / 潮汕 / 芝士。' },
@@ -699,6 +700,7 @@ export class FeastWorld {
             matched: items.length,
             cuisines: this.#lib.cuisines,
             categories: this.#lib.categories,
+            categoryCuisines: this.#lib.categoryCuisines,
             items: items.slice(0, cap).map((d) => ({
               id: d.id, name: d.name, cuisine: d.cuisine, category: d.category,
               region: d.region, keywords: d.keywords, serving: d.serving,

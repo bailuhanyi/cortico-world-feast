@@ -42,21 +42,49 @@ const pick = (arr, rng) => arr[Math.floor(rng() * arr.length) % arr.length];
  * 温度档：这道菜是滚烫的、冰的，还是常温的。
  * 档案里没有单独的字段，就从类别 + 关键词 + 名字推——推错了也只是"这口"的一句话，
  * 事实层（texture/aroma）不受影响。
+ *
+ * `warm` 和 `warmSweet` 的句子必须分开：前者照饮品写的（"就喝掉了""杯子握在手里"），
+ * 端给舒芙蕾、巴克拉瓦、热蛋挞就全错了——那是用勺子吃的东西，不是喝的。
  */
+/** 关键词里真正说明"这道菜是凉的"的：冷藏、冷冻、冰凉、冰镇、冷食。 */
+const COLD_KW = /^(冷藏|冷冻|冰凉|冰镇|冷食|冰)$/;
+/** 关键词说的是**旁边那口**，不是这道菜本身的温度（「配冰淇淋」）。 */
+const SIDE_KW = /^配/;
+
 export function tempClass(dish) {
-  const hay = `${dish.name}${dish.alias}${dish.keywords.join('')}${dish.category}`;
-  if (/冰|凉|冷|刺身|寿司|沙拉|醉|凉拌|冷面|雪糕|冰淇淋|刨冰|冰镇|气泡/.test(hay)) return 'cold';
-  if (dish.category === '饮品') return /热|煮|拿铁|可可|茶(?!饮)|汤/.test(hay) ? 'warm' : 'cold';
-  if (dish.category === '凉菜') return 'cold';
+  const name = `${dish.name}${dish.alias}`;
+  const cat = dish.category;
+  const kws = dish.keywords ?? [];
+
+  // 冷档分两处看，都不看"整串拼起来"的那段文字——拼起来就会误伤：
+  //   · 苹果派关键词写着「配冰淇淋」，那是旁边那球，派本身是烫的；
+  //   · 官渡粑粑「凉了更韧」、番茄蒜香烤面包「冷番茄」，说的是别的事；
+  //   · 奇拉基莱斯「解宿醉」里的"醉"字也不是凉。
+  // 名字带凉意的（冰沙、刨冰、雪糕、凉面、刺身、寿司、醉蟹…）照旧算凉。
+  if (/冰|雪糕|冰淇淋|刨冰|冰镇|凉面|凉皮|凉粉|冷面|冷汤|刺身|寿司|沙拉|醉蟹|醉虾|凉拌|气泡/.test(name)) return 'cold';
+  if (kws.some((k) => !SIDE_KW.test(k) && COLD_KW.test(k))) return 'cold';
+
+  const hay = name + kws.join('');
+  if (cat === '饮品') return /热|煮|拿铁|可可|茶(?!饮)|汤/.test(hay) ? 'warm' : 'cold';
+  if (cat === '凉菜') return 'cold';
   if (/常温|室温|不烫/.test(hay)) return 'room';
-  if (dish.category === '甜品') return /舒芙蕾|熔岩|可颂|司康|泡芙|巴斯克|酥/.test(hay) ? 'warm' : 'room';
-  if (dish.category === '小吃' && /寿司|玉子|大福|麻薯/.test(hay)) return 'room';
+  if (cat === '甜品') {
+    return /舒芙蕾|熔岩|可颂|司康|泡芙|巴斯克|酥|挞|派|布丁|塔|现烤|热食/.test(hay) ? 'warmSweet' : 'room';
+  }
+  if (cat === '小吃' && /寿司|玉子|大福|麻薯/.test(name)) return 'room';
   return 'hot';
 }
 
-/** 怎么配着吃：正餐、喝的、还是甜的。 */
+/**
+ * 怎么配着吃：正餐、喝的、甜的，还是本来就带汤水的。
+ *
+ * `soup` 单独一档是因为「吃到一半先喝了口汤」这类句子只对汤羹/火锅成立：
+ * 一份布法罗鸡翅、一串烤肉念出"先喝了口汤"就是错的（原先把这句放在 food 池里，
+ * 全库抽样 2457 次里有 345 次落在没有汤的菜上）。
+ */
 function kindOf(dish) {
   if (dish.category === '饮品') return 'drink';
+  if (dish.category === '汤羹' || dish.category === '火锅') return 'soup';
   if (dish.category === '甜品' || /冰|雪糕|冰淇淋|刨冰|果冻|布丁/.test(dish.keywords.join(''))) return 'sweet';
   return 'food';
 }
@@ -78,6 +106,13 @@ const TEMP = {
     '端着的时候还烫手，放到能入口的温度就喝掉了。',
     '温热，正好，凉一分就腥、热一分就烫。',
     '杯子握在手里，热从掌心传上来，先闻了两口才喝。',
+  ],
+  // 热的固体甜点：用勺子挖，不是喝的。
+  warmSweet: [
+    '端上来还是烫的，勺子先搁了一会儿才敢碰。',
+    '外皮刚出炉，一碰就烫指尖，得先撕开一角散散热气。',
+    '中间还是温的，边上一圈已经凉下来，一口里两个温度。',
+    '趁热挖，凉了以后它会塌下去，样子就不一样了。',
   ],
   room: [
     '不烫也不冰，温的，是最不起劲也最耐吃的温度。',
@@ -102,8 +137,14 @@ const WITH = {
     '就着一碗白饭，饭比菜先见底。',
     '旁边一杯凉水，喝一口把味道冲淡了再来一口。',
     '配了一口热茶，嘴里那层油被刮干净。',
-    '吃到一半停了一下，先喝了口汤。',
     '吃完舔了下手指，才想起来找纸巾。',
+  ],
+  soup: [
+    '空口喝的，一勺接一勺。',
+    '就着一碗白饭，汤比饭先见底。',
+    '喝到一半停了一下，先夹了口别的菜。',
+    '配了一口热茶，嘴里那层油被刮干净。',
+    '端着碗喝到最后一口，碗底那点料也刮干净了。',
   ],
   drink: [
     '一个人坐着，一口气喝掉半杯。',

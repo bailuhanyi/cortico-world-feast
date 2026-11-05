@@ -28,6 +28,31 @@ test('同一道菜连着吃，说的不是同一句话', () => {
   assert.notEqual(a, b, '两次吃一模一样，那是念菜谱');
 });
 
+test('汤句只说给真有汤的菜：鸡翅、烤肉不会被念「先喝了口汤」', () => {
+  // 这句原来躺在 food 池里，于是布法罗鸡翅、烤串、煎饼都会"先喝了口汤"。
+  // 现在汤羹/火锅单独一档，food 池里不许再出现汤句。
+  const SOUP_ONLY = ['先喝了口汤', '一勺接一勺', '端着碗喝到最后一口', '汤比饭先见底'];
+  for (const line of POOLS.WITH.food) {
+    for (const s of SOUP_ONLY) {
+      assert.ok(!line.includes(s), `food 池里混进了汤句：「${line}」`);
+    }
+  }
+  // 抽几道确定没汤的菜，跑遍档位和日期，一句都不许出现。
+  const noSoup = ['buffalo-wings', 'dak-galbi', 'scallion-pancake', 'barbecue-ribs', 'apple-pie'];
+  for (const id of noSoup) {
+    const d = lib.byId.get(id);
+    assert.ok(d, `库里没有 ${id}`);
+    for (let nth = 0; nth < 3; nth += 1) {
+      for (const day of ['2026-11-01', '2026-11-05', '2026-11-09']) {
+        const text = renderBite(d, { nth, day });
+        for (const s of SOUP_ONLY) {
+          assert.ok(!text.includes(s), `${d.name} 被念出了汤句「${s}」`);
+        }
+      }
+    }
+  }
+});
+
 test('同一个"第几次 + 同一天"重放是稳定的', () => {
   const a = renderBite(dish, { nth: 2, day: '2026-11-05' });
   const b = renderBite(dish, { nth: 2, day: '2026-11-05' });
@@ -83,6 +108,49 @@ test('温度分类：生鱼是凉的，咖啡是热的', () => {
   assert.equal(tempClass(cold), 'cold', '刺身/寿司该是按凉的处理');
   assert.equal(tempClass(drink), 'warm', '手冲该是按热的处理');
   assert.equal(tempClass(dish), 'hot');
+});
+
+test('热的固体甜点不会被说成"喝掉了"', () => {
+  // 舒芙蕾、巴克拉瓦、葡式蛋挞、苹果派都是热的，但它们是**用勺子/手吃**的东西。
+  // 原来它们落到 warm 那档（句子照饮品写的："放到能入口的温度就喝掉了""杯子握在手里"），
+  // 一道舒芙蕾被当成一杯饮料。
+  const sweets = ['french-souffle', 'baklava', 'pastel-de-nata', 'apple-pie']
+    .map((id) => lib.byId.get(id)).filter(Boolean);
+  assert.equal(sweets.length, 4, '甜品样本没找齐');
+  for (const d of sweets) {
+    assert.equal(tempClass(d), 'warmSweet', `${d.name} 该走"热的固体甜点"那档`);
+    for (const nth of [0, 1, 2]) {
+      const text = renderBite(d, { nth, day: '2026-11-05' });
+      assert.ok(!/喝掉|杯子握在手里|先闻了两口才喝/.test(text),
+        `${d.name} 第 ${nth + 1} 回被写成像在喝饮料`);
+    }
+  }
+  // 反过来：真饮品还得走 warm，别被这条修过头。
+  assert.equal(tempClass(drink), 'warm');
+  assert.ok(/杯|喝/.test(POOLS.TEMP.warm.join('')));
+});
+
+test('温度不看"词里恰好带凉字"，只看这道菜本身', () => {
+  // 苹果派的关键词写着「配冰淇淋」——那是旁边那球，派本身是烫的。
+  assert.equal(tempClass(lib.byId.get('apple-pie')), 'warmSweet', '苹果派被"配冰淇淋"带成了凉的');
+  // 官渡粑粑「凉了更韧」、番茄蒜香烤面包「冷番茄」、丝娃娃、奇拉基莱斯「解宿醉」同理。
+  for (const id of ['guandu-baba', 'bruschetta-al-pomodoro']) {
+    assert.notEqual(tempClass(lib.byId.get(id)), 'cold', `${id} 被别的词带成了凉的`);
+  }
+  // 但真凉的东西不能被放过：冷藏、冰镇、冷食，以及名字里就有凉的。
+  for (const id of ['tiramisu', 'lvdagun', 'mango-shaved-ice', 'creme-brulee']) {
+    assert.equal(tempClass(lib.byId.get(id)), 'cold', `${id} 明明是凉的，被漏掉了`);
+  }
+  // 珍珠奶茶是热的，别因为名字里有"冰"以外的字眼就归到冷。
+  assert.equal(tempClass(lib.byId.get('iced-pearl-milk-tea')), 'warm', '奶茶默认该是热的');
+});
+
+test('温度档的词库都得有料，缺一档会静默退回 hot', () => {
+  for (const [k, pool] of Object.entries(POOLS.TEMP)) {
+    assert.ok(Array.isArray(pool) && pool.length >= 3, `${k} 档只有 ${pool?.length ?? 0} 句`);
+  }
+  // renderBite 里是 TEMP[temp] ?? TEMP.hot，档名写错就会悄悄全说成"刚出锅"。
+  assert.ok(POOLS.TEMP.warmSweet, 'warmSweet 档不见了');
 });
 
 test('不合口味时会说清是哪一层不对，并且用这道菜自己的最强维度', () => {

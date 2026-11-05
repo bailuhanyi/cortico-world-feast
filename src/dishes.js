@@ -93,7 +93,14 @@ export async function loadDishes(logger) {
   const cuisines = [...new Set(dishes.map((d) => d.cuisine))].sort();
   const categories = CATEGORIES.filter((c) => dishes.some((d) => d.category === c));
 
-  cache = { dishes, byId, cuisines, categories, bad };
+  // 面板是「先选形态，再在里面挑菜系」，所以每个类别要知道自己下面有哪些菜系。
+  // 不这么给的话，选了「汤羹」还会看到「墨西哥菜」这种一按就没结果的选项。
+  const categoryCuisines = {};
+  for (const c of categories) {
+    categoryCuisines[c] = [...new Set(dishes.filter((d) => d.category === c).map((d) => d.cuisine))].sort();
+  }
+
+  cache = { dishes, byId, cuisines, categories, categoryCuisines, bad };
   return cache;
 }
 

@@ -32,33 +32,52 @@ export const CATEGORIES = [
   '热菜', '凉菜', '主食', '汤羹', '面点', '小吃', '甜品', '饮品', '烧烤', '火锅',
 ];
 
-/** 文件名 → 该文件里 cuisine 应有的值。 */
+/**
+ * 文件名 → 该文件里 cuisine 应有的值。
+ *
+ * 0.3.0 起，cuisine 只说**地域/传统**（这道菜从哪来），形态（热菜/汤羹/面点/小吃/
+ * 甜品/饮品/烧烤/火锅）一律交给 category。所以这里不再有「汤羹」「中式小吃」「饮品」
+ * 这类形态组——它们和菜系是两根轴，混在一起必然撞车（生煎包 vs 小笼包、
+ * 新疆羊肉串 vs 新疆大盘鸡）。
+ *
+ * **没有例外**。0.3.0 曾留过一个 `desserts`（甜品），理由是"黑森林蛋糕这类德式甜点没有别的家"，
+ * 但 0.4.0 拆了：它和 category 里的「甜品」是同一个词，等于同一根轴出现两次；而且每次为了
+ * 某一道菜留一个例外，下一次加菜时就会重新变成问题。现在甜品按地区各归各家
+ * （双皮奶→粤菜、铜锣烧→日料、黑森林蛋糕→欧洲菜）。同理，「家常菜」作为**风格**
+ * 也拆掉了：它的菜按 region 各自归位。
+ *
+ * 0.5.0 补到 500 道时又开了三个外餐组（拉美菜、东欧菜、非洲菜），并把「印度菜」改名
+ * 成「南亚菜」——那一组要收巴基斯坦、斯里兰卡、孟加拉的菜，再叫印度菜就不老实了。
+ * 开组的理由只有一个：**那片地方真有很多菜，而且和邻近组的地域不重叠**，
+ * 不是为了把某几道菜塞进去。
+ */
 export const GROUPS = {
+  // 中餐 11
   'sichuan': '川菜',
   'cantonese': '粤菜',
-  'jiangnan': '江浙菜',
+  'jiangzhe-hu': '江浙沪菜',
   'northern': '北方菜',
   'hunan': '湘菜',
-  'yunnan-guizhou': '云贵菜',
+  'southwest': '西南菜',
   'northeast': '东北菜',
-  'noodles-dumplings': '面点主食',
-  'soups': '汤羹',
-  'chinese-snacks': '中式小吃',
-  'sushi': '日料·寿司',
-  'japanese-hot': '日料·热食',
-  'korean-thai': '韩式与泰式',
-  'vietnamese': '越南与东南亚',
-  'italian': '意菜',
-  'western': '西餐',
-  'desserts': '甜品',
-  'drinks': '饮品',
-  'ice': '冰品与冷饮',
-  'bbq': '烧烤与夜市',
   'northwest': '西北菜',
-  'halal': '清真菜',
-  'home-cooking': '家常菜',
-  'indian': '印度菜',
+  'fujian-taiwan': '闽台菜',
+  'shandong': '鲁菜',
+  'hubei': '鄂菜',
+  // 外餐 13
+  'japanese': '日料',
+  'korean': '韩式',
+  'southeast-asian': '东南亚',
+  'south-asian': '南亚菜',
   'mexican': '墨西哥菜',
+  'italian': '意菜',
+  'french': '法餐',
+  'european': '欧洲菜',
+  'anglo-american': '英美菜',
+  'middle-eastern': '中东菜',
+  'latin-american': '拉美菜',
+  'eastern-european': '东欧菜',
+  'african': '非洲菜',
 };
 
 /** prose 里出现这些词就是套话，打回。 */
