@@ -74,6 +74,30 @@ npm config get registry   # 应是 https://registry.npmjs.org/
 
 > **本机已知情况（2026-11-05）**：npm 缓存目录 `C:\Users\asus\AppData\Local\npm-cache` 在 DSH 沙箱里写不了，`npm pack` / `npm publish` 会报 `EPERM`。这不是 npm 的问题，是沙箱边界——`npm pack`、`npm publish` 这类要写缓存的命令都要在沙箱外跑（或由你在自己终端里跑）。
 
+### 2FA：npm 现在要求发布必须过二次验证
+
+`npm login` 用网页授权登进来的是普通 token，**发不了包**。`npm publish` 会报：
+
+```
+E403  Two-factor authentication or granular access token with bypass 2fa enabled
+      is required to publish packages.
+```
+
+也就是说账号必须满足下面之一：
+
+- 开启 2FA，发布时带 `--otp <6 位码>`（每次都要，码 30 秒过期）
+- 建一个 **granular access token** 并勾上「bypass 2FA」，把它写进 `~/.npmrc`
+
+开启 2FA：<https://www.npmjs.com/settings/YOURNAME/tfa> → 绑定 authenticator → 选 **Authorization and writes**（只勾 writes 不够，改 tag/设置也要验证）。
+
+然后：
+
+```powershell
+npm publish --otp 123456
+```
+
+> 注意：网页授权登录的会话 token 也走不通这条路。要么 2FA + `--otp`，要么 granular token + bypass 2FA，没有第三种。`--otp` 的码只能人手输，脚本替不了。
+
 ---
 
 ## 3. 看一眼要发出去的东西
@@ -91,7 +115,7 @@ npm pack --dry-run
 ## 4. 发
 
 ```powershell
-npm publish
+npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
 第一次发一个 `0.1.0` 的新包，不需要 `--access public`（那是作用域包 `@you/xxx` 才要的）。
@@ -102,6 +126,8 @@ npm publish
 npm view cortico-world-feast version          # 应回 0.1.0
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
 ```
+
+`npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
 
 ---
 
