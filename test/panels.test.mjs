@@ -238,9 +238,9 @@ test('菜单面板：挂载后拉到菜、画出卡片、注入了样式', async
   assert.equal(invocations[0].method, 'list');
   assert.ok(root.querySelector('style'), '没注入样式');
   const cards = root.querySelectorAll('.feast-card');
-  assert.equal(cards.length, 80, `只画了 ${cards.length} 张卡`);
+  assert.equal(cards.length, 200, `只画了 ${cards.length} 张卡`);
   assert.ok(root.texts('feast-card-n').includes('麻婆豆腐'));
-  assert.ok(root.texts('feast-count')[0].includes('共 80 道'));
+  assert.ok(root.texts('feast-count')[0].includes('共 200 道'));
   assert.ok(root.texts('feast-tag').length > 0, '标签没画出来');
   await world.stop();
 });
@@ -288,10 +288,10 @@ test('菜单面板：筛选下拉真的会带上条件再请求', async () => {
   assert.equal(selects.length, 2, '应该有菜系和类别两个下拉');
   selects[0].value = '川菜';
   selects[0].fire('change');
-  await waitFor(() => root.querySelectorAll('.feast-card').length === 4, '筛出 4 道川菜');
+  await waitFor(() => root.querySelectorAll('.feast-card').length === 8, '筛出 8 道川菜');
   const last = invocations.filter((i) => i.method === 'list').pop();
   assert.equal(last.args[0].cuisine, '川菜');
-  assert.equal(root.querySelectorAll('.feast-card').length, 4);
+  assert.equal(root.querySelectorAll('.feast-card').length, 8);
   await world.stop();
 });
 
@@ -348,7 +348,7 @@ test('英文界面：文案切过去，数据还是同一份', async () => {
   const { mount, world } = await mountPanels({ language: 'en' });
   const root = await mount('menu');
   assert.equal(root.findByText('Surprise me')?.textContent, 'Surprise me');
-  assert.ok(root.texts('feast-count')[0].includes('80 dishes'));
+  assert.ok(root.texts('feast-count')[0].includes('200 dishes'));
   await world.stop();
 });
 

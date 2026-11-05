@@ -54,6 +54,11 @@ export const GROUPS = {
   'drinks': '饮品',
   'ice': '冰品与冷饮',
   'bbq': '烧烤与夜市',
+  'northwest': '西北菜',
+  'halal': '清真菜',
+  'home-cooking': '家常菜',
+  'indian': '印度菜',
+  'mexican': '墨西哥菜',
 };
 
 /** prose 里出现这些词就是套话，打回。 */

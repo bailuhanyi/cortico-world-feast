@@ -8,13 +8,14 @@ import { loadDishes, findDish, filterDishes, pickFew, pickOne, tasteProfile, TAS
 
 const lib = await loadDishes();
 
-test('库里至少有 70 道菜、15 个菜系', () => {
-  assert.ok(lib.dishes.length >= 70, `只有 ${lib.dishes.length} 道`);
-  assert.ok(lib.cuisines.length >= 15, `只有 ${lib.cuisines.length} 个菜系`);
+test('库里正好 200 道菜、25 个菜系组', () => {
+  assert.equal(lib.dishes.length, 200, `有 ${lib.dishes.length} 道`);
+  assert.equal(lib.cuisines.length, 25, `有 ${lib.cuisines.length} 个菜系`);
 });
 
 test('中餐和非中餐各占一半左右', () => {
-  const cn = ['川菜', '粤菜', '江浙菜', '北方菜', '湘菜', '云贵菜', '东北菜', '面点主食', '汤羹', '中式小吃'];
+  const cn = ['川菜', '粤菜', '江浙菜', '北方菜', '湘菜', '云贵菜', '东北菜', '西北菜', '清真菜',
+    '家常菜', '面点主食', '汤羹', '中式小吃'];
   const cnCount = lib.dishes.filter((d) => cn.includes(d.cuisine)).length;
   const ratio = cnCount / lib.dishes.length;
   assert.ok(ratio > 0.4 && ratio < 0.6, `中餐占比 ${ratio.toFixed(2)}，偏离一半太远`);

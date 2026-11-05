@@ -1,4 +1,4 @@
-﻿/**
+/**
  * publish-check.mjs —— 模拟 Coo 扩展市场的 Action 扫描，在发 npm 之前把能查的都查掉。
  *
  * Action 的口径见索引仓 Pal-AI-Lab/cortico-extensions 的 DESIGN.md：它搜 npm 的三个关键字，
@@ -279,7 +279,7 @@ const walk = (dir, out = []) => {
   else pass(`发布清单 ${paths.length} 个文件、${(total / 1024).toFixed(0)}KB`);
 
   const dataFiles = paths.filter((f) => /^src\/data\/.+\.json$/.test(f));
-  if (dataFiles.length !== 20) fail(`菜品数据只带 ${dataFiles.length} 个，应为 20 个`);
+  if (dataFiles.length !== 25) fail(`菜品数据只带 ${dataFiles.length} 个，应为 25 个`);
   else pass(`菜品数据 ${dataFiles.length} 个文件全在清单里`);
 
   const leaked = paths.filter((f) => /^(test|tools)\//.test(f) || /\.bak-/.test(f) || f === 'install.ps1' || f.startsWith('.tmp'));

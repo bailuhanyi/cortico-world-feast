@@ -112,7 +112,7 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-应该看到 **35 个文件**，压缩后约 129KB、解包约 306KB（`npm notice` 报的是 `package size: 129.3 kB` / `unpacked size: 306.3 kB`）：`package.json`、`src/`（含 20 个菜品 json）、`dist/webui.js`、`describe.json`、`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
+应该看到 **40 个文件**，压缩后约 190KB、解包约 537KB：`package.json`、`src/`（含 25 个菜品 json）、`dist/webui.js`、`describe.json`、`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
 
 `test/`、`tools/`、`install.ps1` 都在 `files` 之外，不会发出去——菜品校验脚本、装机脚本是我们的工具，不是用户要的东西。
 

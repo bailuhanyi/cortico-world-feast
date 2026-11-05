@@ -3,7 +3,7 @@
  *
  * 做的是"让她真的吃到东西"这件事：
  *
- *   · 库里 80 道菜，每道带九维口味分值 + 香气/口感/余韵 + 3-5 句实吃描写；
+ *   · 库里 200 道菜（25 个菜系组 × 8 道），每道带九维口味分值 + 香气/口感/余韵 + 3-5 句实吃描写；
  *   · feast_eat 不是把档案贴出来，而是叠一层"这一口"（温度、状态、配的那口），
  *     同一道菜连着吃三次说的不一样；
  *   · 主人可以从 WebUI 面板点一道菜"端给她"，那是一条约她来吃的 internal 事件；
@@ -691,7 +691,9 @@ export class FeastWorld {
           const [filter] = args;
           const f = filter && typeof filter === 'object' ? filter : {};
           const items = filterDishes(this.#lib, f);
-          const cap = clampInt(f.limit, 1, 400, 200);
+          // 上限跟着库走：面板一次要全部菜，库涨到 200/300 道时不该有一截被悄悄截掉。
+          // 那个 400 是硬顶（面板一屏画不下这么多卡），不是默认值。
+          const cap = clampInt(f.limit, 1, Math.max(400, items.length), items.length);
           return {
             total: this.#lib.dishes.length,
             matched: items.length,

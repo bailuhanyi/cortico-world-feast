@@ -61,7 +61,7 @@ test('挂载：菜品库读进来了，六个工具都在', async () => {
     'feast_eat', 'feast_history', 'feast_menu', 'feast_reaction', 'feast_skip', 'feast_taste',
   ]);
   const menu = await tools.feast_menu({});
-  assert.ok(menu.text.includes('库里共 80 道'), menu.text.slice(0, 80));
+  assert.ok(menu.text.includes('库里共 200 道'), menu.text.slice(0, 80));
   assert.ok(menu.text.includes('川菜'));
   await world.stop();
 });
@@ -69,7 +69,7 @@ test('挂载：菜品库读进来了，六个工具都在', async () => {
 test('feast_menu：筛选说得出找到了几道，说不通时不当掉', async () => {
   const { world, tools } = await makeWorld();
   const chuan = await tools.feast_menu({ cuisine: '川菜' });
-  assert.ok(chuan.text.includes('找到 4 道'));
+  assert.ok(chuan.text.includes('找到 8 道'));
   assert.ok(chuan.text.includes('麻婆豆腐'));
   const none = await tools.feast_menu({ cuisine: '不存在的菜系' });
   assert.ok(none.text.includes('没有符合这个条件'), none.text);
@@ -237,8 +237,8 @@ test('面板数据面：菜单、单道、历史', async () => {
   assert.ok(!ui.panels[0].getMethods.includes('feed'), 'feed 是写操作，不该允许 GET');
 
   const list = await ui.invoke('menu', 'list', [{}]);
-  assert.equal(list.total, 80);
-  assert.ok(list.items.length >= 80);
+  assert.equal(list.total, 200);
+  assert.ok(list.items.length >= 200);
   assert.ok(list.cuisines.includes('川菜'));
 
   const filtered = await ui.invoke('menu', 'list', [{ cuisine: '甜品' }]);
