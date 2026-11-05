@@ -1,0 +1,191 @@
+{
+  "tools": [
+    {
+      "name": "feast_menu",
+      "description": "看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料·寿司/意菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cuisine": {
+            "type": "string",
+            "description": "菜系，例如 川菜 / 粤菜 / 日料·寿司 / 意菜 / 甜品。"
+          },
+          "category": {
+            "type": "string",
+            "description": "类别，例如 热菜 / 汤羹 / 甜品 / 饮品。"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "标签，例如 下饭 / 解腻 / 滚烫 / 夏天。"
+          },
+          "query": {
+            "type": "string",
+            "description": "自由搜：菜名、产地、食材都行，例如 花椒 / 潮汕 / 芝士。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "read",
+        "snapshot"
+      ],
+      "summary": {
+        "zh": "看菜单：按菜系/类别/标签筛，或随机给几道今天能吃的。",
+        "en": "Browse the library by cuisine, category or tag, or get a few random picks."
+      }
+    },
+    {
+      "name": "feast_eat",
+      "description": "吃一道菜。dish 填菜名或 id（例如 麻婆豆腐 / mapo-tofu）；留空就吃主人刚端来的那道，没有端来的就随机给你一道。回执里有这道菜的味道、香气、口感、余韵，还有\"这一口\"当下的样子——同一道菜每次吃都不一样。吃完跟主人说一句你尝到了什么。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dish": {
+            "type": "string",
+            "description": "要吃哪一道：菜名或 id 都行。留空就见下面两个筛选。"
+          },
+          "cuisine": {
+            "type": "string",
+            "description": "不想点名：限定菜系随机挑一道，例如 川菜。"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "不想点名：限定标签随机挑一道，例如 解腻。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "吃一道菜：给出味道、香气、口感、余韵和「这一口」当下的样子。",
+        "en": "Eat a dish: flavour, aroma, texture, aftertaste, plus how it lands right now."
+      }
+    },
+    {
+      "name": "feast_taste",
+      "description": "只看不吃：查一道菜的完整味道档案（食材、做法、上桌的样子、九维口味、口感、香气、余韵）。想跟主人形容一道菜、或者好奇某道菜是什么味儿时用它；真要吃请用 feast_eat。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dish": {
+            "type": "string",
+            "description": "查哪一道：菜名或 id。"
+          }
+        },
+        "required": [
+          "dish"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "只看不吃：查一道菜的完整味道档案。",
+        "en": "Read a dish's full flavour profile without eating it."
+      }
+    },
+    {
+      "name": "feast_history",
+      "description": "查你自己吃过什么、吃过几回、以及攒出来的口味画像（辣/甜/酸/苦的耐受、偏清淡还是重口、最常入口的菜系）。想知道自己最近爱吃哪一口时用它。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tags": [
+        "read",
+        "snapshot"
+      ],
+      "summary": {
+        "zh": "吃过什么、吃过几回，以及攒出来的口味画像。",
+        "en": "What she has eaten, how often, and the accumulated taste profile."
+      }
+    },
+    {
+      "name": "feast_reaction",
+      "description": "记一句你自己吃完的真实反应。action 填 like（合口味）/ ok（一般）/ dislike（不太对付），note 一句具体的（\"麻得正好，就是豆腐有点碎\"）。dish 留空就是刚吃过的那道。这不是给主人看的评分，是给你自己记的口味。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "like / ok / dislike。",
+            "enum": [
+              "like",
+              "ok",
+              "dislike"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "一句具体的反应，例如「麻得正好」「太甜了，两口就够」。"
+          },
+          "dish": {
+            "type": "string",
+            "description": "评哪一道；留空就是刚吃过的那道。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "记一句吃完的真实反应（合口味 / 一般 / 不太对付）。",
+        "en": "Log how a dish actually landed."
+      }
+    },
+    {
+      "name": "feast_skip",
+      "description": "今天不想吃：跳过今天剩下的饭点，不再叫你。主人端菜过来仍然会告诉你。reason 可选，写给自己看。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "为什么不想吃，可选。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "今天不想吃：跳过剩下的饭点。",
+        "en": "Skip the rest of today's meals."
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "feast.meal",
+      "description": {
+        "zh": "到饭点（或上一顿没吃，到催的时间）：正文列出今天吃过什么和几道候选，让她自己挑一道吃。origin 是 internal，按她自己的作息投递，不是主人发的消息。在配置里可以整个关掉。",
+        "en": "A meal slot came due (or the previous meal was not eaten): lists what she ate today and a few candidates. Internal origin: her own schedule, not a message from the owner. Can be switched off entirely in config."
+      },
+      "trigger": "flush"
+    },
+    {
+      "type": "feast.feed",
+      "description": {
+        "zh": "主人在 WebUI 面板上点「端给她」，把一道菜放到她面前。正文含这道菜上桌的样子和闻到的味道，请她用 feast_eat 尝。origin 是 internal，来自已认证的操作员通道。",
+        "en": "The owner served a dish from the WebUI panel. The text describes how it arrives and smells, and asks her to eat it with feast_eat. Internal origin, from the authenticated operator channel."
+      },
+      "trigger": "flush"
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.feast.env",
+      "title": "一桌菜",
+      "role": "envPrompt",
+      "content": "## 一桌菜\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【一桌菜】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n"
+    }
+  ]
+}

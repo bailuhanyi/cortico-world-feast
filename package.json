@@ -1,0 +1,78 @@
+{
+  "name": "cortico-world-feast",
+  "version": "0.1.0",
+  "description": "一桌菜 · 给 Coo 一张会端菜的桌子：80 道带九维口味、香气、口感与实吃描写的菜品，她能自己挑、主人能从面板端一道过去；同一道菜每次吃到的都不一样，吃过什么和口味画像跨天攒着；另有一套可开关的饭点提醒。",
+  "license": "MIT",
+  "author": "青",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bailuhanyi/cortico-world-feast.git"
+  },
+  "homepage": "https://github.com/bailuhanyi/cortico-world-feast#readme",
+  "bugs": {
+    "url": "https://github.com/bailuhanyi/cortico-world-feast/issues"
+  },
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "coopanion",
+    "coo",
+    "food",
+    "eat",
+    "taste",
+    "flavor",
+    "dish",
+    "meal",
+    "hunger",
+    "companion"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "dist",
+    "assets",
+    "describe.json",
+    "CHANGELOG.md",
+    "README.md",
+    "PUBLISHING.md"
+  ],
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
+    "dishes": "node tools/validate-dishes.mjs",
+    "selfcheck": "node tools/selfcheck.mjs",
+    "check:install": "node tools/check-install.mjs",
+    "check:publish": "node tools/publish-check.mjs --online",
+    "describe": "node tools/make-describe.mjs",
+    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
+  },
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "一桌菜",
+    "icon": "assets/icon.png",
+    "webUiClient": "dist/webui.js",
+    "describe": "describe.json",
+    "locales": {
+      "zh": {
+        "displayName": "一桌菜",
+        "description": "给 Coo 一张会端菜的桌子：80 道菜，每道都有九维口味、香气、口感、余韵和一段实吃描写。她能自己按菜系挑，主人也能从面板把一道菜端到她面前；同一道菜每次吃到的都不一样（温度、状态、配的那口会变），吃过什么、对什么反应、口味画像跨天攒着。饭点提醒默认开着，可以在配置里一键关掉。"
+      },
+      "en": {
+        "displayName": "Table",
+        "description": "A table that serves food to your Coo: 80 dishes, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders are on by default and can be switched off in config."
+      }
+    },
+    "tags": [
+      "companion",
+      "internal-state",
+      "experimental"
+    ]
+  }
+}
