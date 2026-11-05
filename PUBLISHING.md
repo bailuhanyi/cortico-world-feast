@@ -100,7 +100,9 @@ npm publish --otp 123456
 >
 > **`--otp` 要的是 6 位数字**，从 authenticator 应用里现取（30 秒滚一次）。npm 的**恢复码**（一长串 64 位 hex）只能用于**网页登录**顶替验证——**千万别传给 `npm publish --otp`**：会当场消耗掉一个，并且触发 **72 小时安全封禁**（`temporary 72-hour security hold`），期间不能发布、不能建 token、不能改已有 2FA 方式，**无法提前解除**。
 >
-> **npm 的 2FA 主推安全密钥（WebAuthn）**，不是 authenticator 的 6 位码。设置页如果只给 Security key 选项，选它即可——Windows 上走 Windows Hello（指纹/PIN），不再需要输码，也没有 30 秒过期的烦恼。TOTP（authenticator）是另一个可选项，取决于账号页面提供不提供。
+> **判断封禁有没有解除，别只看 `EOTP`。** `npm publish` 分两个阶段：第一阶段发 PUT，只报 `401 / EOTP`（要验证码）；**带上验证码或完成网页验证后重试的第二个 PUT 才会暴露 `403 suspended`**。所以只有走完整个验证流程、看到第二个 PUT 的结果，才知道能不能发。
+>
+> **npm 的 2FA 主推安全密钥（WebAuthn）**，不是 authenticator 的 6 位码。设置页如果只给 Security key 选项，选它即可——Windows 上走 Windows Hello（指纹/PIN），不再需要输码。TOTP（authenticator）是另一个可选项，取决于账号页面提供不提供。
 
 ---
 
