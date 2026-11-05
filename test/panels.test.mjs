@@ -140,11 +140,12 @@ globalThis.document = {
  * 固定次数的 setTimeout(0) 是竞态：机器快就过、机器慢就挂。真正要等的是「结果出现了」。
  */
 async function waitFor(check, what = '条件', timeoutMs = 2000) {
-  const deadline = Date.now() + timeoutMs;
+  // 用 performance.now 计时：有的用例把 Date.now 换成假钟，用它计时会永远等下去。
+  const start = performance.now();
   for (;;) {
     const value = check();
     if (value) return value;
-    if (Date.now() > deadline) throw new Error(`等 ${what} 超时（${timeoutMs}ms）`);
+    if (performance.now() - start > timeoutMs) throw new Error(`等 ${what} 超时（${timeoutMs}ms）`);
     await new Promise((r) => setTimeout(r, 2));
   }
 }
@@ -154,13 +155,28 @@ async function waitFor(check, what = '条件', timeoutMs = 2000) {
 // --------------------------------------------------------------------------
 
 const invocations = [];
+/**
+ * 面板登记的定时器。每次都从 mountPanels 重新给一份：文件级共享的话，
+ * `intervals.find(...)` 会摸到上一个用例的旧面板留下的定时器，测起来就是假的。
+ */
+const intervalBox = { list: [] };
 
-async function mountPanels({ language = 'zh', failList = false } = {}) {
+/**
+ * 假钟：把 Date.now 接到一个可推进的 `{ now }` 上（面板每次走表都现读一次 Date.now，
+ * 冻结成固定值的话，钟拨了它也不知道）。用完必须换回来。
+ */
+const realTime = Date.now;
+function fakeClock(clock) {
+  Date.now = () => clock.now;
+  return () => { Date.now = realTime; };
+}
+
+async function mountPanels({ language = 'zh', failList = false, clock = null } = {}) {
   const world = new FeastWorld({
     cfg: { ...DEFAULTS, enabled: true },
     dataDir: '.tmp/panels',
     timezone: 'Asia/Shanghai',
-    now: () => Date.parse('2026-11-05T12:05:00+08:00'),
+    now: clock ? () => clock.now : () => Date.parse('2026-11-05T12:05:00+08:00'),
     random: () => 0.5,
     timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
   });
@@ -173,6 +189,8 @@ async function mountPanels({ language = 'zh', failList = false } = {}) {
   const bundle = await import('../dist/webui.js?' + Math.random());
   const root = new Node('div');
   const timeouts = [];
+  const panels = { lastHandle: null };
+  intervalBox.list.length = 0; // 只清空，不换数组（换掉的话外面拿到的还是旧的）
   const ctx = {
     pageId: 'world:feast',
     panelId: '',
@@ -180,6 +198,11 @@ async function mountPanels({ language = 'zh', failList = false } = {}) {
     root,
     signal: { aborted: false },
     timeout(fn) { timeouts.push(fn); return { dispose() {} }; },
+    interval(fn, ms) {
+      const entry = { fn, ms, disposed: false };
+      intervalBox.list.push(entry);
+      return { dispose() { entry.disposed = true; } };
+    },
     async invoke(method, args) {
       invocations.push({ method, args });
       if (failList && method === 'list') throw new Error('boom');
@@ -192,11 +215,11 @@ async function mountPanels({ language = 'zh', failList = false } = {}) {
     ctx.panelId = id;
     root.replaceChildren();
     invocations.length = 0;
-    await bundle.default.panels[id].mount(ctx);
+    panels.lastHandle = (await bundle.default.panels[id].mount(ctx)) ?? null;
     return root;
   }
 
-  return { world, bundle, decl, mount, root, invocations, timeouts };
+  return { world, bundle, decl, mount, root, invocations, timeouts, intervals: intervalBox.list, panels };
 }
 
 // --------------------------------------------------------------------------
@@ -334,6 +357,84 @@ test('面板只往 ctx.root 里写，没碰 document.body', async () => {
   const root = await mount('menu');
   assert.equal(root.childNodes.length, 2, '应该是 <style> + 容器');
   assert.equal(root.childNodes[0].tagName, 'STYLE');
+  await world.stop();
+});
+
+test('菜单面板：端来的那道写着还剩多久，钟走一格就变小，到点自己收走', async () => {
+  // 世界那边的表和面板看表用同一个钟（真实环境里两端也是一致的），
+  // 所以端上来的那一瞬间该显示"还剩 30 分钟"。
+  const T0 = Date.parse('2026-11-05T11:35:10+08:00');
+  const clock = { now: T0 };
+  const restore = fakeClock(clock);
+  const { mount, world, invocations, intervals, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('menu');
+
+    // 从面板上端：端完它会自己回菜单并重拉一次，等待条这时就该出现
+    root.querySelectorAll('.feast-card').find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+    await waitFor(() => root.querySelector('.feast-detail'), '详情画出来', 4000);
+    root.findByText('端给她').fire('click');
+    await waitFor(() => root.querySelector('.feast-left'), '等待条上出现倒计时', 4000);
+
+    assert.ok(root.texts('feast-left')[0].includes('还剩约 30 分钟'), `端上来该显示 30 分钟：${root.texts('feast-left')[0]}`);
+
+    const ticker = intervals.find((i) => i.ms === 30_000);
+    assert.ok(ticker, '面板没登记 30 秒走一次的定时器');
+
+    // 拨 16 分钟：不重拉数据，那一行字自己变小
+    clock.now = T0 + 16 * 60_000;
+    ticker.fn();
+    assert.ok(root.texts('feast-left')[0].includes('还剩约 14 分钟'), `该变成 14 分钟：${root.texts('feast-left')[0]}`);
+
+    // 拨过保质期：再走一格，等待条该自己消失
+    clock.now = T0 + 31 * 60_000;
+    const before = invocations.filter((i) => i.method === 'list').length;
+    ticker.fn();
+    await waitFor(() => !root.querySelector('.feast-strip'), '过期后等待条消失', 4000);
+    assert.ok(invocations.filter((i) => i.method === 'list').length > before, '到点该重拉一次数据');
+  } finally {
+    panels.lastHandle?.dispose?.();
+    restore();
+  }
+  await world.stop();
+});
+
+test('菜单面板：别处端来的菜、别人吃掉了，重开面板时等待条跟着服务端走', async () => {
+  const T0 = Date.parse('2026-11-05T11:35:10+08:00');
+  const clock = { now: T0 };
+  const restore = fakeClock(clock);
+  const { mount, world, panels } = await mountPanels({ clock });
+  try {
+    await world.feedDish('mapo-tofu'); // 这一次不是从面板上端的
+    const root = await mount('menu');
+    assert.ok(root.querySelector('.feast-strip'), '重开面板该看到还在她面前的那道');
+    assert.ok(root.texts('feast-left')[0].includes('还剩约 30 分钟'), root.texts('feast-left')[0]);
+
+    // 她吃掉了：服务端已经收走，面板重开必须跟着没有
+    await world.tools().find((t) => t.name === 'feast_eat').handler({});
+    const again = await mount('menu');
+    assert.ok(!again.querySelector('.feast-strip'), '吃掉了还挂着等待条，那是在骗主人');
+  } finally {
+    panels.lastHandle?.dispose?.();
+    restore();
+  }
+  await world.stop();
+});
+
+test('英文界面：等待条上的倒计时也是英文', async () => {
+  const T0 = Date.parse('2026-11-05T11:35:10+08:00');
+  const clock = { now: T0 };
+  const restore = fakeClock(clock);
+  const { mount, world, panels } = await mountPanels({ language: 'en', clock });
+  try {
+    await world.feedDish('mapo-tofu'); // 先端上：面板一挂载就该看到这条
+    const root = await mount('menu');
+    await waitFor(() => root.querySelector('.feast-left'), '出现倒计时', 4000);
+    assert.ok(root.texts('feast-left')[0].includes('about 30 min left'), root.texts('feast-left')[0]);
+  } finally {
+    panels.lastHandle?.dispose?.();
+    restore();
+  }
   await world.stop();
 });
 

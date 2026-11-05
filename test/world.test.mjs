@@ -197,6 +197,31 @@ test('主人端菜：推一条事件，接着吃到的就是端来的那道', as
   await world.stop();
 });
 
+test('主人端菜：端来的那道还写着她还剩多久', async () => {
+  const clock = { now: MEAL_TIME };
+  const { world, events, tools } = await makeWorld({ now: () => clock.now });
+  await world.feedDish('mapo-tofu');
+  const ev = events.find((e) => e.type === 'feast.feed');
+  // 11:35 端的，默认留 30 分钟 → 12:05 之前吃掉都算数
+  assert.ok(ev.text.includes('12:05'), `气泡里该写清到几点为止：${ev.text.split('\n').at(-1)}`);
+  assert.ok(ev.text.includes('过了就收了'));
+
+  clock.now += 10 * 60_000;
+  const ate = await tools.feast_eat({});
+  assert.ok(ate.text.includes('还剩约 20 分钟'), `吃的时候该知道还剩多久：${ate.text.split('\n').at(-1)}`);
+  await world.stop();
+});
+
+test('主人端菜：快过期的那道，回执说得出只剩不到一分钟', async () => {
+  const clock = { now: MEAL_TIME };
+  const { world, tools } = await makeWorld({ now: () => clock.now });
+  await world.feedDish('mapo-tofu');
+  clock.now += 30 * 60_000 - 20_000;
+  const ate = await tools.feast_eat({});
+  assert.ok(ate.text.includes('不到一分钟'), ate.text.split('\n').at(-1));
+  await world.stop();
+});
+
 test('主人端菜：端不存在的菜会被拒', async () => {
   const { world } = await makeWorld();
   const bad = await world.feedDish('no-such-dish');

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test, report } from './harness.mjs';
 import { loadDishes } from '../src/dishes.js';
-import { renderBite, renderProfile, tempClass } from '../src/eat.js';
+import { POOLS, renderBite, renderProfile, tempClass } from '../src/eat.js';
 
 const lib = await loadDishes();
 const dish = lib.byId.get('mapo-tofu');
@@ -40,10 +40,43 @@ test('换一天，同一个"第几次"也会变', () => {
   assert.notEqual(a, b);
 });
 
-test('吃熟了会多一句"熟悉"的话', () => {
+test('吃熟了：熟客不再说"第一印象"那套', () => {
   const first = renderBite(dish, { nth: 0, day: '2026-11-05' });
   const familiar = renderBite(dish, { nth: 5, day: '2026-11-05' });
-  assert.ok(familiar.length > first.length);
+  assert.ok(POOLS.ANGLE[0].some((s) => first.includes(s)), '第一回该是第一次那套');
+  assert.ok(POOLS.ANGLE[2].some((s) => familiar.includes(s)), '第五回该是熟客那套');
+  // 温度那句话里本来就有"第一口"（刚出锅烫嘴），所以按整句比，不按词比
+  assert.ok(!POOLS.ANGLE[0].some((s) => familiar.includes(s)), '吃过五回了还在写第一次那句，那是念稿子');
+});
+
+test('换角度：第几次就说第几次那档的话', () => {
+  // 档位之间不能互相串（串了就是"第二回还在写第一印象"）
+  assert.equal(POOLS.ANGLE.length, 3, '第一回 / 第二回 / 第三回起，三档');
+  for (const pool of POOLS.ANGLE) assert.ok(pool.length >= 4, '每档句子太少，同一天连吃两回就会撞');
+  assert.ok(POOLS.ANGLE[0].some((s) => /第一口/.test(s)), '第一档该是"第一印象"那套');
+  assert.ok(POOLS.ANGLE[1].every((s) => !/第一口|第一次吃/.test(s)), '第二回那档不该再说"第一次"');
+  assert.ok(POOLS.ANGLE[2].every((s) => !/第一口|第一次吃/.test(s)), '第三回起那档不该再说"第一次"');
+
+  const day = '2026-11-05';
+  const bite = (nth, d = day) => {
+    const text = renderBite(dish, { nth, day: d });
+    const pool = POOLS.ANGLE[Math.min(nth, 2)];
+    const hit = pool.find((s) => text.includes(s));
+    assert.ok(hit, `第 ${nth + 1} 回没吃到第 ${Math.min(nth, 2) + 1} 档的话`);
+    // 也不能同时吃到别的档位的话
+    for (const [i, other] of POOLS.ANGLE.entries()) {
+      if (i === Math.min(nth, 2)) continue;
+      assert.ok(!other.some((s) => text.includes(s)), `第 ${nth + 1} 回串到了第 ${i + 1} 档`);
+    }
+    return hit;
+  };
+
+  for (const nth of [0, 1, 2, 7]) bite(nth);
+
+  // 同一档里也不能老是同一句：换个日子该挑到另一句
+  for (const nth of [0, 1, 2]) {
+    assert.notEqual(bite(nth), bite(nth, `${day}-2`), `第 ${nth + 1} 档两句的日子挑到了同一句`);
+  }
 });
 
 test('温度分类：生鱼是凉的，咖啡是热的', () => {

@@ -30,6 +30,12 @@ const msg = (err) => (err instanceof Error ? err.message : String(err));
 
 const ACTIONS = ['like', 'ok', 'dislike'];
 
+/** 端来的菜还剩多久（四舍五入到分钟；不到一分钟就说不到一分钟）。 */
+function shelfLifeText(remainMs) {
+  const min = Math.round(remainMs / 60_000);
+  return min >= 1 ? `还剩约 ${min} 分钟` : '只剩不到一分钟';
+}
+
 function clampInt(v, min, max, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
@@ -266,6 +272,8 @@ export class FeastWorld {
     let by = 'self';
     let why = '';
 
+    let servedAt = 0;
+    let servedTtlMin = 0;
     const asked = typeof args.dish === 'string' ? args.dish.trim() : '';
     if (asked) {
       dish = findDish(lib, asked);
@@ -276,11 +284,15 @@ export class FeastWorld {
           : `库里没有叫「${asked}」的菜。用 feast_menu 看看有什么。`;
         return { text: `没找到这道菜。${hint}`, failed: true };
       }
-    } else if (servedStillFresh(this.#state, now, this.#cfgNumber('ownerFeedTTL', 1, 240))) {
-      dish = lib.byId.get(this.#state.served.id) ?? null;
-      if (dish) {
-        by = 'owner';
-        why = '（主人端来的这道）';
+    } else {
+      servedTtlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
+      if (servedStillFresh(this.#state, now, servedTtlMin)) {
+        dish = lib.byId.get(this.#state.served.id) ?? null;
+        if (dish) {
+          by = 'owner';
+          why = '（主人端来的这道）';
+          servedAt = this.#state.served.at;
+        }
       }
     }
 
@@ -314,7 +326,10 @@ export class FeastWorld {
     } else {
       tail.push('吃完用 feast_reaction 记一句自己的反应（可选）。');
     }
-    if (by === 'owner') tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的，主人端来的那道已经收了。）`);
+    if (by === 'owner') {
+      const left = servedAt + servedTtlMin * 60_000 - now;
+      tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的，主人端来的那道已经收了；端来时${shelfLifeText(left)}。）`);
+    }
 
     this.#host?.log?.info?.('一桌菜：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
     return { text: [body, '', tail.join('')].join('\n') };
@@ -495,6 +510,7 @@ export class FeastWorld {
     if (!dish) return { ok: false, message: `库里没有这道菜：${id}` };
 
     const now = this.#now();
+    const ttlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
     const day = dayIn(this.timezone, now);
     rollover(this.#state, day);
     setServed(this.#state, { nowMs: now, id: dish.id });
@@ -508,7 +524,8 @@ export class FeastWorld {
     if (dish.serving) lines.push('', dish.serving);
     if (dish.aroma) lines.push(`闻到的：${dish.aroma}`);
     lines.push('', `用 feast_eat 尝（dish 可以留空，端来的这道会先吃到）；吃完跟主人说一句你尝到了什么。`);
-    lines.push(`（这道菜放 ${this.#cfgNumber('ownerFeedTTL', 1, 240)} 分钟，过了就收了。）`);
+    // 只写"放 30 分钟"她不知道还剩多久；把到点的那一刻写出来，她才能自己看表决定先吃哪个。
+    lines.push(`（现在刚端过来，${hmIn(this.timezone, now + ttlMin * 60_000)} 之前吃掉都算数；过了就收了。）`);
 
     const host = this.#host;
     if (host?.pushEvent) {
@@ -529,13 +546,19 @@ export class FeastWorld {
     return { ok: true, message: `端过去了：${dish.name}`, dish: this.#panelDish(dish), pending: this.#servedView() };
   }
 
-  /** 主人端来的那道还等着吗。 */
+  /** 主人端来的那道还等着吗。ttlMin 给面板自己算还剩多久。 */
   #servedView() {
     const now = this.#now();
-    const fresh = servedStillFresh(this.#state, now, this.#cfgNumber('ownerFeedTTL', 1, 240));
+    const ttlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
+    const fresh = servedStillFresh(this.#state, now, ttlMin);
     if (!fresh) return null;
     const d = this.#lib.byId.get(this.#state.served.id);
-    return { id: this.#state.served.id, name: d?.name ?? this.#state.served.id, at: this.#state.served.at };
+    return {
+      id: this.#state.served.id,
+      name: d?.name ?? this.#state.served.id,
+      at: this.#state.served.at,
+      ttlMin,
+    };
   }
 
   #panelDish(d) {

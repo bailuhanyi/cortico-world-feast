@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 一桌菜面板的浏览器端（Coo WebUI 扩展面板）。
  *
  * 约定（见 build/cortico/src/web/shared/client-panel.ts）：
@@ -31,6 +31,7 @@ const CSS = `
 .feast-strip{border:1px solid var(--fe-line);border-left:3px solid var(--fe-accent);border-radius:var(--radius-sm,6px);padding:8px 11px;margin-bottom:12px;background:var(--fe-card);display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .feast-strip b{font-weight:600}
 .feast-strip .feast-dim{color:var(--fe-dim)}
+.feast-strip .feast-left{color:var(--fe-dim);font-size:12px;white-space:nowrap;margin-left:auto;font-variant-numeric:tabular-nums}
 .feast-count{color:var(--fe-dim);font-size:12px;margin:2px 0 10px}
 .feast-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:10px}
 .feast-card{text-align:left;border:1px solid var(--fe-line);border-radius:var(--radius-md,10px);background:var(--fe-card);padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:border-color .12s,transform .12s}
@@ -87,6 +88,8 @@ const TABLE = {
     back: '← 回菜单',
     pending: '还在她面前',
     pendingHint: '等她用 feast_eat 尝',
+    pendingLeft: (m) => (m > 0 ? `还剩约 ${m} 分钟` : '就快收了'),
+    pendingGone: '已经收走了',
     matched: (n, total) => `筛出 ${n} 道 / 共 ${total} 道`,
     all: (n) => `共 ${n} 道菜`,
     eatenTimes: (n) => (n ? `吃过 ${n} 回` : '还没吃过'),
@@ -127,6 +130,8 @@ const TABLE = {
     back: '← Back to menu',
     pending: 'waiting in front of her',
     pendingHint: 'until she eats it with feast_eat',
+    pendingLeft: (m) => (m > 0 ? `about ${m} min left` : 'almost over'),
+    pendingGone: 'already cleared away',
     matched: (n, total) => `${n} of ${total} dishes`,
     all: (n) => `${n} dishes`,
     eatenTimes: (n) => (n ? `eaten ${n}×` : 'never eaten'),
@@ -247,8 +252,18 @@ const menuPanel = {
     root.appendChild(style);
 
     const state = { filter: {}, cuisines: [], categories: [], detail: null, pending: null };
+    /** 等待条右边那个"还剩多久"的节点，随钟走。 */
+    let pendingBox = null;
     const wrap = el('div');
     root.appendChild(wrap);
+
+    /** 还剩几分钟（向上取整：不到一分钟也算"1 分钟"，别显示 0）。 */
+    function remainMin(p) {
+      const ttl = Number(p?.ttlMin) || 30;
+      const at = Number(p?.at) || 0;
+      const leftMs = at + ttl * 60_000 - Date.now();
+      return leftMs <= 0 ? 0 : Math.ceil(leftMs / 60_000);
+    }
 
     async function load() {
       wrap.replaceChildren(el('div', 'feast-empty', t.loading));
@@ -261,12 +276,14 @@ const menuPanel = {
       }
       state.cuisines = data.cuisines ?? [];
       state.categories = data.categories ?? [];
+      // 每次重拉都跟着服务端走：端来的菜可能是在别处端的，也可能已经被吃掉/过期收走。
       state.pending = data.pending ?? null;
       render(data);
     }
 
     function render(data) {
       wrap.replaceChildren();
+      pendingBox = null;
 
       // 工具条
       const bar = el('div', 'feast-bar');
@@ -320,12 +337,15 @@ const menuPanel = {
       bar.appendChild(dice);
       wrap.appendChild(bar);
 
-      // 端过来还没吃的那道
+      // 端过来还没吃的那道：右侧写着还剩多久，自己会走。
       if (state.pending) {
+        const p = state.pending;
         const strip = el('div', 'feast-strip');
-        const b = el('b', null, `🍽 ${state.pending.name}`);
-        strip.appendChild(b);
+        strip.appendChild(el('b', null, `🍽 ${p.name}`));
         strip.appendChild(el('span', 'feast-dim', `${t.pending} · ${t.pendingHint}`));
+        const left = el('span', 'feast-left', t.pendingLeft(remainMin(p)));
+        strip.appendChild(left);
+        pendingBox = { el: left, p };
         wrap.appendChild(strip);
       }
 
@@ -370,7 +390,8 @@ const menuPanel = {
         wrap.replaceChildren(el('div', 'feast-empty is-bad', data?.message ?? 'nope'));
         return;
       }
-      state.pending = data.pending ?? state.pending;
+      // 服务端说没了就是没了（吃掉了 / 收走了），不能把旧的等待条留在屏幕上
+      state.pending = data.pending ?? null;
       const d = data.dish;
 
       const box = el('div', 'feast-detail');
@@ -432,7 +453,21 @@ const menuPanel = {
     }
 
     await load();
-    return { dispose() {} };
+
+    // 每 30 秒走一次表：只改那一行字，不到点不重拉数据；到点了才整块刷新。
+    // ctx.interval 已登记，unmount 会自动停；老宿主没有这个方法就当没有它。
+    const ticker = ctx.interval?.(() => {
+      if (!pendingBox) return;
+      const left = remainMin(pendingBox.p);
+      if (left > 0) {
+        pendingBox.el.textContent = t.pendingLeft(left);
+        return;
+      }
+      pendingBox.el.textContent = t.pendingGone;
+      void load();
+    }, 30_000);
+
+    return { dispose() { ticker?.dispose?.(); } };
   },
 };
 
