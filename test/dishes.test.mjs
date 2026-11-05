@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
-import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine } from '../src/dishes.js';
+import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine, CATEGORIES } from '../src/dishes.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const lib = await loadDishes();
@@ -31,30 +31,41 @@ test('每组都不薄：没有哪一组少于 10 道', () => {
   const n = {};
   for (const d of lib.dishes) n[d.cuisine] = (n[d.cuisine] ?? 0) + 1;
   for (const [c, v] of Object.entries(n)) {
-    if (c === '主食') continue; // 主食是唯一的例外组，见下面那条守门测试
+    if (c === '白饭') continue; // 白饭是唯一的例外组，见下面那条守门测试
     assert.ok(v >= 10, `「${c}」只有 ${v} 道`);
   }
   assert.equal(Object.keys(n).length, 28, '有菜系没有菜');
 });
 
-test('守门：主食组只能有白米饭这一道', () => {
-  // 0.6.0 破例开了 staples（cuisine = 主食），理由是白米饭不属于任何一片地方、
+test('守门：白饭组只能有白米饭这一道', () => {
+  // 0.6.0 破例开了 staples（cuisine = 白饭，0.6.2 之前叫「主食」），理由是白米饭不属于任何一片地方、
   // 写哪个省都是编的。0.4.0 拆掉「家常菜」「甜品」正是因为例外组会越收越多，
   // 变成下一个垃圾场——所以这里把上限钉死，加第二道就直接红。
   // 注意：上限写在 validate-dishes.mjs 的 GROUP_CAPS 里，这里是它的镜像。
-  const staple = lib.dishes.filter((d) => d.cuisine === '主食');
-  assert.equal(staple.length, 1, `主食组有 ${staple.length} 道，只能是白米饭这一道`);
+  const staple = lib.dishes.filter((d) => d.cuisine === '白饭');
+  assert.equal(staple.length, 1, `白饭组有 ${staple.length} 道，只能是白米饭这一道`);
   assert.equal(staple[0].name, '白米饭');
   assert.equal(staple[0].category, '主食');
-  // 反向确认：别的菜系里不许再冒出一个「主食」之外的非地域组名。
+  // 反向确认：别的菜系里不许再冒出一个「白饭」之外的非地域组名。
   const cnRegions = ['川菜', '粤菜', '江浙沪菜', '北方菜', '湘菜', '西南菜', '东北菜', '西北菜',
     '闽台菜', '鲁菜', '鄂菜', '徽菜', '赣菜'];
   const foreign = ['日料', '韩式', '东南亚', '南亚菜', '墨西哥菜', '意菜', '法餐', '南欧菜',
     '中欧菜', '英美菜', '中东菜', '拉美菜', '东欧菜', '非洲菜'];
-  const known = new Set([...cnRegions, ...foreign, '主食']);
+  const known = new Set([...cnRegions, ...foreign, '白饭']);
   for (const c of lib.cuisines) {
     assert.ok(known.has(c), `出现了没登记在组表里的菜系「${c}」——非地域组不许再开`);
   }
+});
+
+test('守门：菜系名不许和 category 的形态名撞名', () => {
+  // 0.6.0 的 staples 曾叫「主食」，于是面板卡片印出「主食·主食」，菜系下拉和类别下拉
+  // 各有一项叫「主食」——同一根轴出现两次。0.4.0 拆「甜品」组就是这个理由。
+  // 0.6.2 改成「白饭」，并在这里钉住：任何一个菜系名都不许等于某个 category。
+  for (const c of lib.cuisines) {
+    assert.ok(!CATEGORIES.includes(c),
+      `菜系「${c}」和 category 的形态名撞名——菜系只说地域/身份，形态只走 category`);
+  }
+  // 这条守门是可证的：把 staples.json 的 cuisine 改回「主食」，它（和 validate-dishes）立刻红。
 });
 
 test('形态组已经解散：cuisine 里不该再出现「汤羹/面点主食/中式小吃」这类形态名', () => {
@@ -77,10 +88,10 @@ test('库里一个非地域组都不剩：没有甜品、也没有家常菜', ()
   assert.ok(fromDesserts.length >= 10, '甜品这个类别本身还在，只是不再占一个菜系');
   assert.ok(new Set(fromDesserts.map((d) => d.cuisine)).size >= 5,
     '甜品类别的菜应该散在至少 5 个菜系里，而不是挤回一个组');
-  // 同理「主食」这个非地域组只许有白米饭一道，不许长成第二个甜品组。
+  // 同理「白饭」这个非地域组只许有白米饭一道，不许长成第二个甜品组。
   const staple = lib.dishes.filter((d) => d.category === '主食');
   assert.ok(new Set(staple.map((d) => d.cuisine)).size >= 8,
-    '主食这个类别应该散在很多菜系里，只有白米饭归在「主食」组');
+    '主食这个类别应该散在很多菜系里，只有白米饭归在「白饭」组');
 });
 
 test('0.5.0 新开的三个外餐组都在，而且各自有菜', () => {
