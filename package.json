@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-feast",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "一桌菜 · 给 Coo 一张会端菜的桌子：701 道带九维口味、香气、口感与实吃描写的菜品（28 个菜系组），她能自己挑、主人能从面板端一道过去，也能整桌端过去（8 套内置套餐 + 自己攒桌），还能和她一起吃一顿、互相喂一口；同一道菜每次吃到的都不一样，吃过什么和口味画像跨天攒着；另有一套可开关的饭点提醒。",
   "license": "MIT",
   "author": "青",
@@ -38,7 +38,8 @@
     "describe.json",
     "CHANGELOG.md",
     "README.md",
-    "PUBLISHING.md"
+    "PUBLISHING.md",
+    "GUIDE.md"
   ],
   "engines": {
     "node": ">=22.6"

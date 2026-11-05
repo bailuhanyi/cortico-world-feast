@@ -135,6 +135,25 @@ export function findDish(lib, ref) {
   return null;
 }
 
+/**
+ * 只认精确匹配：id、名字、别名（别名不分大小写）。找不到返回 null。
+ *
+ * 和 `findDish` 的区别是**不做模糊匹配**。主人随手写一句"我在吃…"时用这个：
+ * 模糊匹配会把「在啃面包」对成「蒜香面包」——那就成了替他编（不变式 6）。
+ * 她的工具仍然走 `findDish`（她说的比库里短算数，是另一回事）。
+ */
+export function findDishExact(lib, ref) {
+  if (!ref) return null;
+  const q = String(ref).trim();
+  if (!q) return null;
+  const byId = lib.byId.get(q);
+  if (byId) return byId;
+  const name = lib.dishes.find((d) => d.name === q);
+  if (name) return name;
+  const lower = q.toLowerCase();
+  return lib.dishes.find((d) => d.alias && d.alias.toLowerCase() === lower) ?? null;
+}
+
 /** 按菜系/类别/关键词/自由词筛。全部为空则不筛。 */
 export function filterDishes(lib, { cuisine, category, keyword, query } = {}) {
   let out = lib.dishes;

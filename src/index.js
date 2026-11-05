@@ -16,7 +16,7 @@ export {
   EVENT_TOGETHER,
 } from './config.js';
 export {
-  briefLine, filterDishes, findDish, loadDishes, pickFew, pickOne, resetDishCache,
+  briefLine, filterDishes, findDish, findDishExact, loadDishes, pickFew, pickOne, resetDishCache,
   tasteProfile, TASTE_FIELDS, CATEGORIES,
 } from './dishes.js';
 export { renderBite, renderProfile, tempClass, POOLS } from './eat.js';

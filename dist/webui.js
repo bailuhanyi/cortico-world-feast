@@ -187,7 +187,7 @@ const TABLE = {
     togetherDecline: '今天不了',
     togetherEnd: '散桌',
     togetherOwnerAte: '主人也在吃',
-    togetherNoDish: '库里没有这道',
+    togetherNoDish: '只按你说的这句记',
     togetherBites: (n) => `喂过 ${n} 口`,
     togetherBack: (n) => `她分了你一口 ${n}`,
     togetherBackOk: '接过来',
@@ -197,6 +197,7 @@ const TABLE = {
     togetherTakePh: '我在吃…（一句话就行）',
     togetherTake: '记下来',
     togetherTakeThis: '我也吃这道',
+    togetherBiteThis: '喂她一口',
     togetherLastEnd: (why) => `刚才那顿：${why}`,
     togetherEndWhyFinished: '她那份吃完了',
     togetherEndWhyOwner: '主人说散了',
@@ -283,7 +284,7 @@ const TABLE = {
     togetherDecline: 'Not today',
     togetherEnd: 'Clear the table',
     togetherOwnerAte: 'you are eating',
-    togetherNoDish: 'not in the library',
+    togetherNoDish: 'from your words',
     togetherBites: (n) => `${n} bites fed`,
     togetherBack: (n) => `She offered you a bite of ${n}`,
     togetherBackOk: 'Take it',
@@ -293,6 +294,7 @@ const TABLE = {
     togetherTakePh: 'I am eating… (one line is enough)',
     togetherTake: 'Note it',
     togetherTakeThis: 'I’m having this too',
+    togetherBiteThis: 'Feed her a bite',
     togetherLastEnd: (why) => `Last meal: ${why}`,
     togetherEndWhyFinished: 'her share was finished',
     togetherEndWhyOwner: 'you called it',
@@ -733,8 +735,28 @@ const menuPanel = {
         }
       };
       head.appendChild(serve);
-      // 正一起吃的时候，才谈得上"我也吃这道"——不在席上没这个上下文。
+      // 正一起吃的时候，才谈得上"喂她一口"和"我也吃这道"——不在席上没这个上下文。
       if (state.together?.active) {
+        const bite = el('button', null, t.togetherBiteThis);
+        bite.onclick = async () => {
+          bite.disabled = true;
+          try {
+            const r = await ctx.invoke('bite', [d.id]);
+            if (r?.ok) {
+              state.together = r.together ?? state.together;
+              toast(root, ctx, r.message ?? '喂了一口');
+              bite.disabled = false;
+            } else {
+              toast(root, ctx, r?.message ?? '不行', true);
+              bite.disabled = false;
+            }
+          } catch (err) {
+            toast(root, ctx, t.failed(err?.message ?? err), true);
+            bite.disabled = false;
+          }
+        };
+        head.appendChild(bite);
+
         const mine = el('button', null, t.togetherTakeThis);
         mine.onclick = async () => {
           mine.disabled = true;

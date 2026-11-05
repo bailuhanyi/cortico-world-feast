@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
-import { loadDishes, findDish, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine } from '../src/dishes.js';
+import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine } from '../src/dishes.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const lib = await loadDishes();
@@ -191,6 +191,22 @@ test('找菜：id、全名、别名都能命中', () => {
   assert.equal(byAlias?.id, some.id);
   assert.equal(findDish(lib, '  麻婆豆腐  ')?.id, 'mapo-tofu');
   assert.equal(findDish(lib, '绝无此菜xyz'), null);
+});
+
+test('精确找菜（findDishExact）：只认 id / 全名 / 别名，名字的一部分不算', () => {
+  assert.equal(findDishExact(lib, 'mapo-tofu')?.name, '麻婆豆腐');
+  assert.equal(findDishExact(lib, '  麻婆豆腐  ')?.id, 'mapo-tofu', '两头空白该放过');
+  const some = lib.dishes.find((d) => d.alias);
+  assert.equal(findDishExact(lib, some.alias)?.id, some.id, '别名不分大小写');
+  assert.equal(findDishExact(lib, '绝无此菜xyz'), null);
+
+  // 关键差别：模糊匹配（findDish）会认名字的一部分，精确匹配不认。
+  // 主人写"在啃面包"时把「番茄蒜香烤面包」端上去，就是替他编（不变式 6）。
+  const fuzzy = lib.dishes.find((d) => d.name.includes('面包'));
+  assert.ok(fuzzy, '库里该有带「面包」的菜，否则这条测不出区别');
+  assert.equal(findDishExact(lib, '面包'), null, '名字的一部分不算命中');
+  assert.ok(findDish(lib, '面包'), '（对照）模糊匹配会猜一个出来');
+  assert.equal(findDishExact(lib, '在啃面包'), null);
 });
 
 test('筛选：菜系 / 类别 / 标签 / 自由词', () => {

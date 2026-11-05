@@ -571,7 +571,7 @@ test('一起吃饭：喂一口走上桌事件，正文是「这一口」的样�
   await world.stop();
 });
 
-test('一起吃饭：主人自己吃什么——库里那道给菜名，自由文本要明说库里没有这道', async () => {
+test('一起吃饭：主人自己吃什么——库里点一道给菜名，写的那句正好是菜名也按库里那道记', async () => {
   const { world, events } = await makeWorld();
   await world.inviteTogether();
   const dish = lib.dishes[0];
@@ -580,13 +580,49 @@ test('一起吃饭：主人自己吃什么——库里那道给菜名，自由�
   assert.equal(r1.ok, true, r1.message);
   const ev1 = events.filter((e) => e.type === 'feast.together' && e.meta.kind === 'owner-ate').at(-1);
   assert.ok(ev1.text.includes(dish.name), ev1.text.slice(0, 120));
+  assert.ok(!ev1.text.includes('没进库'), '库里点的那道不该说"没进库"');
 
-  const r2 = await world.takeTogether({ note: '在啃面包' });
+  // 写的那句**正好**是库里一道菜的名字：不该回一句"库里没有"
+  const r2 = await world.takeTogether({ note: dish.name });
   assert.equal(r2.ok, true, r2.message);
   const ev2 = events.filter((e) => e.type === 'feast.together' && e.meta.kind === 'owner-ate').at(-1);
-  assert.ok(ev2.text.includes('在啃面包'), ev2.text.slice(0, 120));
-  // 不变式 6：库里没有的东西不许编一个出来。
-  assert.ok(ev2.text.includes('库里没有'), `自由文本必须如实说库里没有：${ev2.text.slice(0, 200)}`);
+  assert.ok(ev2.text.includes(dish.name), ev2.text.slice(0, 120));
+  assert.ok(ev2.text.includes(dish.cuisine), `按库里那道记就该带上菜系：${ev2.text.slice(0, 160)}`);
+  assert.ok(!ev2.text.includes('库里没有'), `库里有的菜名不能说"库里没有"：${ev2.text.slice(0, 200)}`);
+  assert.ok(!ev2.text.includes('没进库'), `对上了就不算自由文本：${ev2.text.slice(0, 200)}`);
+  const v = (await panel(world, 'together')).together;
+  assert.equal(v.ownerAte[0].kind, 'dish', '面板上该记成库里那道');
+  assert.equal(v.ownerAte[0].id, dish.id);
+
+  // 用 id 写也一样
+  const r3 = await world.takeTogether({ note: dish.id });
+  assert.ok((await panel(world, 'together')).together.ownerAte[0].kind === 'dish', 'id 也该认');
+  assert.equal(r3.ok, true, r3.message);
+
+  await world.stop();
+});
+
+test('一起吃饭：写的那句不是菜名才按自由文本记，而且只认精确匹配（不做模糊）', async () => {
+  const { world, events } = await makeWorld();
+  await world.inviteTogether();
+
+  const r = await world.takeTogether({ note: '在啃面包' });
+  assert.equal(r.ok, true, r.message);
+  const ev = events.filter((e) => e.type === 'feast.together' && e.meta.kind === 'owner-ate').at(-1);
+  assert.ok(ev.text.includes('在啃面包'), ev.text.slice(0, 120));
+  // 不变式 6：这条只按他说的写，别拿库里别的菜替他形容。
+  assert.ok(ev.text.includes('没进库'), `自由文本要如实说明没进库：${ev.text.slice(0, 200)}`);
+  assert.ok(ev.text.includes('别拿库里别的菜'), ev.text.slice(0, 200));
+  const v = (await panel(world, 'together')).together;
+  assert.equal(v.ownerAte[0].kind, 'note');
+  assert.equal(v.ownerAte[0].note, '在啃面包');
+
+  // 「面包」是库里好几道菜名的一部分，但自由文本**不做模糊匹配**：
+  // 把"在啃面包"当成"蒜香面包"就是替他编（这是 findDishExact 存在的理由）。
+  const partial = await world.takeTogether({ note: '面包' });
+  assert.equal(partial.ok, true, partial.message);
+  assert.equal((await panel(world, 'together')).together.ownerAte[0].kind, 'note',
+    '名字的一部分不算命中');
 
   const bad = await world.takeTogether({});
   assert.equal(bad.ok, false, '什么都没说就不该记');

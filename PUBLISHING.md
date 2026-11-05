@@ -23,7 +23,7 @@ node tools/make-describe.mjs --check
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态（0.6.0）：**18 项通过、0 失败、2 条警告**（没截 `screenshots`，以及离线时没查 npm——带 `--online` 就只剩 1 条警告）；187 项测试全绿。
+当前状态（0.6.1）：**18 项通过、0 失败、2 条警告**（没截 `screenshots`，以及离线时没查 npm——带 `--online` 就只剩 1 条警告）；189 项测试全绿。
 
 ---
 
@@ -118,9 +118,9 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-0.6.0 应该是 **45 个文件**（`publish-check` 数出来是 46 个，它把目录条目也算一个），压缩后约 400KB、
+0.6.1 应该是 **46 个文件**（`publish-check` 数出来是 47 个，它把目录条目也算一个），压缩后约 400KB、
 解包约 1.6MB：`package.json`、`src/`（含 28 个菜品 json + 9 个 js）、`dist/webui.js`、`describe.json`、
-`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
+`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`、`GUIDE.md`。
 
 `test/`、`tools/`、`install.ps1`、`COMBO-SPEC.md`、`TOGETHER-SPEC.md`、`DISH-SPEC.md` 都在 `files` 之外，
 不会发出去——菜品校验脚本、装机脚本、设计稿是我们的工具，不是用户要的东西。
@@ -133,15 +133,16 @@ npm pack --dry-run
 npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
-这个包 0.4.0 已经在 npm 上（不是新包），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
-0.5.0 / 0.6.0 / 0.7.0 三个版本号从没发布过，`latest` 会从 **0.4.0** 直接跳到 **0.6.0**，这是正常的。
+这个包不是新包（0.1.x / 0.2.x / 0.4.0 / 0.6.0 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
+`latest` 会从 **0.6.0** 走到 **0.6.1**。历史上 0.5.0 / 0.7.0 两个号没发布过——0.5.0 的数据并进了 0.6.0，
+0.7.0 的套餐 + 一起吃饭也并进了 0.6.0，所以 0.6.0 之后直接是 0.6.1，中间没有 0.7.0。
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.6.0
+npm view cortico-world-feast version          # 应回 0.6.1
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
-npm view cortico-world-feast dist-tags        # latest 应是 0.6.0
+npm view cortico-world-feast dist-tags        # latest 应是 0.6.1
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -183,7 +184,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 "screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png"],
 ```
 
-6. 升版本号到 `0.6.1`，重跑 `npm publish`
+6. 升版本号到 `0.6.2`，重跑 `npm publish`
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 
@@ -220,8 +221,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 3. World 扩展不直接依赖其他 World 扩展
 4. **至少有过一次后续更新**
 
-第 4 条意味着至少要发两个版本才能申请。0.1.x / 0.2.x / 0.4.0 已经发过，0.6.0 是又一次更新；
-所以**等截图补上、0.6.1 发出去之后**就可以申请了。
+第 4 条意味着至少要发两个版本才能申请。0.1.x / 0.2.x / 0.4.0 / 0.6.0 都发过，**0.6.1 就是那次后续更新**，
+所以现在就可以申请（想把截图一并带上再申请也行，那就等 0.6.2）。
 
 申请方式是开一个 `[认证]` issue：
 

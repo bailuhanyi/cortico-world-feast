@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULTS, EVENT_FEED, EVENT_MEAL, EVENT_TABLE, EVENT_TOGETHER, ID, configGroup, panelText, text,
 } from './config.js';
-import { briefLine, filterDishes, findDish, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
+import { briefLine, filterDishes, findDish, findDishExact, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
 import {
   MAX_TABLE, PRESETS, adhocCombo, comboIdFrom, comboProblem, comboSize, findCombo, findPreset,
   normalizeCombo, resolveCombo, tableLine, tableTaste,
@@ -856,16 +856,33 @@ export class FeastWorld {
     return { ok: true, message: `喂了一口：${dish.name}`, together: this.#togetherView() };
   }
 
-  /** 面板记「主人也在吃」：库里点一道，或者一句自由文本。 */
+  /**
+   * 面板记「主人也在吃」：库里点一道（`id`），或者写一句（`note`）。
+   *
+   * 那一句**先当菜名查一次库**（只认精确匹配，见 findDishExact）：主人写「麻婆豆腐」时，
+   * 回一句"库里没有这道"是不实的——库里明明有。查中了就按库里那道记（带菜系、进她的口味账），
+   * 查不中才是自由文本（这时如实说明"这条没进库、只按他说的这句写"）。
+   */
   async takeTogether({ id = '', note = '' } = {}) {
     this.#ensureStarted();
     const t = this.#state.together;
     if (!isTogether(t)) return { ok: false, message: '现在没在一起吃；先点「一起吃」邀请她。' };
 
     const want = String(id ?? '').trim();
-    const dish = want ? (this.#lib.byId.get(want) ?? null) : null;
+    let dish = want ? (this.#lib.byId.get(want) ?? null) : null;
     if (want && !dish) return { ok: false, message: `库里没有这道菜：${want}` };
-    const entry = setOwnerAte(t, { nowMs: this.#now(), dish, note });
+
+    let text = String(note ?? '').trim();
+    let matched = false;
+    if (!dish && text) {
+      dish = findDishExact(this.#lib, text);
+      if (dish) {
+        matched = true;
+        text = '';
+      }
+    }
+
+    const entry = setOwnerAte(t, { nowMs: this.#now(), dish, note: text });
     if (!entry) return { ok: false, message: '要说清你吃的是哪道，或者写一句你在吃什么。' };
     await this.#save();
 
@@ -873,20 +890,22 @@ export class FeastWorld {
       ? [
         `【一起吃饭 · 主人也在吃】主人说他这会儿也在吃：${dish.name}（${dish.cuisine === dish.category ? dish.cuisine : `${dish.cuisine} · ${dish.category}`}）。`,
         dish.serving ? `他那份的样子：${dish.serving}` : '',
+        matched ? '（他没点名，是照他写的那句对上了库里这一道。）' : '',
         '（你们在吃同一道/同一桌东西——可以顺势聊聊这一口。）',
       ]
       : [
         `【一起吃饭 · 主人也在吃】主人说他${entry.note}。`,
-        '（**库里没有这道**，所以别拿库里别的菜替他形容——只按他说的这句写。）',
+        '（**这条没进库**：只按他说的这句话写，别拿库里别的菜替他形容。）',
       ];
     await this.#pushTogether(lines, { kind: 'owner-ate', ...(dish ? { dish: dish.id, name: dish.name } : {}) });
 
-    this.#host?.log?.info?.('一桌菜：主人也吃了点什么', { kind: entry.kind });
-    return {
-      ok: true,
-      message: entry.kind === 'dish' ? `记下了：他也在吃${dish.name}。` : '记下了：他也在吃他自己那份。',
-      together: this.#togetherView(),
-    };
+    this.#host?.log?.info?.('一桌菜：主人也吃了点什么', { kind: entry.kind, matched });
+    const said = entry.kind === 'dish'
+      ? (matched
+        ? `记下了：你在吃${dish.name}——这句正好是库里那道，按它记了。`
+        : `记下了：他也在吃${dish.name}。`)
+      : '记下了：他也在吃他自己那份（只按你说的这句记）。';
+    return { ok: true, message: said, together: this.#togetherView() };
   }
 
   /** 面板点「好，一起吃」：接住她的邀请。这对她来说也是主人开口了，所以要推事件。 */

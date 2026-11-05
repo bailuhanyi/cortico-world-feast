@@ -620,7 +620,7 @@ test('菜单面板：她那边先收了这顿，走表一拍之后会话条跟�
   await world.stop();
 });
 
-test('菜单面板：菜品详情里能点「我也吃这道」，不在席上就不显示', async () => {
+test('菜单面板：菜品详情里能「喂她一口」和「我也吃这道」，不在席上都不显示', async () => {
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('menu');
@@ -628,11 +628,21 @@ test('菜单面板：菜品详情里能点「我也吃这道」，不在席上�
     open('麻婆豆腐').fire('click');
     await waitFor(() => root.querySelector('.feast-detail'), '详情画出来');
     assert.ok(!root.findByText('我也吃这道'), '没在吃的时候不该有「我也吃这道」');
+    assert.ok(!root.findByText('喂她一口'), '没在吃的时候不该有「喂她一口」');
 
     await world.inviteTogether();
     await mount('menu');
     open('麻婆豆腐').fire('click');
     await waitFor(() => root.querySelector('.feast-detail'), '详情又画出来');
+
+    // 喂她一口：主人的投喂动作，走 bite（进她的吃过记录，但不算吃掉一道）
+    const bite = root.findByText('喂她一口');
+    assert.ok(bite, '正一起吃时详情里该有「喂她一口」');
+    bite.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'bite'), '调 bite');
+    assert.equal(invocations.filter((i) => i.method === 'bite').pop().args[0], 'mapo-tofu',
+      '喂的是点开的那道');
+
     const mine = root.findByText('我也吃这道');
     assert.ok(mine, '正一起吃时详情里该有「我也吃这道」');
     mine.fire('click');
