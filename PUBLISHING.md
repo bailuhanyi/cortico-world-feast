@@ -72,6 +72,8 @@ npm config get registry   # 应是 https://registry.npmjs.org/
 
 如果 `npm whoami` 报 `ENEEDAUTH`，就是没登上。如果报 `EPERM ... npm-cache\_logs`，那是本机 npm 缓存目录的权限问题（不影响发布，只是写不了日志）。
 
+> **本机已知情况（2026-11-05）**：npm 缓存目录 `C:\Users\asus\AppData\Local\npm-cache` 在 DSH 沙箱里写不了，`npm pack` / `npm publish` 会报 `EPERM`。这不是 npm 的问题，是沙箱边界——`npm pack`、`npm publish` 这类要写缓存的命令都要在沙箱外跑（或由你在自己终端里跑）。
+
 ---
 
 ## 3. 看一眼要发出去的东西
@@ -80,7 +82,7 @@ npm config get registry   # 应是 https://registry.npmjs.org/
 npm pack --dry-run
 ```
 
-应该看到 **35 个文件、约 299KB 解包**：`package.json`、`src/`（含 20 个菜品 json）、`dist/webui.js`、`describe.json`、`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
+应该看到 **35 个文件**，压缩后约 129KB、解包约 306KB（`npm notice` 报的是 `package size: 129.3 kB` / `unpacked size: 306.3 kB`）：`package.json`、`src/`（含 20 个菜品 json）、`dist/webui.js`、`describe.json`、`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
 
 `test/`、`tools/`、`install.ps1` 都在 `files` 之外，不会发出去——菜品校验脚本、装机脚本是我们的工具，不是用户要的东西。
 
