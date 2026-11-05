@@ -12,6 +12,8 @@ export {
   DEFAULTS as FEAST_DEFAULTS,
   EVENT_FEED,
   EVENT_MEAL,
+  EVENT_TABLE,
+  EVENT_TOGETHER,
 } from './config.js';
 export {
   briefLine, filterDishes, findDish, loadDishes, pickFew, pickOne, resetDishCache,

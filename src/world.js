@@ -3,8 +3,9 @@
  *
  * 做的是"让她真的吃到东西"这件事：
  *
- *   · 库里 500 道菜（24 个菜系组），每道带九维口味分值 + 香气/口感/余韵 + 实吃描写；
- *     cuisine 只说地域/传统，形态一律看 category（没有例外组）；
+ *   · 库里 700 道地域菜 + 白米饭 1 道（28 个菜系组），每道带九维口味分值 + 香气/口感/余韵 + 实吃描写；
+ *     cuisine 只说地域/传统，形态一律看 category；
+ *     唯一允许的非地域组是 `staples`（主食），里面只有白米饭一碗，有守门测试钉死上限；
  *   · feast_eat 不是把档案贴出来，而是叠一层"这一口"（温度、状态、配的那口），
  *     同一道菜连着吃三次说的不一样；
  *   · 主人可以从 WebUI 面板点一道菜"端给她"，那是一条约她来吃的 internal 事件；
@@ -17,14 +18,25 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DEFAULTS, EVENT_FEED, EVENT_MEAL, ID, configGroup, panelText, text } from './config.js';
+import {
+  DEFAULTS, EVENT_FEED, EVENT_MEAL, EVENT_TABLE, EVENT_TOGETHER, ID, configGroup, panelText, text,
+} from './config.js';
 import { briefLine, filterDishes, findDish, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
+import {
+  MAX_TABLE, PRESETS, adhocCombo, comboIdFrom, comboProblem, comboSize, findCombo, findPreset,
+  normalizeCombo, resolveCombo, tableLine, tableTaste,
+} from './combos.js';
 import { renderBite, renderProfile } from './eat.js';
 import {
-  dayIn, eatenTodayText, eatCount, hmIn, lastEaten, markNudged, newState, nextMealText,
-  normalizeState, planTick, recentEaten, recordEat, recordReaction, rollover, servedStillFresh,
-  setServed, skipToday, statusLine,
+  dayIn, eatenMarkOf, eatenSince, eatenTodayText, eatCount, hmIn, lastEaten, markNudged, newState,
+  nextMealText, normalizeState, planTick, recentEaten, recordEat, recordReaction, rollover,
+  servedRemaining, servedStillFresh, setServed, skipToday, statusLine,
 } from './state.js';
+import {
+  addBack, addBite, answerBack, biteCount, clearInvite, dropStaleInvite, finishTogether,
+  inviteLeftMin, isTogether, lastOwnerAte, makeInvite, pendingBack, setOwnerAte, startTogether,
+  togetherView, togetherWhy,
+} from './together.js';
 
 const ENV_PROMPT = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 const msg = (err) => (err instanceof Error ? err.message : String(err));
@@ -120,6 +132,47 @@ export const FEAST_TOOL_DECLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'feast_combos',
+    tags: ['read', 'snapshot'],
+    description: '看有哪些套餐（一桌菜）：内置的现成套餐 + 主人自己攒的那些。每一套都会现配出具体的菜名给你看。想"有没有现成的一桌"、或者想看看主人平时给你配什么时用它。',
+    parameters: {
+      type: 'object',
+      properties: {
+        resolve: { type: 'boolean', description: '要不要把每套现配成具体菜名（默认 true；只看名字时可以关掉，省得一屏全是菜名）。' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'feast_combo',
+    tags: ['write'],
+    description: '开一桌：把一个套餐配成具体的几道菜，摆到你面前，一道一道吃。combo 填套餐名或 id（例如 四菜一汤 / 清爽一餐）；留空就按你的口味现配一桌。整桌摆上来之后，feast_eat 不带 dish 就会吃桌上还没吃的那道。',
+    parameters: {
+      type: 'object',
+      properties: {
+        combo: { type: 'string', description: '哪一套：套餐名或 id。留空 = 现配一桌。' },
+        size: { type: 'integer', description: '留空且没给 combo 时，现配几道（1–12，默认按配置）。', minimum: 1, maximum: 12 },
+        cuisine: { type: 'string', description: '想"一桌同一个菜系"时填，例如 川菜 / 日料。' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'feast_together',
+    tags: ['write'],
+    description: '陪主人一起吃饭。action 填 invite（问主人要不要一起吃——面板上会挂一条等他回应，但话得你自己在聊天里说出来）、feed（从库里挑一道分他一口，他会看到、可以接过去）、end（这顿到这儿了）。他喂你的一口和他自己吃什么，你会收到事件；你自己吃饭还是用 feast_eat。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'invite / feed / end。', enum: ['invite', 'feed', 'end'] },
+        dish: { type: 'string', description: 'action=feed 时要分他的那道：菜名或 id。' },
+        note: { type: 'string', description: '一句话，可选；invite 时是"想一起吃什么"的由头，end 时是为什么先收了。' },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export class FeastWorld {
@@ -134,6 +187,8 @@ export class FeastWorld {
   #clearInterval;
   #setTimeout;
   #random;
+  /** 主人攒的桌（懒加载，见 #loadCombos）。 */
+  #combos = null;
 
   constructor(opts = {}) {
     this.id = ID;
@@ -190,6 +245,16 @@ export class FeastWorld {
     return join(this.dataDir, 'feast', 'state.json');
   }
 
+  /**
+   * 自定义套餐单独一个文件，**不进 state.json**。
+   *
+   * 因为它是主人写的内容，不是"她吃过什么"的记录：面板上点「清空吃过的记录」
+   * 不该顺手把主人攒的桌一起删掉。
+   */
+  combosFile() {
+    return join(this.dataDir, 'feast', 'combos.json');
+  }
+
   // -------------------------------------------------------------------------
   // 提示词
   // -------------------------------------------------------------------------
@@ -229,6 +294,9 @@ export class FeastWorld {
       case 'feast_history': return this.#historyTool();
       case 'feast_reaction': return await this.#reactionTool(args);
       case 'feast_skip': return await this.#skipTool(args);
+      case 'feast_combos': return await this.#combosTool(args);
+      case 'feast_combo': return await this.#comboTool(args);
+      case 'feast_together': return await this.#togetherTool(args);
       default: return { text: `[${name} 失败] 不认识这个工具。`, failed: true };
     }
   }
@@ -288,10 +356,14 @@ export class FeastWorld {
     } else {
       servedTtlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
       if (servedStillFresh(this.#state, now, servedTtlMin)) {
-        dish = lib.byId.get(this.#state.served.id) ?? null;
+        // 端来的可能是一桌：吃这一桌里**还没吃的那道**。
+        const remaining = servedRemaining(this.#state);
+        dish = remaining.length ? (lib.byId.get(remaining[0]) ?? null) : null;
         if (dish) {
           by = 'owner';
-          why = '（主人端来的这道）';
+          why = this.#state.served?.name
+            ? `（主人端来的这一桌：${this.#state.served.name}）`
+            : '（主人端来的这道）';
           servedAt = this.#state.served.at;
         }
       }
@@ -316,6 +388,8 @@ export class FeastWorld {
 
     const miss = this.#rollMiss();
     const nth = eatCount(this.#state, dish.id);
+    // 吃掉之前先记下这一桌还剩几道（recordEat 之后 served 可能已经收了）。
+    const tableBefore = by === 'owner' && this.#state.served?.ids?.length > 1 ? this.#state.served : null;
     const entry = recordEat(this.#state, { nowMs: now, dish, by, miss });
     await this.#save();
 
@@ -327,9 +401,19 @@ export class FeastWorld {
     } else {
       tail.push('吃完用 feast_reaction 记一句自己的反应（可选）。');
     }
+    if (tableBefore) {
+      // 一桌：说清还剩哪几道，不然她不知道还有没有下一道。
+      const left = servedRemaining(this.#state);
+      const leftNames = left.map((id) => lib.byId.get(id)?.name ?? id);
+      if (leftNames.length) {
+        tail.push(`（这一桌${tableBefore.name ? `「${tableBefore.name}」` : ''}共 ${tableBefore.ids.length} 道，还剩 ${leftNames.length} 道：${leftNames.join('、')}。）`);
+      } else {
+        tail.push('（这一桌吃完了。）');
+      }
+    }
     if (by === 'owner') {
       const left = servedAt + servedTtlMin * 60_000 - now;
-      tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的，主人端来的那道已经收了；端来时${shelfLifeText(left)}。）`);
+      tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的；端来时${shelfLifeText(left)}。）`);
     }
 
     this.#host?.log?.info?.('一桌菜：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
@@ -360,7 +444,7 @@ export class FeastWorld {
     if (recent.length) {
       lines.push('最近几口：');
       for (const e of recent) {
-        lines.push(`- ${dayIn(this.timezone, e.at)} ${hmIn(this.timezone, e.at)} ${e.name || e.id}${e.by === 'owner' ? '（主人端的）' : ''}${e.miss ? '（那次不太对付）' : ''}`);
+        lines.push(`- ${dayIn(this.timezone, e.at)} ${hmIn(this.timezone, e.at)} ${e.name || e.id}${eatenMarkOf(e)}${e.miss ? '（那次不太对付）' : ''}`);
       }
     }
 
@@ -435,6 +519,8 @@ export class FeastWorld {
     const now = this.#now();
     // 主人端来的菜过期就撤掉，免得半天后突然回一句。
     servedStillFresh(this.#state, now, this.#cfgNumber('ownerFeedTTL', 1, 240));
+    // 一起吃饭这一顿到点也自己散（面板没开着也得散）。
+    await this.#togetherSettle();
 
     const plan = planTick(this.#state, this.cfg, now, this.timezone);
     if (plan.action === 'none') return;
@@ -547,19 +633,449 @@ export class FeastWorld {
     return { ok: true, message: `端过去了：${dish.name}`, dish: this.#panelDish(dish), pending: this.#servedView() };
   }
 
-  /** 主人端来的那道还等着吗。ttlMin 给面板自己算还剩多久。 */
+  /**
+   * 面板点「端这一桌」：把一桌子菜一起端过去。
+   *
+   * 和 feedDish 分开而不是合成一个：两者的正文不一样（一道菜说"尝这一道"，
+   * 一桌要说清几道、怎么个吃法、还剩几道），事件类型也不一样。
+   */
+  async feedCombo(combo, dishes, seed) {
+    this.#ensureStarted();
+    if (!dishes?.length) return { ok: false, message: '这一桌配不出菜来。' };
+
+    const now = this.#now();
+    const ttlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
+    const day = dayIn(this.timezone, now);
+    rollover(this.#state, day);
+    setServed(this.#state, {
+      nowMs: now,
+      ids: dishes.map((d) => d.id),
+      name: combo?.name ?? '一桌菜',
+      comboId: combo?.id ?? '',
+    });
+    await this.#save();
+
+    const name = combo?.name ?? '一桌菜';
+    const lines = [
+      `【主人端来一桌菜 · ${name}】`,
+      `主人摆了${dishes.length}道菜在你面前：`,
+      ...dishes.map((d, i) => `${i + 1}. ${d.name}${d.cuisine === d.category ? `（${d.cuisine}）` : `（${d.cuisine} · ${d.category}）`}`),
+    ];
+    const taste = tableTaste(dishes);
+    if (taste) lines.push('', `这一桌合起来${tableLine(taste)}。`);
+    lines.push('', '用 feast_eat 一道一道吃（dish 留空就吃这一桌里还没吃的那道）；吃完跟主人说一句你尝到了什么。');
+    lines.push(`（现在刚摆上，${hmIn(this.timezone, now + ttlMin * 60_000)} 之前吃掉都算数；过了就收了。）`);
+
+    const host = this.#host;
+    if (host?.pushEvent) {
+      await host.pushEvent({
+        type: EVENT_TABLE,
+        source: this.id,
+        senderKey: 'feast-table',
+        origin: 'internal',
+        ts: new Date(now).toISOString(),
+        text: lines.join('\n'),
+        meta: { combo: combo?.id ?? '', name, ids: dishes.map((d) => d.id), seed: seed ?? '' },
+      }, { deliver: true, trigger: 'flush' });
+    } else {
+      throw new Error('宿主没有 pushEvent，端不过去');
+    }
+
+    this.#host?.log?.info?.('一桌菜：主人端了一桌', { combo: combo?.id, n: dishes.length });
+    return {
+      ok: true,
+      message: `端过去了：${name}（${dishes.length} 道）`,
+      combo: { id: combo?.id ?? '', name, size: dishes.length },
+      dishes: dishes.map((d) => ({ id: d.id, name: d.name, cuisine: d.cuisine, category: d.category })),
+      pending: this.#servedView(),
+    };
+  }
+
+  /** 主人端来的那道/那桌还等着吗。ttlMin 给面板自己算还剩多久。 */
   #servedView() {
     const now = this.#now();
     const ttlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
     const fresh = servedStillFresh(this.#state, now, ttlMin);
     if (!fresh) return null;
-    const d = this.#lib.byId.get(this.#state.served.id);
+    const s = this.#state.served;
+    const remaining = servedRemaining(this.#state);
+    const named = remaining
+      .map((id) => this.#lib.byId.get(id))
+      .filter(Boolean);
+    // 还剩一道而且端来时就一道：保持 0.6.0 的形状（面板上那行"端来的一道菜"不用改）。
+    const single = !s.name && s.ids.length === 1;
     return {
-      id: this.#state.served.id,
-      name: d?.name ?? this.#state.served.id,
-      at: this.#state.served.at,
+      id: s.ids[0],
+      name: named[0]?.name ?? s.ids[0],
+      at: s.at,
       ttlMin,
+      // 一桌的额外信息。面板按 total 判断是不是一桌，单道时这些也填着，不影响旧渲染。
+      total: s.ids.length,
+      remaining: remaining.length,
+      left: named.map((d) => d.name),
+      tableName: s.name || '',
+      comboId: s.comboId || '',
+      isTable: !single,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // 陪主人吃饭
+  //
+  // 两条方向天生不对称：主人 → 她走 pushEvent（这里所有 #pushTogether）；
+  // 她 → 主人没有通道，只能"面板上挂一条待回应 + 她自己说出口"。
+  // 账要分清：喂的一口进 eaten（带 bite），她回喂和主人自己吃的不进（见 together.js）。
+  // -------------------------------------------------------------------------
+
+  #togetherTtlMin() {
+    return this.#cfgNumber('togetherTTLMin', 1, 600);
+  }
+
+  #togetherInviteMin() {
+    return this.#cfgNumber('togetherInviteMin', 1, 240);
+  }
+
+  #togetherMaxInvites() {
+    return this.#cfgNumber('togetherMaxInvites', 0, 5);
+  }
+
+  /**
+   * 惰性收摊：把到点的邀请放掉、把该散的一顿散掉。
+   * 面板一读就顺手做（不用等下一拍），饭点那一拍也会调它。
+   */
+  async #togetherSettle() {
+    const now = this.#now();
+    const t = this.#state.together;
+    dropStaleInvite(t, now, this.#togetherInviteMin());
+    if (!isTogether(t)) return false;
+    const why = togetherWhy(t, {
+      nowMs: now,
+      ttlMin: this.#togetherTtlMin(),
+      ateSince: eatenSince(this.#state, t.at),
+      tableEmpty: servedRemaining(this.#state).length === 0,
+    });
+    if (!why) return false;
+    // 「吃完了」不另发一条：她刚在 feast_eat 的回执里看到"这一桌吃完了"。
+    await this.#finishTogether(why, { push: why === 'ttl' });
+    return true;
+  }
+
+  /** 面板会话条要的那一份。 */
+  #togetherView() {
+    return togetherView(this.#state.together, {
+      nowMs: this.#now(),
+      ttlMin: this.#togetherTtlMin(),
+      inviteWindowMin: this.#togetherInviteMin(),
+    });
+  }
+
+  /** 收摊：记 lastEnd、存盘，必要时告诉她。 */
+  async #finishTogether(why, { push = false } = {}) {
+    const ended = finishTogether(this.#state.together, { nowMs: this.#now(), why });
+    if (!ended) return null;
+    await this.#save();
+    this.#host?.log?.info?.('一桌菜：这一顿散了', { why, bites: ended.bites });
+    if (push) await this.#pushTogether(this.#endLines(ended), { kind: 'end', why });
+    return ended;
+  }
+
+  #endLines(ended) {
+    const why = ended.why === 'finished' ? '你那份吃完了'
+      : ended.why === 'ttl' ? '这顿挂得有点久，到点收摊了'
+        : ended.why === 'her' ? '你先说收了' : '主人说散了';
+    const lines = [`【一起吃饭 · 这顿散了】${why}。`];
+    if (ended.bites) lines.push(`（这一顿他一共喂了你 ${ended.bites} 口。）`);
+    lines.push('想吃随时自己来：feast_menu 挑一道，或者 feast_combo 开一桌。');
+    return lines;
+  }
+
+  /** 一起吃饭这一条通道：邀请 / 喂一口 / 主人自己吃什么 / 回喂的回应 / 散桌。 */
+  async #pushTogether(lines, meta = {}) {
+    const host = this.#host;
+    if (!host?.pushEvent) throw new Error('宿主没有 pushEvent，说不过去');
+    await host.pushEvent({
+      type: EVENT_TOGETHER,
+      source: this.id,
+      senderKey: 'feast-together',
+      origin: 'internal',
+      ts: new Date(this.#now()).toISOString(),
+      text: lines.filter(Boolean).join('\n'),
+      meta,
+    }, { deliver: true, trigger: 'flush' });
+  }
+
+  /** 面板点「一起吃」：主人邀请她。 */
+  async inviteTogether(note = '') {
+    this.#ensureStarted();
+    const t = this.#state.together;
+    if (isTogether(t)) return { ok: false, message: '你们已经在一起吃了。' };
+    const said = typeof note === 'string' ? note.trim().slice(0, 120) : '';
+    startTogether(t, { nowMs: this.#now(), starter: 'owner' });
+    await this.#save();
+
+    await this.#pushTogether([
+      '【一起吃饭 · 主人问你】主人问你要不要一起吃点什么。',
+      said ? `他说：${said}` : '',
+      '',
+      '想一起就应一声，然后 feast_eat 吃（dish 留空就吃桌上还没吃的那道，桌上没有就先挑一道）；也可以 feast_together（action 填 feed，dish 填菜名）分他一口。',
+      '他喂你一口、或者他自己吃了什么，都会告诉你。不想吃就直说——feast_skip 管的是饭点提醒，不管这个。',
+    ], { kind: 'invite' });
+
+    this.#host?.log?.info?.('一桌菜：邀请她一起吃');
+    return { ok: true, message: '问她了：一起吃点？', together: this.#togetherView() };
+  }
+
+  /** 面板点「喂她一口」：夹一筷子递过去。进 eaten（所以 nth 接着数），但不消耗桌上的菜。 */
+  async biteTogether(id) {
+    this.#ensureStarted();
+    const dish = this.#lib.byId.get(String(id ?? ''));
+    if (!dish) return { ok: false, message: `库里没有这道菜：${id}` };
+    const t = this.#state.together;
+    if (!isTogether(t)) return { ok: false, message: '现在没在一起吃；先点「一起吃」邀请她。' };
+
+    const now = this.#now();
+    const day = dayIn(this.timezone, now);
+    rollover(this.#state, day);
+    const nth = eatCount(this.#state, dish.id);
+    const miss = this.#rollMiss();
+    recordEat(this.#state, { nowMs: now, dish, by: 'owner', miss, bite: true });
+    addBite(t, { nowMs: now, dish, nth });
+    await this.#save();
+
+    const count = biteCount(t, dish.id);
+    await this.#pushTogether([
+      `【一起吃饭 · 主人喂你一口】主人夹了${dish.name}递到你嘴边。`,
+      '',
+      renderBite(dish, { nth, day, miss }),
+      '',
+      `（这一顿他喂你的第 ${count} 口${miss ? '，这一口不太合口味' : ''}；${dish.cuisine === dish.category ? dish.cuisine : `${dish.cuisine} · ${dish.category}`}。）`,
+      this.#askReaction() ? '说一句这一口什么味儿——一句话就够。' : '',
+    ], { kind: 'bite', dish: dish.id, name: dish.name });
+
+    this.#host?.log?.info?.('一桌菜：喂了她一口', { dish: dish.id, nth });
+    return { ok: true, message: `喂了一口：${dish.name}`, together: this.#togetherView() };
+  }
+
+  /** 面板记「主人也在吃」：库里点一道，或者一句自由文本。 */
+  async takeTogether({ id = '', note = '' } = {}) {
+    this.#ensureStarted();
+    const t = this.#state.together;
+    if (!isTogether(t)) return { ok: false, message: '现在没在一起吃；先点「一起吃」邀请她。' };
+
+    const want = String(id ?? '').trim();
+    const dish = want ? (this.#lib.byId.get(want) ?? null) : null;
+    if (want && !dish) return { ok: false, message: `库里没有这道菜：${want}` };
+    const entry = setOwnerAte(t, { nowMs: this.#now(), dish, note });
+    if (!entry) return { ok: false, message: '要说清你吃的是哪道，或者写一句你在吃什么。' };
+    await this.#save();
+
+    const lines = entry.kind === 'dish'
+      ? [
+        `【一起吃饭 · 主人也在吃】主人说他这会儿也在吃：${dish.name}（${dish.cuisine === dish.category ? dish.cuisine : `${dish.cuisine} · ${dish.category}`}）。`,
+        dish.serving ? `他那份的样子：${dish.serving}` : '',
+        '（你们在吃同一道/同一桌东西——可以顺势聊聊这一口。）',
+      ]
+      : [
+        `【一起吃饭 · 主人也在吃】主人说他${entry.note}。`,
+        '（**库里没有这道**，所以别拿库里别的菜替他形容——只按他说的这句写。）',
+      ];
+    await this.#pushTogether(lines, { kind: 'owner-ate', ...(dish ? { dish: dish.id, name: dish.name } : {}) });
+
+    this.#host?.log?.info?.('一桌菜：主人也吃了点什么', { kind: entry.kind });
+    return {
+      ok: true,
+      message: entry.kind === 'dish' ? `记下了：他也在吃${dish.name}。` : '记下了：他也在吃他自己那份。',
+      together: this.#togetherView(),
+    };
+  }
+
+  /** 面板点「好，一起吃」：接住她的邀请。这对她来说也是主人开口了，所以要推事件。 */
+  async acceptTogether() {
+    this.#ensureStarted();
+    const t = this.#state.together;
+    if (isTogether(t)) return { ok: false, message: '你们已经在一起吃了。' };
+    if (!t.invite) return { ok: false, message: '她现在没有挂着邀请。' };
+
+    startTogether(t, { nowMs: this.#now(), starter: 'her' });
+    await this.#save();
+
+    await this.#pushTogether([
+      '【一起吃饭 · 主人应了】你刚才问他要不要一起吃，他应了：好，一起吃。',
+      '那就 feast_eat 吃起来（dish 留空就吃桌上还没吃的那道）；也可以 feast_together（action 填 feed）分他一口。',
+    ], { kind: 'invite', accepted: true });
+
+    this.#host?.log?.info?.('一桌菜：接住了一起吃的邀请');
+    return { ok: true, message: '应了：这顿一起吃。', together: this.#togetherView() };
+  }
+
+  /** 面板点「今天不了」：把她的邀请收掉。**不推事件**——回绝请直接在她聊天里说。 */
+  async declineTogether() {
+    this.#ensureStarted();
+    if (!clearInvite(this.#state.together)) return { ok: false, message: '她现在没有挂着邀请。' };
+    await this.#save();
+    return {
+      ok: true,
+      message: '收掉了。她不会收到提示——要回绝就直接在聊天里跟她说一句。',
+      together: this.#togetherView(),
+    };
+  }
+
+  /** 面板点「接过来 / 下次吧」：回应她的回喂。 */
+  async replyTogether(ok = true) {
+    this.#ensureStarted();
+    const g = answerBack(this.#state.together, { ok: ok === true });
+    if (!g) return { ok: false, message: '没有等着回应的——她还没分你什么。' };
+    await this.#save();
+
+    await this.#pushTogether(ok === true
+      ? [
+        `【一起吃饭 · 主人接住了】你刚才分他的${g.name || g.id}，他接过去吃了。`,
+        '（他也在吃你爱吃的东西——这顿算两个人的。）',
+      ]
+      : [
+        `【一起吃饭 · 主人这次没要】你刚才分他的${g.name || g.id}，他这次没要。`,
+        '（大概是客气或者吃不下，不是不喜欢。别追问，也别往心里去。）',
+      ], { kind: 'back', dish: g.id, name: g.name, accepted: ok === true });
+
+    this.#host?.log?.info?.('一桌菜：回喂的回应', { dish: g.id, accepted: ok === true });
+    return {
+      ok: true,
+      message: ok === true ? `记下了：他吃了${g.name || g.id}。` : '记下了：这次没要。',
+      together: this.#togetherView(),
+    };
+  }
+
+  /** 面板点「散桌」。 */
+  async endTogether() {
+    this.#ensureStarted();
+    if (!isTogether(this.#state.together)) return { ok: false, message: '现在没在一起吃。' };
+    const ended = await this.#finishTogether('owner', { push: true });
+    return {
+      ok: true,
+      message: `散了${ended?.bites ? `（他一共喂了她 ${ended.bites} 口）` : ''}。`,
+      together: this.#togetherView(),
+    };
+  }
+
+  /** feast_together：她自己这一边的三个动作。 */
+  async #togetherTool(args) {
+    const now = this.#now();
+    const day = dayIn(this.timezone, now);
+    rollover(this.#state, day);
+    const action = typeof args?.action === 'string' ? args.action.trim() : '';
+    const note = typeof args?.note === 'string' ? args.note.trim().slice(0, 200) : '';
+
+    if (action === 'invite') return await this.#togetherInviteTool(note, now, day);
+    if (action === 'feed') return await this.#togetherFeedTool(args, now);
+    if (action === 'end') return await this.#togetherEndTool(note);
+    return { text: 'action 只能是 invite（问主人要不要一起吃）/ feed（分他一口）/ end（这顿先收了）。', failed: true };
+  }
+
+  async #togetherInviteTool(note, now, day) {
+    const t = this.#state.together;
+    if (isTogether(t)) {
+      return { text: '你们已经在一起吃了——直接 feast_eat 吃，或者 feast_together（action 填 feed）分他一口。' };
+    }
+    const max = this.#togetherMaxInvites();
+    const win = this.#togetherInviteMin();
+    const r = makeInvite(t, { nowMs: now, day, max, windowMin: win });
+    if (!r.ok) {
+      if (r.reason === 'hanging') {
+        return {
+          text: `你已经挂了一条在等他回应（还剩约 ${r.leftMin} 分钟），别急着问第二遍。真想说，就在聊天里顺口提一句。`,
+          failed: true,
+        };
+      }
+      return {
+        text: `今天主动邀请的次数用完了（配置里是一天 ${max} 次）。他要是自己在聊天里问起，你当然可以答应；但别再硬凑一个由头。`,
+        failed: true,
+      };
+    }
+
+    await this.#save();
+    return {
+      text: [
+        '挂上了：主人一开面板就看得见你问过。',
+        '**但他听不到这句话**——你得自己在聊天里跟他说一句（"今晚一起吃点什么？"这样，一句就够）。',
+        note ? `你记下的由头：${note}` : '',
+        `这条挂 ${win} 分钟，他没回应就自己收掉，不会再催你；今天还能主动邀请 ${Math.max(0, max - r.used)} 次。`,
+      ].filter(Boolean).join('\n'),
+    };
+  }
+
+  async #togetherFeedTool(args, now) {
+    const asked = typeof args?.dish === 'string' ? args.dish.trim() : '';
+    if (!asked) return { text: '要分主人一口，得说清是哪一道：dish 填菜名或 id。', failed: true };
+    const dish = findDish(this.#lib, asked);
+    if (!dish) {
+      const near = filterDishes(this.#lib, { query: asked }).slice(0, 6);
+      const hint = near.length ? `库里接近的有：${near.map((d) => d.name).join('、')}。` : '用 feast_menu 看看有什么。';
+      return { text: `没找到这道菜。${hint}`, failed: true };
+    }
+
+    const t = this.#state.together;
+    // 分他一口就是一起吃的开始——不用先走一遍邀请。
+    if (!isTogether(t)) startTogether(t, { nowMs: now, starter: 'her' });
+    addBack(t, { nowMs: now, dish });
+    await this.#save();
+
+    const mine = eatCount(this.#state, dish.id);
+    return {
+      text: [
+        `分过去了：${dish.name}${dish.serving ? `（${dish.serving}）` : ''}。`,
+        mine ? `你自己吃过 ${mine} 回，这一口是熟客推荐。` : '你自己还没吃过这道，那就是"我也刚发现"的语气。',
+        '面板上他看得见；接不接由他，他接过去（或者没要）之后会告诉你——不用追问。',
+        '你那份还在，接着 feast_eat 吃就行。',
+      ].join('\n'),
+    };
+  }
+
+  async #togetherEndTool(note) {
+    const t = this.#state.together;
+    if (!isTogether(t)) return { text: '现在没在一起吃（没有开着的这一顿）。', failed: true };
+    const ended = await this.#finishTogether('her', { push: false });
+    return {
+      text: [
+        `好，这顿到这儿了${ended?.bites ? `（他一共喂了你 ${ended.bites} 口）` : ''}。`,
+        note ? `你自己记一句：${note}` : '',
+        '面板上他会看到收摊了。自己想吃随时再开一桌。',
+      ].filter(Boolean).join('\n'),
+    };
+  }
+
+  /**
+   * 面板上那张套餐卡。
+   *
+   * `seed` 由面板给（见 combo/list 的 opts.seeds）：**卡上列出来的几道，和
+   * 「端这一桌」端过去的必须是同一颗种子配出来的那一桌**。缺省仍是
+   * `<comboId>|panel`，别的调用方（feast_combos / combo/pick）行为不变。
+   */
+  #panelCombo(combo, resolve = true, seed = '') {
+    const size = comboSize(combo);
+    const view = {
+      id: combo.id,
+      name: combo.name,
+      desc: combo.desc ?? '',
+      kind: combo.kind ?? 'preset',
+      size,
+      slots: (combo.slots ?? []).map((s) => s.label ?? ''),
+      dishes: [],
+      missing: [],
+      line: '',
+      taste: null,
+    };
+    if (resolve) {
+      const { dishes, missing, line, taste } = this.#resolve(combo, seed || `${combo.id}|panel`);
+      view.dishes = dishes.map((d) => ({
+        id: d.id, name: d.name, cuisine: d.cuisine, category: d.category,
+      }));
+      view.missing = missing;
+      view.line = line;
+      view.taste = taste;
+    }
+    // 固定桌（主人攒的）要能回面板上"改"：把勾选的原样给出去。
+    if (Array.isArray(combo.dishes) && combo.dishes.length) view.picked = combo.dishes.slice();
+    return view;
   }
 
   #panelDish(d) {
@@ -606,6 +1122,124 @@ export class FeastWorld {
     await rename(tmp, file);
   }
 
+  // -------------------------------------------------------------------------
+  // 套餐（自定义的存取）
+  // -------------------------------------------------------------------------
+
+  /** 读主人攒的桌。坏文件/坏条目跳过，不抛——一个手改坏的 json 不该让整页打不开。 */
+  async #loadCombos() {
+    if (Array.isArray(this.#combos)) return this.#combos;
+    let raw = null;
+    try {
+      raw = JSON.parse(await readFile(this.combosFile(), 'utf8'));
+    } catch {
+      raw = null;
+    }
+    const list = Array.isArray(raw?.combos) ? raw.combos : Array.isArray(raw) ? raw : [];
+    const out = [];
+    const seen = new Set();
+    for (const item of list) {
+      const c = normalizeCombo(item);
+      if (!c) continue;
+      // 没有 id 的（手写的）补一个；撞了加序号。
+      if (!c.id) c.id = comboIdFrom(c.name, seen);
+      if (seen.has(c.id)) c.id = comboIdFrom(`${c.id}-2`, seen);
+      seen.add(c.id);
+      out.push(c);
+    }
+    this.#combos = out;
+    return out;
+  }
+
+  async #saveCombos(list) {
+    this.#combos = list;
+    const file = this.combosFile();
+    await mkdir(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    await writeFile(tmp, JSON.stringify({ combos: list }, null, 2), 'utf8');
+    await rename(tmp, file);
+  }
+
+  /** 预设 + 自定义，合成一份给面板和工具用。预设排在前面。 */
+  async #allCombos() {
+    const custom = await this.#loadCombos();
+    return [...PRESETS.map((c) => ({ ...c, kind: 'preset' })), ...custom];
+  }
+
+  /**
+   * 把一张桌配成具体的菜。
+   *
+   * 口味画像现算；她标记过 dislike 的菜不进桌；上一顿吃过的那道降到最后。
+   */
+  #resolve(combo, seed = '') {
+    const profile = tasteProfile(this.#lib, this.#state);
+    const dislikes = this.#state.reactions.filter((r) => r.liked === false).map((r) => r.id);
+    const last = lastEaten(this.#state);
+    return resolveCombo(this.#lib, combo, {
+      avg: profile?.empty ? null : profile?.avg ?? null,
+      seed,
+      exclude: dislikes,
+      demote: this.#avoidRepeat() ? last?.id ?? null : null,
+    });
+  }
+
+  async #combosTool(args) {
+    const withDishes = args?.resolve !== false;
+    const all = await this.#allCombos();
+
+    const lines = [`共 ${all.length} 套（内置 ${PRESETS.length} 套，你自己攒的 ${all.length - PRESETS.length} 套）：`];
+    for (const c of all) {
+      const size = comboSize(c);
+      const head = `- ${c.name}（${size} 道${c.kind === 'custom' ? '，主人攒的' : ''}）${c.desc ? `：${c.desc}` : ''}`;
+      if (!withDishes) { lines.push(head); continue; }
+      const { dishes, missing } = this.#resolve(c, c.id);
+      lines.push(`${head}\n  现配：${dishes.map((d) => d.name).join('、') || '（配不出来）'}`);
+      if (missing.length) lines.push(`  说明：${missing.join('；')}`);
+    }
+    lines.push('', '用 feast_combo 开一桌（combo 填名字或 id，留空就按你的口味现配）。');
+    return { text: lines.join('\n') };
+  }
+
+  async #comboTool(args) {
+    const ref = typeof args?.combo === 'string' ? args.combo.trim() : '';
+    let combo;
+    let seed = '';
+
+    if (ref) {
+      const all = await this.#allCombos();
+      const found = findCombo(all, ref) ?? findPreset(ref);
+      if (!found) {
+        const names = all.map((c) => c.name).join('、');
+        return { text: `没有这套餐：「${ref}」。现有的有：${names}。也可以不给 combo，让我按你的口味现配一桌。`, failed: true };
+      }
+      combo = found;
+      // 同一天同一套配出来一样，隔天换一桌。端哪桌都是这一桌，所以种子带上日期。
+      seed = `${combo.id}|${dayIn(this.timezone, this.#now())}`;
+    } else {
+      combo = adhocCombo({
+        size: args?.size ?? this.#cfgNumber('comboSize', 1, 12),
+        cuisine: typeof args?.cuisine === 'string' ? args.cuisine.trim() : '',
+      });
+      seed = `${combo.id}|${dayIn(this.timezone, this.#now())}`;
+    }
+
+    const { dishes, missing, line } = this.#resolve(combo, seed);
+    if (!dishes.length) {
+      return { text: `这一桌配不出菜来${missing.length ? `：${missing.join('；')}` : ''}。换个菜系或去掉条件试试。`, failed: true };
+    }
+
+    const result = await this.feedCombo(combo, dishes, seed);
+    if (!result.ok) return { text: result.message, failed: true };
+
+    const lines = [
+      `摆好了：${combo.name}，${dishes.length} 道${line ? `（${line}）` : ''}。`,
+      ...dishes.map((d, i) => `${i + 1}. ${d.name}（${d.cuisine} · ${d.category}）`),
+    ];
+    if (missing.length) lines.push('', `少配的：${missing.join('；')}`);
+    lines.push('', '用 feast_eat 一道一道吃（dish 留空就吃还没吃的那道）。吃完跟主人说一句你尝到了什么。');
+    return { text: lines.join('\n') };
+  }
+
   #serial(task) {
     const run = () => task();
     const result = this.#queue.then(run, run);
@@ -642,7 +1276,8 @@ export class FeastWorld {
         { label: t.badgeNext, value: nextMealText(state, this.cfg, now, this.timezone), tone: 'plain' },
       ],
       panels: [
-        { id: 'menu', title: p.menu.title, description: p.menu.description, getMethods: ['list', 'dish', 'random', 'pending'] },
+        { id: 'menu', title: p.menu.title, description: p.menu.description, getMethods: ['list', 'dish', 'random', 'pending', 'together'] },
+        { id: 'combo', title: p.combo.title, description: p.combo.description, getMethods: ['list', 'pick'] },
         { id: 'history', title: p.history.title, description: p.history.description, getMethods: ['list'] },
       ],
       invoke: (panel, method, args) => this.#invoke(panel, method, args ?? []),
@@ -665,8 +1300,24 @@ export class FeastWorld {
           ? `${state.eaten.length} 回吃过的 · ${state.reactions.length} 条反应 · 库里 ${this.#lib.dishes.length} 道菜`
           : '菜品库还没载入（世界未启动）'),
         clear: () => this.#clearState(),
+      }, {
+        // 自定义套餐单独一项：它是主人写的内容，不该跟着"吃过的记录"一起被清掉。
+        key: 'combos',
+        label: t.storage.combosLabel,
+        kind: 'disk',
+        location: this.combosFile(),
+        danger: true,
+        note: t.storage.combosNote,
+        stat: () => `${(this.#combos ?? []).length} 桌（内置的 ${PRESETS.length} 套不算在这里）`,
+        clear: () => this.#clearCombos(),
       }],
     };
+  }
+
+  async #clearCombos() {
+    await this.#saveCombos([]);
+    this.#host?.log?.info?.('一桌菜：自定义套餐已清空');
+    return '主人攒的桌清了；内置的套餐和她吃过的记录都没动。';
   }
 
   async #clearState() {
@@ -679,12 +1330,139 @@ export class FeastWorld {
     this.#state = fresh;
     await this.#save();
     this.#host?.log?.info?.('一桌菜：吃过的记录已清空');
-    return '吃过的记录清了；菜单和菜品库没动。';
+    return '吃过的记录清了；菜单、菜品库和主人攒的套餐都没动。';
   }
 
   async #invoke(panel, method, args) {
     this.#ensureStarted();
     const p = panelText(this.language);
+
+    if (panel === 'combo') {
+      switch (method) {
+        case 'list': {
+          const all = await this.#allCombos();
+          const [opts] = args;
+          const resolve = !opts || opts.resolve !== false;
+          // 面板把每张卡的种子先算好、整张表传进来（`{ [comboId]: seed }`）：
+          // 它预览时用的和「端这一桌」用的是同一颗。缺省（不给 seeds）仍走
+          // `<comboId>|panel`，feast_combos 这类只读调用方行为不变。
+          const seeds = opts && typeof opts === 'object' && opts.seeds && typeof opts.seeds === 'object'
+            ? opts.seeds
+            : null;
+          const card = (c) => this.#panelCombo(c, resolve, typeof seeds?.[c.id] === 'string' ? seeds[c.id] : '');
+          // items 是给"攒一桌"那块用的：勾选要按名字搜全库，所以和菜单面板一样给全量。
+          // 不带 items 的话攒桌区只能按类别翻，搜不了「花椒」这种。
+          return {
+            pending: this.#servedView(),
+            presets: all.filter((c) => c.kind === 'preset').map(card),
+            custom: all.filter((c) => c.kind === 'custom').map(card),
+            max: MAX_TABLE,
+            total: this.#lib.dishes.length,
+            cuisines: this.#lib.cuisines,
+            categories: this.#lib.categories,
+            categoryCuisines: this.#lib.categoryCuisines,
+            items: this.#lib.dishes.map((d) => ({
+              id: d.id, name: d.name, cuisine: d.cuisine, category: d.category,
+              region: d.region, keywords: d.keywords,
+            })),
+          };
+        }
+        case 'pick': {
+          // 现配一桌（不存）：给面板"看看会配出什么"用。
+          const [opts] = args;
+          const o = opts && typeof opts === 'object' ? opts : {};
+          const combo = adhocCombo({
+            size: o.size ?? this.#cfgNumber('comboSize', 1, 12),
+            cuisine: o.cuisine ?? '',
+          });
+          return { ok: true, combo: this.#panelCombo(combo, true) };
+        }
+        case 'save': {
+          const [raw] = args;
+          // 先按原始输入查"同一道菜出现两次"——normalizeCombo 会去重，
+          // 等它跑完就永远看不出重复了，那成了替主人悄悄改桌。
+          const rawIds = Array.isArray(raw?.dishes) ? raw.dishes : [];
+          if (new Set(rawIds).size !== rawIds.length) {
+            return { ok: false, message: '同一道菜在一桌里出现了两次。' };
+          }
+          const c = normalizeCombo(raw);
+          const problem = c ? comboProblem(c, this.#lib) : '这一桌得起个名字。';
+          if (problem) return { ok: false, message: problem };
+          const list = await this.#loadCombos();
+          const taken = new Set([...list.map((x) => x.id), ...PRESETS.map((x) => x.id)]);
+          const now = this.#now();
+          const existing = raw?.id ? list.find((x) => x.id === raw.id) : null;
+          if (existing) {
+            existing.name = c.name;
+            existing.desc = c.desc;
+            existing.dishes = c.dishes;
+            existing.updatedAt = now;
+            await this.#saveCombos(list);
+            return { ok: true, message: `改好了：${c.name}`, combo: this.#panelCombo(existing, true) };
+          }
+          const id = comboIdFrom(c.name, taken);
+          const made = { ...c, id, createdAt: now, updatedAt: now };
+          await this.#saveCombos([...list, made]);
+          return { ok: true, message: `存下来了：${c.name}`, combo: this.#panelCombo(made, true) };
+        }
+        case 'remove': {
+          const [id] = args;
+          const list = await this.#loadCombos();
+          const left = list.filter((c) => c.id !== String(id ?? ''));
+          if (left.length === list.length) return { ok: false, message: '没有这一桌。' };
+          await this.#saveCombos(left);
+          return { ok: true, message: '删掉了。' };
+        }
+        case 'serve': {
+          // 端一张桌：预设 / 自定义 / 面板上现勾的几道，都走这里。
+          const [opts] = args;
+          const o = opts && typeof opts === 'object' ? opts : {};
+          let combo = null;
+          let dishes = null;
+          const missing = [];
+
+          // 面板上现勾的那几道：直接按 id 端，不走槽位现配。
+          // 勾选是主人当场定的，再按槽位重配一遍就成了"端过去跟你挑的不一样"。
+          const hand = Array.isArray(o.dishes) ? o.dishes.filter((x) => typeof x === 'string') : [];
+          if (hand.length) {
+            const picked = hand.map((id) => this.#lib.byId.get(id)).filter(Boolean);
+            if (!picked.length) return { ok: false, message: '这几道菜库里都没有。' };
+            combo = {
+              id: o.id ?? 'hand-picked',
+              name: typeof o.name === 'string' && o.name.trim() ? o.name.trim() : '现勾的一桌',
+              kind: 'custom',
+              dishes: picked.map((d) => d.id),
+            };
+            dishes = picked;
+          } else {
+            if (o.id) {
+              const all = await this.#allCombos();
+              combo = findCombo(all, o.id) ?? findPreset(o.id);
+            }
+            if (!combo) {
+              combo = adhocCombo({
+                size: o.size ?? this.#cfgNumber('comboSize', 1, 12),
+                cuisine: o.cuisine ?? '',
+              });
+            }
+            // 种子由面板给（它预览时用的同一个），这样"看到的就是端过去的"。
+            const seed = typeof o.seed === 'string' && o.seed ? o.seed
+              : `${combo.id}|${dayIn(this.timezone, this.#now())}`;
+            const r = this.#resolve(combo, seed);
+            dishes = r.dishes;
+            missing.push(...r.missing);
+          }
+
+          if (!dishes.length) {
+            return { ok: false, message: `这一桌配不出菜来${missing.length ? `：${missing.join('；')}` : ''}。` };
+          }
+          const r = await this.feedCombo(combo, dishes, '');
+          return { ...r, missing };
+        }
+        default:
+          return { ok: false, message: `套餐面板没有这个方法：${method}` };
+      }
+    }
 
     if (panel === 'menu') {
       switch (method) {
@@ -695,6 +1473,8 @@ export class FeastWorld {
           // 上限跟着库走：面板一次要全部菜，库涨到 200/300 道时不该有一截被悄悄截掉。
           // 那个 400 是硬顶（面板一屏画不下这么多卡），不是默认值。
           const cap = clampInt(f.limit, 1, Math.max(400, items.length), items.length);
+          // 顺手把到点的邀请/该散的一顿收掉（惰性）：面板一读就是新的。
+          await this.#togetherSettle();
           return {
             total: this.#lib.dishes.length,
             matched: items.length,
@@ -707,6 +1487,7 @@ export class FeastWorld {
               taste: d.taste, eaten: eatCount(this.#state, d.id),
             })),
             pending: this.#servedView(),
+            together: this.#togetherView(),
           };
         }
         case 'dish': {
@@ -729,6 +1510,37 @@ export class FeastWorld {
           const [id] = args;
           return await this.feedDish(id);
         }
+        // ---- 陪主人吃饭（会话条上那几个动作都在菜单面板上） ----
+        case 'together': {
+          await this.#togetherSettle();
+          return { together: this.#togetherView() };
+        }
+        case 'invite': {
+          const [opts] = args;
+          return await this.inviteTogether(opts && typeof opts === 'object' ? opts.note ?? '' : '');
+        }
+        case 'bite': {
+          const [id] = args;
+          return await this.biteTogether(id);
+        }
+        case 'take': {
+          const [opts] = args;
+          return await this.takeTogether(opts && typeof opts === 'object' ? opts : {});
+        }
+        case 'accept': {
+          return await this.acceptTogether();
+        }
+        case 'decline': {
+          return await this.declineTogether();
+        }
+        case 'reply': {
+          const [opts] = args;
+          const ok = !opts || typeof opts !== 'object' ? true : opts.ok !== false;
+          return await this.replyTogether(ok);
+        }
+        case 'end': {
+          return await this.endTogether();
+        }
         default:
           return { ok: false, message: `菜单面板没有这个方法：${method}` };
       }
@@ -748,6 +1560,7 @@ export class FeastWorld {
             today: state.eaten.filter((e) => dayIn(this.timezone, e.at) === dayIn(this.timezone, this.#now())).length,
             recent: recentEaten(state, 40).map((e) => ({
               id: e.id, name: e.name || e.id, at: e.at, by: e.by, miss: e.miss === true,
+              bite: e.bite === true,
             })),
             top,
             profile,

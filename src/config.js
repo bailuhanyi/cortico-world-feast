@@ -12,6 +12,10 @@ export const LABEL = '一桌菜';
 export const EVENT_MEAL = 'feast.meal';
 /** 主人端了一道菜过来。 */
 export const EVENT_FEED = 'feast.feed';
+/** 0.6.0：主人端了一桌菜过来（几道，不是一道）。 */
+export const EVENT_TABLE = 'feast.table';
+/** 0.6.0：「陪主人吃饭」的一切——邀请、喂一口、主人自己吃了什么、回喂的回应、散桌。 */
+export const EVENT_TOGETHER = 'feast.together';
 
 /** `worlds.feast` 段的默认值；`enabled` 由框架的 World 开关管理。 */
 export const DEFAULTS = Object.freeze({
@@ -38,6 +42,14 @@ export const DEFAULTS = Object.freeze({
   ownerFeedTTL: 30,
   /** feast_menu 不带筛选时给几道。 */
   menuSize: 5,
+  /** feast_combo 没指定套餐时，现配几道。 */
+  comboSize: 4,
+  /** 她挂的那条"想和你一起吃"留多少分钟；到点自己放掉，不催。 */
+  togetherInviteMin: 20,
+  /** 她自己一天最多主动邀请几次（0 = 不主动邀请）。主人的邀请不受这个限制。 */
+  togetherMaxInvites: 2,
+  /** 一顿"一起吃饭"最多挂多少分钟，到点自动散桌。 */
+  togetherTTLMin: 60,
 });
 
 const ZH = {
@@ -71,10 +83,20 @@ const ZH = {
     ownerFeedTTLDesc: '主人从面板端过来的菜，多少分钟内有效；过期就撤掉，免得半天后突然回一句。',
     menuSize: '随机给几道',
     menuSizeDesc: 'feast_menu 不带筛选时给出几道候选。',
+    comboSize: '来一桌配几道',
+    comboSizeDesc: '没指定套餐时，「来一桌」配几道菜。四道是正餐的量；一个人吃可以调到 2。',
+    togetherInviteMin: '她说一起吃的邀请留多久',
+    togetherInviteMinDesc: '她在面板上挂一条「想和你一起吃」，多久没人应就自己收掉。到点不催、不重发。',
+    togetherMaxInvites: '她一天主动邀请几次',
+    togetherMaxInvitesDesc: '她自己主动开口邀请你一起吃的次数上限；0 = 她不再主动邀请（你仍然可以邀请她）。',
+    togetherTTLMin: '一起吃饭最多挂多久',
+    togetherTTLMinDesc: '一顿「一起吃饭」最多挂多久，到点自动散桌，免得面板上一直写着"正一起吃"。',
   },
   storage: {
     label: '吃过的记录',
-    note: '清掉之后她不记得吃过什么、口味画像也会重来。菜品库本身不受影响。',
+    note: '清掉之后她不记得吃过什么、口味画像也会重来，正在一起吃的这一顿也会收摊（喂过的口、主人吃的那份都清了）。菜品库和主人攒的套餐都不受影响。',
+    combosLabel: '主人攒的套餐',
+    combosNote: '这是主人自己攒的桌。清掉之后套餐面板只剩内置的那几套；她吃过的记录不受影响。',
   },
 };
 
@@ -109,10 +131,20 @@ const EN = {
     ownerFeedTTLDesc: 'How many minutes an owner-served dish stays pending before it is withdrawn.',
     menuSize: 'Picks per menu',
     menuSizeDesc: 'How many candidates feast_menu offers when no filter is given.',
+    comboSize: 'Dishes per table',
+    comboSizeDesc: 'How many dishes an unspecified "set the table" gets. Four is a proper meal; 2 suits eating alone.',
+    togetherInviteMin: 'Her invite stays for',
+    togetherInviteMinDesc: 'How long an invitation of hers hangs on the panel before it drops itself. No nudging, no repeats.',
+    togetherMaxInvites: 'Invites per day',
+    togetherMaxInvitesDesc: 'How many times a day she may ask you to eat together; 0 = she never asks (you still can).',
+    togetherTTLMin: 'A shared meal lasts',
+    togetherTTLMinDesc: 'How long a shared meal may stay open before it closes itself, so the panel never says "eating together" forever.',
   },
   storage: {
     label: 'Eating history',
-    note: 'Clearing this erases what she has eaten and the taste profile. The dish library is untouched.',
+    note: 'Clearing this erases what she has eaten and the taste profile, and closes any shared meal in progress (the bites and your own food go too). The dish library and your saved set meals are untouched.',
+    combosLabel: 'Your saved set meals',
+    combosNote: 'Set meals you put together yourself. Clearing this leaves only the built-in sets; her eating history is untouched.',
   },
 };
 
@@ -217,6 +249,42 @@ export function configGroup(language = 'zh') {
           'x-suffix': ' 道',
           'x-hot': true,
         },
+        [`${K}.comboSize`]: {
+          type: 'integer',
+          title: t.comboSize,
+          description: t.comboSizeDesc,
+          minimum: 1,
+          maximum: 12,
+          'x-suffix': ' 道',
+          'x-hot': true,
+        },
+        [`${K}.togetherInviteMin`]: {
+          type: 'integer',
+          title: t.togetherInviteMin,
+          description: t.togetherInviteMinDesc,
+          minimum: 1,
+          maximum: 240,
+          'x-suffix': ' 分钟',
+          'x-hot': true,
+        },
+        [`${K}.togetherMaxInvites`]: {
+          type: 'integer',
+          title: t.togetherMaxInvites,
+          description: t.togetherMaxInvitesDesc,
+          minimum: 0,
+          maximum: 5,
+          'x-suffix': ' 次',
+          'x-hot': true,
+        },
+        [`${K}.togetherTTLMin`]: {
+          type: 'integer',
+          title: t.togetherTTLMin,
+          description: t.togetherTTLMinDesc,
+          minimum: 1,
+          maximum: 600,
+          'x-suffix': ' 分钟',
+          'x-hot': true,
+        },
       },
     },
   };
@@ -226,12 +294,14 @@ export function configGroup(language = 'zh') {
 export function panelText(language = 'zh') {
   if (language === 'en') {
     return {
-      menu: { title: 'Menu', description: 'Browse dishes, read a full flavour profile, or put one on her table.' },
+      menu: { title: 'Menu', description: 'Browse dishes, read a full flavour profile, put one on her table, or share a meal with her.' },
+      combo: { title: 'Set meals', description: 'Serve a whole table: a ready-made set, or pick a few dishes and save your own.' },
       history: { title: 'What she ate', description: 'What she has eaten, and the taste profile that has accumulated.' },
     };
   }
   return {
-    menu: { title: '菜单', description: '翻菜品、看完整的味道档案，或者端起一道放到她面前。' },
+    menu: { title: '菜单', description: '翻菜品、看完整的味道档案，端起一道放到她面前，或者和她一起吃一顿。' },
+    combo: { title: '套餐', description: '一桌一桌地端：现成的套餐，或者勾几道自己攒一桌存下来。' },
     history: { title: '吃过什么', description: '她吃过的东西，以及攒出来的口味画像。' },
   };
 }

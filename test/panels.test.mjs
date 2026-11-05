@@ -27,6 +27,12 @@ class Node {
     this.style = {};
     this.attributes = {};
     this._listeners = {};
+    // 真 DOM 的 <input>/<select> 一律有 value（默认 ''）。桩里不给的话，
+    // 面板里 `input.value.trim()` 会炸，而那是面板的正常写法。
+    this.value = '';
+    this.placeholder = '';
+    this.disabled = false;
+    this.parentNode = null;
   }
 
   get textContent() {
@@ -159,6 +165,12 @@ async function waitFor(check, what = '条件', timeoutMs = 2000) {
 
 const invocations = [];
 /**
+ * 每个用例一份独立的数据目录，见 mountPanels。
+ * 带上 pid 和启动时间：只按序号的话，第二次跑测试会读到上一次留下的 state.json。
+ */
+let panelSeq = 0;
+const panelRun = `${process.pid}-${Date.now().toString(36)}`;
+/**
  * 面板登记的定时器。每次都从 mountPanels 重新给一份：文件级共享的话，
  * `intervals.find(...)` 会摸到上一个用例的旧面板留下的定时器，测起来就是假的。
  */
@@ -175,9 +187,12 @@ function fakeClock(clock) {
 }
 
 async function mountPanels({ language = 'zh', failList = false, clock = null } = {}) {
+  // 每次一个独立目录：共用一个的话，上一个用例端过的菜、吃过的记录会漏到下一个用例里，
+  // 于是"刚端上来"和"早就吃完了"混在一起，测出来的东西是假的。
+  const dataDir = `.tmp/panels/${panelRun}/${panelSeq += 1}`;
   const world = new FeastWorld({
     cfg: { ...DEFAULTS, enabled: true },
-    dataDir: '.tmp/panels',
+    dataDir,
     timezone: 'Asia/Shanghai',
     now: clock ? () => clock.now : () => Date.parse('2026-11-05T12:05:00+08:00'),
     random: () => 0.5,
@@ -207,10 +222,15 @@ async function mountPanels({ language = 'zh', failList = false, clock = null } =
       return { dispose() { entry.disposed = true; } };
     },
     async invoke(method, args) {
-      invocations.push({ method, args });
+      // 回执也留着：有些断言要看服务端真返回了什么（例如「端这一桌」端过去的菜名），
+      // 光看"调了哪个方法"抓不到"端过去的和你看到的不一样"。
+      const record = { method, args };
+      invocations.push(record);
       if (failList && method === 'list') throw new Error('boom');
-      const which = ctx.panelId === 'history' ? 'history' : 'menu';
-      return decl.invoke(which, method, args ?? []);
+      // 面板 id 直接透传：写死成 menu/history 的话，套餐面板的调用会打到菜单面板上。
+      const result = await decl.invoke(ctx.panelId, method, args ?? []);
+      record.result = result;
+      return result;
     },
   };
 
@@ -227,11 +247,12 @@ async function mountPanels({ language = 'zh', failList = false, clock = null } =
 
 // --------------------------------------------------------------------------
 
-test('bundle 形状对：两个面板，mount 都是函数', async () => {
+test('bundle 形状对：三个面板，mount 都是函数', async () => {
   const b = await import('../dist/webui.js');
-  assert.deepEqual(Object.keys(b.default.panels).sort(), ['history', 'menu']);
-  assert.equal(typeof b.default.panels.menu.mount, 'function');
-  assert.equal(typeof b.default.panels.history.mount, 'function');
+  assert.deepEqual(Object.keys(b.default.panels).sort(), ['combo', 'history', 'menu']);
+  for (const id of ['menu', 'combo', 'history']) {
+    assert.equal(typeof b.default.panels[id].mount, 'function', `${id} 缺 mount`);
+  }
   assert.ok(!Array.isArray(b.default.panels));
 });
 
@@ -293,7 +314,13 @@ test('菜单面板：先选类别，菜系下拉跟着收窄，换类别会清�
   // 一上来菜系列的是全部菜系
   assert.ok(root.findAll((n) => n.tagName === 'OPTION').length > 20);
 
-  // 选「汤羹」→ 菜系下拉只剩汤羹里真有的那几个
+  // 选「汤羹」→ 菜系下拉只剩汤羹里真有的那几个。
+  // 两个数都从库里算：菜系总数会随加菜变（0.6.0 就从 24 涨到 28），
+  // 「汤羹里的菜系数」更是会变——写死 20 这种上限，加两个菜系就红一次。
+  const soupCuisines = new Set(
+    lib.dishes.filter((d) => d.category === '汤羹').map((d) => d.cuisine),
+  );
+  assert.ok(soupCuisines.size < lib.cuisines.length, '汤羹不该覆盖全部菜系，否则这条测不出收窄');
   cat.value = '汤羹';
   cat.fire('change');
   await waitFor(() => invocations.filter((i) => i.method === 'list').pop()?.args[0]?.category === '汤羹',
@@ -306,7 +333,9 @@ test('菜单面板：先选类别，菜系下拉跟着收窄，换类别会清�
   await waitFor(() => root.findAll((n) => n.tagName === 'SELECT').length === 2, '下拉画回来');
   const after = root.findAll((n) => n.tagName === 'SELECT')[1];
   const opts = after.childNodes.filter((n) => n.tagName === 'OPTION').map((n) => n.value).filter(Boolean);
-  assert.ok(opts.length > 0 && opts.length < 20, `汤羹下的菜系应该收窄了，现在是 ${opts.length} 个`);
+  assert.equal(opts.length, soupCuisines.size,
+    `汤羹下的菜系应该只剩汤羹里真有的那 ${soupCuisines.size} 个，现在是 ${opts.length} 个`);
+  assert.ok(opts.every((o) => soupCuisines.has(o)), `汤羹下拉里混进了没有汤羹的菜系：${opts.filter((o) => !soupCuisines.has(o)).join('、')}`);
   after.value = opts[0];
   after.fire('change');
   await waitFor(() => {
@@ -472,6 +501,337 @@ test('英文界面：等待条上的倒计时也是英文', async () => {
   } finally {
     panels.lastHandle?.dispose?.();
     restore();
+  }
+  await world.stop();
+});
+
+// --------------------------------------------------------------------------
+// 一起吃饭（会话条挂在菜单面板顶部，没有新面板）
+// --------------------------------------------------------------------------
+
+/** 她那边动一下（回喂 / 收摊），走的是她自己的工具。 */
+function herTool(world, args) {
+  const t = world.tools().find((x) => x.name === 'feast_together');
+  assert.ok(t, '没找到 feast_together');
+  return t.handler(args);
+}
+
+test('菜单面板：没在一起吃时只有一个小按钮，点它就去邀请她', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('menu');
+    const bar = root.querySelector('.feast-together');
+    assert.ok(bar, '菜单面板顶部该有会话条');
+    assert.ok(!bar.textContent.includes('散桌'), '还没开席，不该有散桌');
+    assert.ok(!root.findByText('好，一起吃'), '没邀请时不该有「好，一起吃」');
+
+    const ask = root.findByText('🍽 一起吃');
+    assert.ok(ask, `会话条上该有邀请按钮：${bar.textContent}`);
+    ask.fire('click');
+    await waitFor(() => root.findByText('散桌'), '开席后出现散桌');
+    assert.ok(invocations.some((i) => i.method === 'invite'), '没调 invite');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：正一起吃时画出喂过几口、她分的一口（带接过来/下次吧），点散桌会调 end', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    await world.inviteTogether();
+    await world.biteTogether(lib.dishes[0].id);
+    await herTool(world, { action: 'feed', dish: lib.dishes[1].id });
+
+    const root = await mount('menu');
+    const bar = root.querySelector('.feast-together');
+    assert.ok(bar.textContent.includes('正一起吃'), `会话条该写着在吃：${bar.textContent}`);
+    assert.ok(bar.textContent.includes('喂过 1 口'), `该写喂过几口：${bar.textContent}`);
+    assert.ok(bar.textContent.includes(lib.dishes[1].name), `该写她分了哪一口：${bar.textContent}`);
+    assert.ok(root.findByText('接过来'), '她分过来的一口该有「接过来」');
+    assert.ok(root.findByText('下次吧'), '该有「下次吧」');
+
+    root.findByText('接过来').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'reply'), '调 reply');
+    const call = invocations.filter((i) => i.method === 'reply').pop();
+    assert.equal(call.args[0].ok, true, '接过来就是 ok:true');
+
+    root.findByText('散桌').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'end'), '调 end');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：她挂着邀请时给出「好，一起吃」和「今天不了」', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    await herTool(world, { action: 'invite' });
+    const root = await mount('menu');
+    const bar = root.querySelector('.feast-together');
+    assert.ok(bar.textContent.includes('想和你一起'), `会话条该说她想一起吃：${bar.textContent}`);
+
+    root.findByText('好，一起吃').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'accept'), '调 accept');
+    await waitFor(() => root.findByText('散桌'), '接住之后就在一起吃');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：自己走表只拉「一起吃饭」这一条，结构没变就不重画卡片', async () => {
+  const { mount, invocations, world, panels, intervals } = await mountPanels();
+  try {
+    await world.inviteTogether();
+    const root = await mount('menu');
+    const cardsBefore = root.querySelectorAll('.feast-card').length;
+
+    const ticker = intervals.find((e) => e.ms === 30_000);
+    assert.ok(ticker, '菜单面板该登记一个 30 秒的表');
+    const listsBefore = invocations.filter((i) => i.method === 'list').length;
+    ticker.fn();
+    await waitFor(() => invocations.some((i) => i.method === 'together'), '走表时拉一起吃饭');
+    // 结构没变（还是同一顿、没人再喂）：不该重画 701 张卡。
+    assert.equal(invocations.filter((i) => i.method === 'list').length, listsBefore,
+      '结构没变时不该整块重拉');
+    assert.equal(root.querySelectorAll('.feast-card').length, cardsBefore);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：她那边先收了这顿，走表一拍之后会话条跟着收掉', async () => {
+  const { mount, world, panels, intervals } = await mountPanels();
+  try {
+    await world.inviteTogether();
+    const root = await mount('menu');
+    assert.ok(root.findByText('散桌'), '先得在吃');
+
+    await herTool(world, { action: 'end' });
+    const ticker = intervals.find((e) => e.ms === 30_000);
+    ticker.fn();
+    await waitFor(() => !root.findByText('散桌'), '她收摊后面板跟着收起会话条');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：菜品详情里能点「我也吃这道」，不在席上就不显示', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('menu');
+    const open = (name) => root.querySelectorAll('.feast-card').find((c) => c.textContent.includes(name));
+    open('麻婆豆腐').fire('click');
+    await waitFor(() => root.querySelector('.feast-detail'), '详情画出来');
+    assert.ok(!root.findByText('我也吃这道'), '没在吃的时候不该有「我也吃这道」');
+
+    await world.inviteTogether();
+    await mount('menu');
+    open('麻婆豆腐').fire('click');
+    await waitFor(() => root.querySelector('.feast-detail'), '详情又画出来');
+    const mine = root.findByText('我也吃这道');
+    assert.ok(mine, '正一起吃时详情里该有「我也吃这道」');
+    mine.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'take'), '调 take');
+    const call = invocations.filter((i) => i.method === 'take').pop();
+    assert.equal(call.args[0].id, 'mapo-tofu', '该把这一道报过去');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+// --------------------------------------------------------------------------
+// 套餐面板
+// --------------------------------------------------------------------------
+
+test('套餐面板：挂载后画出预设，每张卡带着现配出来的菜名', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    assert.equal(invocations[0].method, 'list', '一挂载就该拉数据');
+    const cards = root.querySelectorAll('.feast-set');
+    assert.ok(cards.length >= 8, `预设该画出 8 张：${cards.length}`);
+    const text = cards.map((c) => c.textContent).join('\n');
+    assert.ok(text.includes('四菜一汤'), '缺四菜一汤那张');
+    assert.ok(text.includes('清爽一餐'), '缺清爽一餐那张');
+    // 每张卡都该有「端这一桌」和「看这一桌」。
+    assert.ok(root.findByText('端这一桌'), '缺端这一桌按钮');
+    assert.ok(root.findByText('看这一桌'), '缺看这一桌按钮');
+    // 预设是槽位现配的，端之前必须看得到具体是哪几道。
+    assert.ok(root.querySelectorAll('.feast-set-dishes').length >= 8, '每张卡都该列出具体菜名');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：点「端这一桌」会真的推过去，并带上等待条', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const card = root.querySelectorAll('.feast-set').find((c) => c.textContent.includes('四菜一汤'));
+    assert.ok(card, '没找到四菜一汤');
+    const serve = card.findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('端这一桌'));
+    assert.ok(serve, '那张卡上没找到端这一桌');
+    serve.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'serve'), '调 serve');
+    await waitFor(() => root.querySelector('.feast-strip'), '出现等待条');
+
+    const strip = root.querySelector('.feast-strip').textContent;
+    assert.ok(strip.includes('这一桌'), `等待条该说这是一桌：${strip}`);
+    assert.ok(/还剩 \d+ \/ \d+ 道/.test(strip), `该写还剩几道：${strip}`);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+// 卡片上列的菜名和「端这一桌」端过去的菜名必须一模一样。
+// 这两条钉的是同一件事：种子（也就是这一桌怎么配）必须在**画卡之前**就定好。
+// 以前卡上写死 `<id>|panel`、端的时候另生成一颗 `Date.now()`，于是"看到的"
+// 和"端过去的"是两桌菜——面板自己还写着"看到的这几道就是会端过去的那几道"。
+test('套餐面板：不先点「看这一桌」，直接端也是卡上列的那几道', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const card = () => root.querySelectorAll('.feast-set').find((c) => c.textContent.includes('四菜一汤'));
+    const row = card().querySelectorAll('.feast-set-dishes')[0];
+    assert.ok(row, '卡上该列出具体菜名');
+    const shown = row.querySelectorAll('span').map((n) => n.textContent);
+    assert.ok(shown.length >= 2, `卡上该列出具体菜名：${shown.join('、')}`);
+
+    const serve = card().findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('端这一桌'));
+    serve.fire('click');
+    const call = await waitFor(() => invocations.filter((i) => i.method === 'serve' && i.result).pop(), 'serve 回执');
+
+    const served = (call.result.dishes ?? []).map((d) => d.name);
+    assert.deepEqual(served, shown,
+      `卡上列的和端过去的不是同一桌：卡上「${shown.join('、')}」/ 端过去「${served.join('、')}」`);
+    assert.equal(typeof call.args[0].seed, 'string', '端的时候该带上这一张卡的那颗种子');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：点过「看这一桌」之后再端，端的是重配后卡上显示的那一桌', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const card = () => root.querySelectorAll('.feast-set').find((c) => c.textContent.includes('清爽一餐'));
+    const withSeeds = () => invocations.filter((i) => i.method === 'list' && i.args?.[0]?.seeds).length;
+    const before = withSeeds();
+    assert.ok(before > 0, '一挂载就该带种子拉过一次数据');
+
+    card().findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('看这一桌')).fire('click');
+    await waitFor(() => withSeeds() > before, '预览后带新种子重拉数据');
+
+    const shown = card().querySelectorAll('.feast-set-dishes')[0].querySelectorAll('span').map((n) => n.textContent);
+    // 这一张卡这次画用好的是哪颗种子——端的时候必须还是它。
+    const seedUsed = invocations.filter((i) => i.method === 'list' && i.args?.[0]?.seeds).pop().args[0].seeds['light-meal'];
+    assert.equal(typeof seedUsed, 'string', '画卡的那次 list 该带上这一张卡的种子');
+
+    const serve = card().findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('端这一桌'));
+    serve.fire('click');
+    const call = await waitFor(() => invocations.filter((i) => i.method === 'serve' && i.result).pop(), 'serve 回执');
+
+    assert.equal(call.args[0].seed, seedUsed, '端的时候换了种子，卡上的菜就不再是端过去的菜');
+    const served = (call.result.dishes ?? []).map((d) => d.name);
+    assert.deepEqual(served, shown,
+      `预览之后端的该是重配的那一桌：卡上「${shown.join('、')}」/ 端过去「${served.join('、')}」`);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：勾几道 → 直接端，勾的那几道就是端过去的那几道', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const chips = root.querySelectorAll('.feast-chip');
+    assert.ok(chips.length > 100, `勾选区该有整库：${chips.length}`);
+    // 勾三道
+    const want = ['麻婆豆腐', '东坡肉', '腌笃鲜'];
+    for (const name of want) {
+      const chip = root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes(name));
+      assert.ok(chip, `勾选区里没找到${name}`);
+      chip.fire('click');
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    const card = root.querySelectorAll('.feast-build')[0];
+    assert.ok(card.textContent.includes('已选 3'), `该显示已选 3 道：${card.textContent.slice(-80)}`);
+
+    // 只在动作条里找按钮：菜卡本身也是 button，findAll 会把 701 个 chip 都算进来。
+    const acts = card.querySelectorAll('.feast-set-acts')[0];
+    const serve = acts.findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('端这一桌'));
+    assert.ok(serve, '动作条里没找到端这一桌');
+    serve.fire('click');
+    serve.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'serve'), '调 serve');
+
+    const call = invocations.filter((i) => i.method === 'serve').pop();
+    assert.equal(call.args[0].dishes.length, 3, '该把勾的三道传过去');
+    await waitFor(() => root.querySelector('.feast-strip'), '出现等待条');
+    assert.ok(root.querySelector('.feast-strip').textContent.includes('3'), '等待条该说三道');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：攒一桌存下来，重开面板还在', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    let root = await mount('combo');
+    const chips = () => root.querySelectorAll('.feast-chip');
+    chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    root = root; // 重绘后 root 还在
+    chips().find((c) => c.textContent.includes('东坡肉')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+
+    const input = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('名字'));
+    assert.ok(input, '缺起名字的输入框');
+    input.value = '我的两菜桌';
+    input.fire('input');
+
+    const save = root.querySelectorAll('.feast-set-acts').at(-1)
+      .findAll((n) => n.tagName === 'BUTTON')
+      .find((b) => b.textContent.trim() === '攒一桌');
+    assert.ok(save, '缺存下来按钮');
+    save.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'save'), '调 save');
+    await waitFor(() => root.textContent.includes('我的两菜桌'), '存下来的桌出现在列表里', 3000);
+
+    // 重开面板（同一个 World），自定义的桌该还在。
+    const again = await mount('combo');
+    await waitFor(() => again.textContent.includes('我的两菜桌'), '重开面板后自定义桌还在');
+    assert.ok(again.querySelectorAll('.feast-set').length >= 9, '预设 8 + 自定义 1');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：英文界面的按钮和标题是英文', async () => {
+  const { mount, world, panels } = await mountPanels({ language: 'en' });
+  try {
+    const root = await mount('combo');
+    const text = root.textContent;
+    assert.ok(text.includes('Ready-made sets'), '缺英文标题');
+    assert.ok(text.includes('Serve this table'), '缺英文按钮');
+    assert.ok(text.includes('Build a table'), '缺英文攒桌标题');
+    // 套餐名、菜名是数据，跟整个菜品库一样是中文——英文界面不译数据。
+    // 这一条把那个界线钉住：证明确实是"内容中文、界面英文"，不是漏翻了界面。
+    assert.ok(text.includes('四菜一汤'), '套餐名属于内容，仍应是中文');
+  } finally {
+    panels.lastHandle?.dispose?.();
   }
   await world.stop();
 });

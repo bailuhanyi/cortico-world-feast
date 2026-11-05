@@ -160,6 +160,96 @@
         "zh": "今天不想吃：跳过剩下的饭点。",
         "en": "Skip the rest of today's meals."
       }
+    },
+    {
+      "name": "feast_combos",
+      "description": "看有哪些套餐（一桌菜）：内置的现成套餐 + 主人自己攒的那些。每一套都会现配出具体的菜名给你看。想\"有没有现成的一桌\"、或者想看看主人平时给你配什么时用它。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "resolve": {
+            "type": "boolean",
+            "description": "要不要把每套现配成具体菜名（默认 true；只看名字时可以关掉，省得一屏全是菜名）。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "read",
+        "snapshot"
+      ],
+      "summary": {
+        "zh": "看有哪些套餐（一桌菜），每套现配出具体菜名。",
+        "en": "See the set meals available, each resolved into actual dishes."
+      }
+    },
+    {
+      "name": "feast_combo",
+      "description": "开一桌：把一个套餐配成具体的几道菜，摆到你面前，一道一道吃。combo 填套餐名或 id（例如 四菜一汤 / 清爽一餐）；留空就按你的口味现配一桌。整桌摆上来之后，feast_eat 不带 dish 就会吃桌上还没吃的那道。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "combo": {
+            "type": "string",
+            "description": "哪一套：套餐名或 id。留空 = 现配一桌。"
+          },
+          "size": {
+            "type": "integer",
+            "description": "留空且没给 combo 时，现配几道（1–12，默认按配置）。",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "cuisine": {
+            "type": "string",
+            "description": "想\"一桌同一个菜系\"时填，例如 川菜 / 日料。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "开一桌：把一个套餐配成具体几道菜摆上来，一道一道吃。",
+        "en": "Set a whole table: resolve a set meal into dishes and serve them together."
+      }
+    },
+    {
+      "name": "feast_together",
+      "description": "陪主人一起吃饭。action 填 invite（问主人要不要一起吃——面板上会挂一条等他回应，但话得你自己在聊天里说出来）、feed（从库里挑一道分他一口，他会看到、可以接过去）、end（这顿到这儿了）。他喂你的一口和他自己吃什么，你会收到事件；你自己吃饭还是用 feast_eat。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "invite / feed / end。",
+            "enum": [
+              "invite",
+              "feed",
+              "end"
+            ]
+          },
+          "dish": {
+            "type": "string",
+            "description": "action=feed 时要分他的那道：菜名或 id。"
+          },
+          "note": {
+            "type": "string",
+            "description": "一句话，可选；invite 时是\"想一起吃什么\"的由头，end 时是为什么先收了。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "陪主人一起吃：问他要不要一起、分他一口、这顿先收了。",
+        "en": "Eat together: ask the owner to share a meal, offer him a bite, or close the meal."
+      }
     }
   ],
   "events": [
@@ -178,6 +268,22 @@
         "en": "The owner served a dish from the WebUI panel. The text describes how it arrives and smells, and asks her to eat it with feast_eat. Internal origin, from the authenticated operator channel."
       },
       "trigger": "flush"
+    },
+    {
+      "type": "feast.table",
+      "description": {
+        "zh": "主人端来一整桌（几道菜，不是一道）：正文列出这一桌有哪几道、合起来是什么口味，请她用 feast_eat 一道一道吃。和 feast.feed 分开是因为正文要说清「几道、还剩哪几道」。origin 是 internal，来自已认证的操作员通道。",
+        "en": "The owner served a whole table (several dishes, not one): the text lists them, describes the combined flavour, and asks her to eat through them one by one. Separate from feast.feed because the wording is about a table and its remaining dishes. Internal origin, from the authenticated operator channel."
+      },
+      "trigger": "flush"
+    },
+    {
+      "type": "feast.together",
+      "description": {
+        "zh": "「陪主人吃饭」这条通道，只有主人 → 她这一个方向（她开口邀请主人没有通道，只能面板挂一条 + 她自己说）。meta.kind 分清是哪一件事：invite（主人问要不要一起吃，或他应了她的邀请）、bite（主人喂她一口，正文带这一口当下的样子）、owner-ate（主人自己也在吃什么：库内那道给菜名，自由文本会明说库里没有这道）、back（他接住或没要她分过去的那口）、end（散桌：吃完了 / 主人说散了 / 到点收摊）。origin 是 internal，来自已认证的操作员通道。",
+        "en": "The shared-meal channel, owner to her only (she has no way to message the owner; her invitation just hangs on the panel and she says it herself). meta.kind tells the moments apart: invite (the owner asks, or accepts her invitation), bite (the owner feeds her one bite, the text carries how it lands), owner-ate (what the owner is eating himself: a library dish by name, or free text that says outright the library has no such dish), back (he took, or declined, the bite she offered), end (the meal closed: finished / he called it / it timed out). Internal origin, from the authenticated operator channel."
+      },
+      "trigger": "flush"
     }
   ],
   "prompts": [
@@ -185,7 +291,7 @@
       "key": "worlds.feast.env",
       "title": "一桌菜",
       "role": "envPrompt",
-      "content": "## 一桌菜\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【一桌菜】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n"
+      "content": "## 一桌菜\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【一桌菜】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- 你也可以自己开一桌：`feast_combos` 看有哪些套餐（四菜一汤、清爽一餐……），`feast_combo` 开一桌。想一个人慢慢吃就别开一桌。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n"
     }
   ]
 }

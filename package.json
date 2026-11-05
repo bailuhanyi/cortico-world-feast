@@ -1,7 +1,7 @@
 {
   "name": "cortico-world-feast",
-  "version": "0.5.0",
-  "description": "一桌菜 · 给 Coo 一张会端菜的桌子：500 道带九维口味、香气、口感与实吃描写的菜品（24 个菜系组），她能自己挑、主人能从面板端一道过去；同一道菜每次吃到的都不一样，吃过什么和口味画像跨天攒着；另有一套可开关的饭点提醒。",
+  "version": "0.6.0",
+  "description": "一桌菜 · 给 Coo 一张会端菜的桌子：701 道带九维口味、香气、口感与实吃描写的菜品（28 个菜系组），她能自己挑、主人能从面板端一道过去，也能整桌端过去（8 套内置套餐 + 自己攒桌），还能和她一起吃一顿、互相喂一口；同一道菜每次吃到的都不一样，吃过什么和口味画像跨天攒着；另有一套可开关的饭点提醒。",
   "license": "MIT",
   "author": "青",
   "repository": {
@@ -44,13 +44,13 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
+    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
     "dishes": "node tools/validate-dishes.mjs",
     "selfcheck": "node tools/selfcheck.mjs",
     "check:install": "node tools/check-install.mjs",
     "check:publish": "node tools/publish-check.mjs --online",
     "describe": "node tools/make-describe.mjs",
-    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
+    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
   },
   "cortico": {
     "kind": "world",
@@ -62,11 +62,11 @@
     "locales": {
       "zh": {
         "displayName": "一桌菜",
-        "description": "给 Coo 一张会端菜的桌子：500 道菜（24 个菜系组），每道都有九维口味、香气、口感、余韵和一段实吃描写。她能自己按菜系挑，主人也能从面板把一道菜端到她面前；同一道菜每次吃到的都不一样（温度、状态、配的那口会变），吃过什么、对什么反应、口味画像跨天攒着。饭点提醒默认开着，可以在配置里一键关掉。"
+        "description": "给 Coo 一张会端菜的桌子：701 道菜（28 个菜系组），每道都有九维口味、香气、口感、余韵和一段实吃描写。她能自己按菜系挑，主人也能从面板把一道菜端到她面前，或者整桌端过去（8 套内置套餐，也能自己勾几道攒成一桌存下来）；还能和她一起吃一顿：邀请她、互相喂一口，你吃了什么她也知道。同一道菜每次吃到的都不一样（温度、状态、配的那口会变），吃过什么、对什么反应、口味画像跨天攒着。饭点提醒默认开着，可以在配置里一键关掉。"
       },
       "en": {
         "displayName": "Table",
-        "description": "A table that serves food to your Coo: 500 dishes across 24 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders are on by default and can be switched off in config."
+        "description": "A table that serves food to your Coo: 701 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders are on by default and can be switched off in config."
       }
     },
     "tags": [

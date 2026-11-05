@@ -17,13 +17,13 @@ cd 'E:\deep seek\feed-world'
 node tools/validate-dishes.mjs      # 菜品库：字段、九维、类别、套话、菜系与文件名一致
 node tools/selfcheck.mjs            # 复刻 Coo 的干装载检查
 node tools/publish-check.mjs --online  # 市场收录口径 + npm 包名占用
-node test/dishes.test.mjs; node test/eat.test.mjs; node test/state.test.mjs; node test/world.test.mjs; node test/panels.test.mjs
+node test/dishes.test.mjs; node test/eat.test.mjs; node test/state.test.mjs; node test/combos.test.mjs; node test/together.test.mjs; node test/world.test.mjs; node test/panels.test.mjs
 node tools/make-describe.mjs --check
 ```
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态：**18 项通过、0 失败、1 条警告**（警告是没截 `screenshots`，见第 5 步）。
+当前状态（0.6.0）：**18 项通过、0 失败、2 条警告**（没截 `screenshots`，以及离线时没查 npm——带 `--online` 就只剩 1 条警告）；187 项测试全绿。
 
 ---
 
@@ -96,6 +96,12 @@ E403  Two-factor authentication or granular access token with bypass 2fa enabled
 npm publish --otp 123456
 ```
 
+> ⚠️ **`npm publish` 必须在交互式终端里跑。** npm 只在**真 TTY** 里才弹验证提示
+> （`npm/lib/utils/auth.js` 里 `if (!process.stdin.isTTY || !process.stdout.isTTY) throw err`），
+> 所以在 agent 的非 TTY shell 里它直接抛 `EOTP`，日志里的认证链接还会被遮蔽成
+> `https://www.npmjs.com/auth/cli/***`（拿不到真链）。**agent 能做的到 `publish-check` 为止**，
+> 最后那一下由你在自己的 PowerShell 里敲。
+>
 > 注意：网页授权登录的会话 token 也走不通这条路。要么 2FA + `--otp`，要么 granular token + bypass 2FA，没有第三种。`--otp` 的码只能人手输，脚本替不了。
 >
 > **`--otp` 要的是 6 位数字**，从 authenticator 应用里现取（30 秒滚一次）。npm 的**恢复码**（一长串 64 位 hex）只能用于**网页登录**顶替验证——**千万别传给 `npm publish --otp`**：会当场消耗掉一个，并且触发 **72 小时安全封禁**（`temporary 72-hour security hold`），期间不能发布、不能建 token、不能改已有 2FA 方式，**无法提前解除**。
@@ -112,9 +118,12 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-应该看到 **40 个文件**，压缩后约 190KB、解包约 537KB：`package.json`、`src/`（含 25 个菜品 json）、`dist/webui.js`、`describe.json`、`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
+0.6.0 应该是 **45 个文件**（`publish-check` 数出来是 46 个，它把目录条目也算一个），压缩后约 400KB、
+解包约 1.6MB：`package.json`、`src/`（含 28 个菜品 json + 9 个 js）、`dist/webui.js`、`describe.json`、
+`assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`。
 
-`test/`、`tools/`、`install.ps1` 都在 `files` 之外，不会发出去——菜品校验脚本、装机脚本是我们的工具，不是用户要的东西。
+`test/`、`tools/`、`install.ps1`、`COMBO-SPEC.md`、`TOGETHER-SPEC.md`、`DISH-SPEC.md` 都在 `files` 之外，
+不会发出去——菜品校验脚本、装机脚本、设计稿是我们的工具，不是用户要的东西。
 
 ---
 
@@ -124,13 +133,15 @@ npm pack --dry-run
 npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
-第一次发一个 `0.1.0` 的新包，不需要 `--access public`（那是作用域包 `@you/xxx` 才要的）。
+这个包 0.4.0 已经在 npm 上（不是新包），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
+0.5.0 / 0.6.0 / 0.7.0 三个版本号从没发布过，`latest` 会从 **0.4.0** 直接跳到 **0.6.0**，这是正常的。
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.1.0
+npm view cortico-world-feast version          # 应回 0.6.0
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
+npm view cortico-world-feast dist-tags        # latest 应是 0.6.0
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -152,6 +163,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 
 没装 `gh`（这台机器就没有）也可以直接在网页上开：<https://github.com/Pal-AI-Lab/cortico-extensions/issues/new>。
 
+> 0.2.0 那次没开成，等 Action 自己那一趟等了好几天——**发完就开一个**，别省这一步。
+
 之后在 Coo 的「扩展 → 市场」里搜「一桌菜」就能看到。第一次出现时会带**新品**徽标（`newDays: 14`）。
 
 ---
@@ -161,7 +174,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 市场详情页现在只有图标和文字。截图要你自己截，脚本替不了：
 
 1. 重启 Coo，世界页开「一桌菜」
-2. 「菜单」页签截一张（能同时看到筛选条、卡片、九维口味条最好）
+2. 「菜单」页签截一张（能同时看到筛选条、卡片、顶部的「一起吃饭」条最好）
 3. 「吃过什么」页签截一张（口味画像那张）
 4. 存成 `assets/screenshot-1.png`、`assets/screenshot-2.png`（每张 ≤2MB，最多 8 张）
 5. 在 `package.json` 的 `cortico` 块里加：
@@ -170,7 +183,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 "screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png"],
 ```
 
-6. 升版本号到 `0.1.1`，重跑 `npm publish`
+6. 升版本号到 `0.6.1`，重跑 `npm publish`
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 
@@ -186,13 +199,13 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 | --- | --- | --- |
 | `companion` | 普通 | 情绪、作息、时间感、主动开口——饭点和「她自己想吃」都是这类 |
 | `internal-state` | 提示 | 这个 World 在 Memory 之外自己记着她吃过什么、对什么有反应、口味画像。装上或卸下前后，她对自己的认知会不一致。**词表明确不推荐在 World 里管内部状态**，我们照实声明。 |
-| `experimental` | 提示 | 0.1.0，只在少数配置上验过，兼容性未确认 |
+| `experimental` | 提示 | 只在少数配置上验过，兼容性未确认 |
 
 `keywords` 里的 `companion` 会自动映射成普通标签（同一级别，不重复算）。
 
 之前写过 `food` 和 `local`，两个都不对：`food` 不在词表里（市场不认，写了等于没写）；`local` 的意思是「在本机跑模型、要算力和显存」，我们一行推理都不跑。已删掉。
 
-**没声明的**：`injection-risk` 不该有——我们推的两条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么），没有一句是别人写的文字。`high-cost` 也不该有——6 个工具合计约 844 token，饭点一天最多 3 次。
+**没声明的**：`injection-risk` 不该有——我们推的四条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么），没有一句是别人写的文字。`high-cost` 也不该有——9 个工具合计约 1.4k token，饭点一天最多 3 次。
 
 如果官方后续加了什么标签，`index.json` 的 `overrides` 里会有 `note` 说明原因；想去掉自己声明的那几个，开一个 `[标签]` issue 就行。
 
@@ -207,7 +220,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 3. World 扩展不直接依赖其他 World 扩展
 4. **至少有过一次后续更新**
 
-第 4 条意味着至少要发两个版本才能申请。所以先发 0.1.0，攒点实际用下来的反馈，发 0.2.x 的时候顺手把截图补上，那时再申请。
+第 4 条意味着至少要发两个版本才能申请。0.1.x / 0.2.x / 0.4.0 已经发过，0.6.0 是又一次更新；
+所以**等截图补上、0.6.1 发出去之后**就可以申请了。
 
 申请方式是开一个 `[认证]` issue：
 
