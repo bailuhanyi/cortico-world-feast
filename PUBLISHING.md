@@ -97,6 +97,10 @@ npm publish --otp 123456
 ```
 
 > 注意：网页授权登录的会话 token 也走不通这条路。要么 2FA + `--otp`，要么 granular token + bypass 2FA，没有第三种。`--otp` 的码只能人手输，脚本替不了。
+>
+> **`--otp` 要的是 6 位数字**，从 authenticator 应用里现取（30 秒滚一次）。npm 的**恢复码**（一长串 64 位 hex）也能顶一次验证，但会当场消耗掉，只能当应急手段。
+>
+> **刚开完 2FA 不要马上发**：npm 会报 `403 Your account has been temporarily suspended due to a recent security-sensitive action`。这是敏感操作后的冷却期，不是封号，等它过去即可（等多久没有官方文档）。
 
 ---
 
