@@ -70,10 +70,14 @@ console.log('\n=== 分值可疑 ===');
 // 阈值故意松：马赛鱼汤带蒜香蛋黄酱（油 72）、夫妻肺片是红油凉菜（油 78）、
 // 拔丝地瓜就是纯糖（甜 90）——都是对的，不该判红。这里只抓明显写反的。
 const V = { 甜品甜下限: 45, 汤羹油上限: 80, 凉菜油上限: 88, 甜上限: 95, 油上限: 92 };
+/** 苦味压甜的甜品：苦是它的本体，不是把甜写漏了。龟苓膏、苦咖啡冻这一类。 */
+const bitterSweets = new Set(['wuzhou-guilingao']);
 const suspicious = [];
 for (const d of all) {
   const t = d.taste ?? {};
-  if (d.category === '甜品' && (t.甜 ?? 0) < V.甜品甜下限) suspicious.push(`${d.name}：类别甜品但甜只有 ${t.甜}`);
+  if (d.category === '甜品' && (t.甜 ?? 0) < V.甜品甜下限 && !bitterSweets.has(d.id)) {
+    suspicious.push(`${d.name}：类别甜品但甜只有 ${t.甜}`);
+  }
   if (d.category === '汤羹' && (t.油 ?? 0) > V.汤羹油上限) suspicious.push(`${d.name}：汤羹但油 ${t.油}`);
   if (d.category === '凉菜' && (t.油 ?? 0) > V.凉菜油上限) suspicious.push(`${d.name}：凉菜但油 ${t.油}`);
   if ((t.辣 ?? 0) >= 60 && /甜|奶|冰|蛋糕/.test(d.name)) suspicious.push(`${d.name}：名字像甜品却辣 ${t.辣}`);

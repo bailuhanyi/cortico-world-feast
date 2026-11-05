@@ -3,3 +3,5 @@ node_modules/
 *.bak-*
 *.log
 .DS_Store
+# 世界运行时的数据目录：World 的 dataDir 默认是 cwd，手工跑一下就会在这里生成
+/feast/

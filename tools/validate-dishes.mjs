@@ -40,19 +40,30 @@ export const CATEGORIES = [
  * 这类形态组——它们和菜系是两根轴，混在一起必然撞车（生煎包 vs 小笼包、
  * 新疆羊肉串 vs 新疆大盘鸡）。
  *
- * **没有例外**。0.3.0 曾留过一个 `desserts`（甜品），理由是"黑森林蛋糕这类德式甜点没有别的家"，
+ * **只有一个例外，而且理由跟「甜品」「家常菜」都不一样**：`staples`（主食）里只有
+ * **白米饭一道**。前两个例外被拆，是因为它们是**风格/形态**，和 category 那根轴重复，
+ * 而且会越收越多变成垃圾场。白米饭不属于任何一片地方——它没有产地可写，写哪个省都是编的，
+ * 而「主食」这个词在 category 里是**形态**、在这里是**这道菜的身份**（「一碗饭」本身）。
+ * 代价之所以可控，是它被守门测试钉死只能有 1 道（test/dishes.test.mjs），永远不会长成第二个
+ * 「家常菜」。除此之外，库里不许再有非地域组。
+ *
+ * 0.3.0 曾留过一个 `desserts`（甜品），理由是"黑森林蛋糕这类德式甜点没有别的家"，
  * 但 0.4.0 拆了：它和 category 里的「甜品」是同一个词，等于同一根轴出现两次；而且每次为了
  * 某一道菜留一个例外，下一次加菜时就会重新变成问题。现在甜品按地区各归各家
- * （双皮奶→粤菜、铜锣烧→日料、黑森林蛋糕→欧洲菜）。同理，「家常菜」作为**风格**
+ * （双皮奶→粤菜、铜锣烧→日料、黑森林蛋糕→中欧菜）。同理，「家常菜」作为**风格**
  * 也拆掉了：它的菜按 region 各自归位。
  *
  * 0.5.0 补到 500 道时又开了三个外餐组（拉美菜、东欧菜、非洲菜），并把「印度菜」改名
  * 成「南亚菜」——那一组要收巴基斯坦、斯里兰卡、孟加拉的菜，再叫印度菜就不老实了。
  * 开组的理由只有一个：**那片地方真有很多菜，而且和邻近组的地域不重叠**，
  * 不是为了把某几道菜塞进去。
+ *
+ * 0.6.0 补到 700 道（+ 主食那一碗）时开了徽菜、赣菜，并把「欧洲菜」拆成「南欧菜」「中欧菜」：
+ * 徽菜是八大菜系里唯一完全缺席的一片地方，赣菜同理一口没占；「欧洲菜」是 0.4.0 从
+ * 「南欧菜」改名来的临时筐，18 道混着六个国家，再涨就是一锅——**按地理拆，不按形态拆**。
  */
 export const GROUPS = {
-  // 中餐 11
+  // 中餐 13
   'sichuan': '川菜',
   'cantonese': '粤菜',
   'jiangzhe-hu': '江浙沪菜',
@@ -64,7 +75,9 @@ export const GROUPS = {
   'fujian-taiwan': '闽台菜',
   'shandong': '鲁菜',
   'hubei': '鄂菜',
-  // 外餐 13
+  'anhui': '徽菜',
+  'jiangxi': '赣菜',
+  // 外餐 14
   'japanese': '日料',
   'korean': '韩式',
   'southeast-asian': '东南亚',
@@ -72,13 +85,22 @@ export const GROUPS = {
   'mexican': '墨西哥菜',
   'italian': '意菜',
   'french': '法餐',
-  'european': '欧洲菜',
+  'southern-european': '南欧菜',
+  'central-european': '中欧菜',
   'anglo-american': '英美菜',
   'middle-eastern': '中东菜',
   'latin-american': '拉美菜',
   'eastern-european': '东欧菜',
   'african': '非洲菜',
+  // 唯一的非地域例外：整个文件只许有白米饭一道（见上面注释）
+  'staples': '主食',
 };
+
+/**
+ * 例外组的道数上限。写死在这里，validate-dishes 和测试都按它判，
+ * 免得「主食」这个筐被后人越塞越多——那正是 0.4.0 拆掉「家常菜」「甜品」的原因。
+ */
+export const GROUP_CAPS = { staples: 1 };
 
 /** prose 里出现这些词就是套话，打回。 */
 export const BANNED = [
@@ -202,6 +224,15 @@ async function main() {
 
   for (const slug of Object.keys(GROUPS)) {
     if (!files.includes(`${slug}.json`)) problems.push(`${slug}.json: 文件不存在`);
+  }
+
+  // 例外组只许那么多道（`staples` 只能是白米饭这一碗）。
+  for (const [slug, cap] of Object.entries(GROUP_CAPS)) {
+    if (!files.includes(`${slug}.json`)) continue;
+    const arr = JSON.parse(await readFile(join(dataDir, `${slug}.json`), 'utf8'));
+    if (arr.length > cap) {
+      problems.push(`${slug}.json: ${arr.length} 道，超过例外组上限 ${cap} 道——「${GROUPS[slug]}」不是收菜的筐`);
+    }
   }
 
   console.log(`文件 ${files.length} 个，菜品 ${total} 道，菜系 ${byCuisine.size} 组`);

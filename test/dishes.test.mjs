@@ -12,17 +12,18 @@ import { loadDishes, findDish, filterDishes, pickFew, pickOne, tasteProfile, TAS
 const HERE = dirname(fileURLToPath(import.meta.url));
 const lib = await loadDishes();
 
-test('库里正好 500 道菜、24 个菜系组', () => {
-  assert.equal(lib.dishes.length, 500, `有 ${lib.dishes.length} 道`);
-  assert.equal(lib.cuisines.length, 24, `有 ${lib.cuisines.length} 个菜系`);
+test('库里正好 700 道地域菜 + 白米饭 1 道 = 701 道 / 28 个菜系组', () => {
+  // 700 是地域菜的契约（中餐 420 + 外餐 280），白米饭是唯一的非地域例外，单独算一道。
+  assert.equal(lib.dishes.length, 701, `有 ${lib.dishes.length} 道`);
+  assert.equal(lib.cuisines.length, 28, `有 ${lib.cuisines.length} 个菜系`);
 });
 
-test('中餐占六成左右（0.5.0 有意往中餐偏）', () => {
+test('中餐占六成左右（0.5.0 起有意往中餐偏）', () => {
   const cn = ['川菜', '粤菜', '江浙沪菜', '北方菜', '湘菜', '西南菜', '东北菜', '西北菜',
-    '闽台菜', '鲁菜', '鄂菜'];
+    '闽台菜', '鲁菜', '鄂菜', '徽菜', '赣菜'];
   const cnCount = lib.dishes.filter((d) => cn.includes(d.cuisine)).length;
   const ratio = cnCount / lib.dishes.length;
-  assert.ok(ratio >= 0.55 && ratio <= 0.65, `中餐占比 ${ratio.toFixed(2)}，偏离六成太远`);
+  assert.ok(ratio >= 0.57 && ratio <= 0.65, `中餐占比 ${ratio.toFixed(2)}，偏离六成太远`);
 });
 
 test('每组都不薄：没有哪一组少于 10 道', () => {
@@ -30,9 +31,30 @@ test('每组都不薄：没有哪一组少于 10 道', () => {
   const n = {};
   for (const d of lib.dishes) n[d.cuisine] = (n[d.cuisine] ?? 0) + 1;
   for (const [c, v] of Object.entries(n)) {
+    if (c === '主食') continue; // 主食是唯一的例外组，见下面那条守门测试
     assert.ok(v >= 10, `「${c}」只有 ${v} 道`);
   }
-  assert.equal(Object.keys(n).length, 24, '有菜系没有菜');
+  assert.equal(Object.keys(n).length, 28, '有菜系没有菜');
+});
+
+test('守门：主食组只能有白米饭这一道', () => {
+  // 0.6.0 破例开了 staples（cuisine = 主食），理由是白米饭不属于任何一片地方、
+  // 写哪个省都是编的。0.4.0 拆掉「家常菜」「甜品」正是因为例外组会越收越多，
+  // 变成下一个垃圾场——所以这里把上限钉死，加第二道就直接红。
+  // 注意：上限写在 validate-dishes.mjs 的 GROUP_CAPS 里，这里是它的镜像。
+  const staple = lib.dishes.filter((d) => d.cuisine === '主食');
+  assert.equal(staple.length, 1, `主食组有 ${staple.length} 道，只能是白米饭这一道`);
+  assert.equal(staple[0].name, '白米饭');
+  assert.equal(staple[0].category, '主食');
+  // 反向确认：别的菜系里不许再冒出一个「主食」之外的非地域组名。
+  const cnRegions = ['川菜', '粤菜', '江浙沪菜', '北方菜', '湘菜', '西南菜', '东北菜', '西北菜',
+    '闽台菜', '鲁菜', '鄂菜', '徽菜', '赣菜'];
+  const foreign = ['日料', '韩式', '东南亚', '南亚菜', '墨西哥菜', '意菜', '法餐', '南欧菜',
+    '中欧菜', '英美菜', '中东菜', '拉美菜', '东欧菜', '非洲菜'];
+  const known = new Set([...cnRegions, ...foreign, '主食']);
+  for (const c of lib.cuisines) {
+    assert.ok(known.has(c), `出现了没登记在组表里的菜系「${c}」——非地域组不许再开`);
+  }
 });
 
 test('形态组已经解散：cuisine 里不该再出现「汤羹/面点主食/中式小吃」这类形态名', () => {
@@ -47,7 +69,7 @@ test('库里一个非地域组都不剩：没有甜品、也没有家常菜', ()
   // 「甜品」在 category 里已经有一个同名值，菜系里再放一个就是同一根轴出现两次；
   // 「家常菜」是风格不是地域。两个都拆了，菜按 region 各归各家。
   // 「印度菜」0.5.0 改名「南亚菜」（要收巴基斯坦、斯里兰卡、孟加拉）。
-  for (const w of ['甜品', '家常菜', '南欧菜', '云贵菜', '江浙菜', '印度菜']) {
+  for (const w of ['甜品', '家常菜', '云贵菜', '江浙菜', '印度菜', '欧洲菜']) {
     assert.ok(!lib.cuisines.includes(w), `cuisine 里还留着非地域组「${w}」`);
   }
   // 反向确认：原来在甜品组的菜，现在确实散到别的菜系去了。
@@ -55,6 +77,10 @@ test('库里一个非地域组都不剩：没有甜品、也没有家常菜', ()
   assert.ok(fromDesserts.length >= 10, '甜品这个类别本身还在，只是不再占一个菜系');
   assert.ok(new Set(fromDesserts.map((d) => d.cuisine)).size >= 5,
     '甜品类别的菜应该散在至少 5 个菜系里，而不是挤回一个组');
+  // 同理「主食」这个非地域组只许有白米饭一道，不许长成第二个甜品组。
+  const staple = lib.dishes.filter((d) => d.category === '主食');
+  assert.ok(new Set(staple.map((d) => d.cuisine)).size >= 8,
+    '主食这个类别应该散在很多菜系里，只有白米饭归在「主食」组');
 });
 
 test('0.5.0 新开的三个外餐组都在，而且各自有菜', () => {
@@ -67,6 +93,39 @@ test('0.5.0 新开的三个外餐组都在，而且各自有菜', () => {
   assert.ok(sa.length >= 12, `南亚菜只有 ${sa.length} 道`);
   assert.ok(/巴基斯坦|斯里兰卡|孟加拉/.test(sa.map((d) => d.region).join(' ')),
     '南亚菜里应该出现印度以外的国家，否则改名没意义');
+});
+
+test('0.6.0 新开的徽菜、赣菜都在，且不是只有一两道撑门面', () => {
+  for (const c of ['徽菜', '赣菜']) {
+    assert.ok(lib.cuisines.includes(c), `缺菜系「${c}」`);
+    const list = filterDishes(lib, { cuisine: c });
+    assert.ok(list.length >= 20, `「${c}」只有 ${list.length} 道`);
+    // region 必须真落在那片地方，不能只是挂个名字。
+    const re = c === '徽菜' ? /安徽/ : /江西/;
+    const bad = list.filter((d) => !re.test(d.region));
+    assert.equal(bad.length, 0, `${c}里这些菜的 region 不在本地：${bad.map((d) => `${d.name}(${d.region})`).join('、')}`);
+    // 一个组别全是热菜。
+    assert.ok(new Set(list.map((d) => d.category)).size >= 4, `${c}的类别太单一`);
+  }
+});
+
+test('0.6.0 把欧洲菜拆成南欧菜 + 中欧菜，按地理分', () => {
+  // 「欧洲菜」是 0.4.0 从「南欧菜」改名来的临时筐，18 道混着六个国家，再涨就是一锅。
+  assert.ok(!lib.cuisines.includes('欧洲菜'), '「欧洲菜」应该已经拆掉');
+  const south = filterDishes(lib, { cuisine: '南欧菜' });
+  const central = filterDishes(lib, { cuisine: '中欧菜' });
+  assert.ok(south.length >= 15, `南欧菜只有 ${south.length} 道`);
+  assert.ok(central.length >= 15, `中欧菜只有 ${central.length} 道`);
+  // 判据是地理：南欧只有西/葡/希，中欧只有德/奥/比/荷/瑞。
+  const S = /西班牙|葡萄牙|希腊|巴斯克|瓦伦西亚|安达卢西亚|加利西亚|加泰|马德里|里斯本|阿连特茹|波尔图|克里特|塞戈维亚/;
+  const C = /德国|奥地利|比利时|荷兰|瑞士|慕尼黑|纽伦堡|维也纳|布鲁塞尔|巴伐利亚|豪达|纳沙泰尔|伯尔尼|黑森林/;
+  const wrongSouth = south.filter((d) => !S.test(d.region));
+  const wrongCentral = central.filter((d) => !C.test(d.region));
+  assert.equal(wrongSouth.length, 0, `南欧菜里混进了非南欧：${wrongSouth.map((d) => `${d.name}(${d.region})`).join('、')}`);
+  assert.equal(wrongCentral.length, 0, `中欧菜里混进了非中欧：${wrongCentral.map((d) => `${d.name}(${d.region})`).join('、')}`);
+  // 意菜、法餐各自成组，没被并进这两个。
+  const italianNames = filterDishes(lib, { cuisine: '意菜' }).map((d) => d.region).join(' ');
+  assert.ok(/意大利|罗马|米兰|那不勒斯|托斯卡纳/.test(italianNames), '意菜的 region 应该都还在意大利');
 });
 
 test('每个类别下面都能报出它自己有哪些菜系', () => {

@@ -25,5 +25,5 @@ for (const f of (await readdir('src/data')).filter((x) => x.endsWith('.json'))) 
   if (wrong.length) { console.log(`✗ ${f}：${wrong.length} 道 cuisine 不是「${want}」（例：${wrong[0].name}=${wrong[0].cuisine}）`); bad += 1; }
 }
 
-console.log(bad ? `\n❌ ${bad} 处不一致` : '\n✓ 组表、GROUPS、24 个数据文件三方严格一致');
+console.log(bad ? `\n❌ ${bad} 处不一致` : `\n✓ 组表、GROUPS、${(await readdir('src/data')).filter((x) => x.endsWith('.json')).length} 个数据文件三方严格一致`);
 if (bad) process.exitCode = 1;
