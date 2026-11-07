@@ -1296,7 +1296,7 @@ export class FeastWorld {
       ],
       panels: [
         { id: 'menu', title: p.menu.title, description: p.menu.description, getMethods: ['list', 'dish', 'random', 'pending', 'together'] },
-        { id: 'combo', title: p.combo.title, description: p.combo.description, getMethods: ['list', 'pick'] },
+        { id: 'combo', title: p.combo.title, description: p.combo.description, getMethods: ['list'] },
         { id: 'history', title: p.history.title, description: p.history.description, getMethods: ['list'] },
       ],
       invoke: (panel, method, args) => this.#invoke(panel, method, args ?? []),
@@ -1385,16 +1385,6 @@ export class FeastWorld {
               region: d.region, keywords: d.keywords,
             })),
           };
-        }
-        case 'pick': {
-          // 现配一桌（不存）：给面板"看看会配出什么"用。
-          const [opts] = args;
-          const o = opts && typeof opts === 'object' ? opts : {};
-          const combo = adhocCombo({
-            size: o.size ?? this.#cfgNumber('comboSize', 1, 12),
-            cuisine: o.cuisine ?? '',
-          });
-          return { ok: true, combo: this.#panelCombo(combo, true) };
         }
         case 'save': {
           const [raw] = args;

@@ -307,7 +307,7 @@ test('feast_combo：限了菜系，一桌都在那个菜系里', async () => {
   await world.stop();
 });
 
-test('套餐面板：list 给出预设和自定义，pick 现配不存', async () => {
+test('套餐面板：list 给出预设和自定义，每套都现配出菜', async () => {
   const { world } = await makeWorld();
   const ui = world.webUi('zh');
   const list = await ui.invoke('combo', 'list', [{}]);
@@ -319,13 +319,8 @@ test('套餐面板：list 给出预设和自定义，pick 现配不存', async (
     assert.ok(Array.isArray(p.dishes) && p.dishes.length, `${p.name} 没现配出菜`);
     assert.ok(p.line, `${p.name} 缺一句口味话`);
   }
-
-  const picked = await ui.invoke('combo', 'pick', [{ size: 2 }]);
-  assert.equal(picked.ok, true);
-  assert.equal(picked.combo.dishes.length, 2);
-  // pick 只是看看，不该往她面前摆东西。
-  const after = await ui.invoke('menu', 'pending', []);
-  assert.equal(after.pending, null, 'pick 不该真的端过去');
+  // 「看看会配出什么」在面板里走的是换种子重新 list（预览 = 端过去的），
+  // 服务端的 pick 方法从来没人调，已删——这里不再测它。
   await world.stop();
 });
 

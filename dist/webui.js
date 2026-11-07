@@ -167,7 +167,6 @@ const TABLE = {
     comboConfirmRemove: '再点一次就删掉',
     comboEdit: '改',
     comboEmpty: '这一桌配不出菜来。',
-    comboPack: '收起',
     comboHint: '点菜卡选或取消；选好了存下来，下次直接端。',
     comboTable: '这一桌',
     comboLeft: (n, t) => `还剩 ${n} / ${t} 道`,
@@ -264,7 +263,6 @@ const TABLE = {
     comboConfirmRemove: 'Click again to delete',
     comboEdit: 'Edit',
     comboEmpty: 'Nothing resolves for this table.',
-    comboPack: 'Collapse',
     comboHint: 'Tap cards to pick or unpick; save the table and serve it later.',
     comboTable: 'This table',
     comboLeft: (n, t) => `${n} of ${t} left`,
@@ -401,6 +399,37 @@ const menuPanel = {
     const wrap = el('div');
     root.appendChild(wrap);
 
+    /**
+     * 重拉会先摘掉整棵树再重画：正在打字的搜索框（或会话条的记一笔输入框）
+     * 会跟着被摘掉，焦点、光标、没提交的草稿全丢。这里把「刚才焦点在哪个位子、
+     * 光标在哪」存下来，重画完放回去。位子用节点身份认（searchNode/noteNode），
+     * 因为重画后节点是新的，身份对不上。
+     */
+    let focusSave = null;
+    let searchNode = null;
+    let noteNode = null;
+    /** 会话条「记一笔」没提交的草稿：结构变了整条重画时别把人打了一半的字吞掉。 */
+    let noteDraft = '';
+    const saveFocus = () => {
+      const a = document.activeElement;
+      // a 得先非空：谁都没聚焦时 a 是 null，而 searchNode 这时也是 null，
+      // null === null 会误判成"焦点在搜索框上"。
+      if (a && (a === searchNode || a === noteNode)) {
+        focusSave = { note: a === noteNode, start: a.selectionStart, end: a.selectionEnd };
+      }
+    };
+    const loadFocus = () => {
+      const f = focusSave;
+      focusSave = null;
+      if (!f) return;
+      const node = f.note ? noteNode : searchNode;
+      if (!node) return;
+      node.focus();
+      if (typeof f.start === 'number') {
+        try { node.setSelectionRange(f.start, f.end); } catch { /* 光标超界就算了 */ }
+      }
+    };
+
     /** 还剩几分钟（向上取整：不到一分钟也算"1 分钟"，别显示 0）。 */
     function remainMin(p) {
       const ttl = Number(p?.ttlMin) || 30;
@@ -464,9 +493,17 @@ const menuPanel = {
         const bar = el('div', 'feast-together-bar');
         const note = el('input', 'feast-search');
         note.placeholder = t.togetherTakePh;
+        // 她那边一动（分了一口、先收了这顿）整条会重画：草稿存外面，重画带回来。
+        note.value = noteDraft;
+        note.oninput = () => { noteDraft = String(note.value ?? ''); };
+        noteNode = note;
         bar.appendChild(note);
         const say = el('button', null, t.togetherTake);
-        say.onclick = () => void act('take', [{ note: String(note.value ?? '').trim() }]);
+        say.onclick = () => {
+          const text = String(note.value ?? '').trim();
+          noteDraft = ''; // 记下了就清草稿，重画后输入框跟着清空
+          void act('take', [{ note: text }]);
+        };
         bar.appendChild(say);
         box.appendChild(bar);
 
@@ -557,6 +594,7 @@ const menuPanel = {
     }
 
     async function load() {
+      saveFocus(); // 摘树之前存：一摘焦点就没了，事后想存也摸不到
       wrap.replaceChildren(el('div', 'feast-empty', t.loading));
       let data;
       try {
@@ -580,6 +618,7 @@ const menuPanel = {
       wrap.replaceChildren();
       pendingBox = null;
       togetherBox = null;
+      noteNode = null; // 会话条这一趟没画记一笔的话，别让恢复焦点摸到旧节点
 
       // 一起吃饭（会话条）放在工具条下面、等待条上面：
       // "我们一起吃" 比 "我端了东西给你" 更贴顶，两者同时存在时也读得通。
@@ -591,14 +630,21 @@ const menuPanel = {
       search.type = 'search';
       search.placeholder = t.search;
       search.value = state.filter.query ?? '';
+      searchNode = search;
       let timer = null;
-      search.oninput = () => {
+      const queueSearch = () => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
           state.filter.query = String(search.value ?? '').trim();
           void load();
         }, 260);
       };
+      search.oninput = (e) => {
+        // 输入法组词中别重拉：树一摘，组了一半的词当场散掉。
+        if (e.isComposing) return;
+        queueSearch();
+      };
+      search.addEventListener('compositionend', queueSearch);
       bar.appendChild(search);
 
       // 先形态，后菜系。菜系下拉跟着已选类别收窄——选了「汤羹」就不该再列「墨西哥菜」，
@@ -665,6 +711,7 @@ const menuPanel = {
 
       if (!data.items?.length) {
         wrap.appendChild(el('div', 'feast-empty', t.empty));
+        loadFocus();
         return;
       }
 
@@ -685,6 +732,7 @@ const menuPanel = {
         grid.appendChild(card);
       }
       wrap.appendChild(grid);
+      loadFocus(); // 重画完把焦点和光标放回搜索框（或会话条输入框）
     }
 
     async function openDetail(id) {
@@ -1116,7 +1164,16 @@ const comboPanel = {
     searchInput.className = 'feast-search';
     searchInput.placeholder = t.search;
     searchInput.value = build.q;
-    searchInput.oninput = () => { build.q = String(searchInput.value ?? '').trim(); render(); };
+    searchInput.oninput = (e) => {
+      // 组词中不重画：input 会被摘下再挂回，组了一半的词当场散掉。
+      if (e.isComposing) return;
+      build.q = String(searchInput.value ?? '').trim();
+      render();
+    };
+    searchInput.addEventListener('compositionend', () => {
+      build.q = String(searchInput.value ?? '').trim();
+      render();
+    });
 
     function buildZone() {
       const box = el('div', 'feast-build');
@@ -1258,6 +1315,14 @@ const comboPanel = {
 
     function render() {
       const scrollTop = wrap.scrollTop;
+      // .feast-pick 自己是滚动容器：只救外层 wrap 的话，点靠下的 chip 会跳回列表顶。
+      const pick = wrap.querySelector('.feast-pick');
+      const pickScroll = pick ? pick.scrollTop : null;
+      // 攒桌区的搜索框和名字框是常驻节点（每次重画重新挂回同一颗）：摘下再挂回会丢
+      // 焦点和光标，存的是节点本身，重画完放回去。
+      const a = document.activeElement;
+      const focusNode = (a === searchInput || a === nameInput) ? a : null;
+      const focusSel = focusNode ? { start: focusNode.selectionStart, end: focusNode.selectionEnd } : null;
       wrap.replaceChildren();
 
       if (data?.pending) wrap.appendChild(pendingStrip(data.pending));
@@ -1279,6 +1344,14 @@ const comboPanel = {
       wrap.appendChild(el('div', 'feast-combo-h', t.comboBuild));
       wrap.appendChild(buildZone());
       wrap.scrollTop = scrollTop;
+      const nextPick = wrap.querySelector('.feast-pick');
+      if (nextPick && typeof pickScroll === 'number') nextPick.scrollTop = pickScroll;
+      if (focusNode) {
+        focusNode.focus();
+        if (typeof focusSel?.start === 'number') {
+          try { focusNode.setSelectionRange(focusSel.start, focusSel.end); } catch { /* 光标超界就算了 */ }
+        }
+      }
     }
 
     // ---- 启动 ------------------------------------------------------------

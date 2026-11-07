@@ -33,6 +33,9 @@ class Node {
     this.placeholder = '';
     this.disabled = false;
     this.parentNode = null;
+    // 真 <input> 的光标位：面板恢复焦点时读它、setSelectionRange 写它。
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
   }
 
   get textContent() {
@@ -95,6 +98,16 @@ class Node {
     (this._listeners[type] ??= []).push(fn);
   }
 
+  /** 面板重画后会调它恢复焦点：真 DOM 里 focus() 会把 activeElement 指过来。 */
+  focus() {
+    document.activeElement = this;
+  }
+
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
+
   /** 触发一个事件（onclick 这类属性也一并触发）。 */
   fire(type = 'click') {
     for (const fn of this._listeners[type] ?? []) fn({ type, target: this });
@@ -140,6 +153,7 @@ class Node {
 globalThis.document = {
   createElement: (tag) => new Node(tag),
   createTextNode: (t) => Object.assign(new Node('#text'), { _text: String(t) }),
+  activeElement: null,
 };
 
 /**
@@ -237,6 +251,7 @@ async function mountPanels({ language = 'zh', failList = false, clock = null } =
   async function mount(id) {
     ctx.panelId = id;
     root.replaceChildren();
+    document.activeElement = null; // 上一个用例留在输入框里的焦点别漏过来
     invocations.length = 0;
     panels.lastHandle = (await bundle.default.panels[id].mount(ctx)) ?? null;
     return root;
@@ -823,6 +838,181 @@ test('套餐面板：攒一桌存下来，重开面板还在', async () => {
     const again = await mount('combo');
     await waitFor(() => again.textContent.includes('我的两菜桌'), '重开面板后自定义桌还在');
     assert.ok(again.querySelectorAll('.feast-set').length >= 9, '预设 8 + 自定义 1');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：搜索框打完字重拉，焦点和光标还在输入框里（组词中不重拉）', async () => {
+  const { mount, world, panels } = await mountPanels();
+  try {
+    const root = await mount('menu');
+    const allCount = root.querySelectorAll('.feast-card').length;
+    assert.ok(allCount > 100, '先确认全量卡片在');
+
+    const search = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('搜菜名'));
+    assert.ok(search, '缺搜索框');
+    search.focus();
+    search.value = '豆腐';
+    // 输入法组词中：不该触发重拉（树一摘，组了一半的词就散了）
+    search.oninput({ isComposing: true });
+    await new Promise((r) => setTimeout(r, 350));
+    assert.equal(root.querySelectorAll('.feast-card').length, allCount, '组词中不该重拉');
+
+    search.selectionStart = 2;
+    search.selectionEnd = 2; // 光标在词尾
+    search.fire('compositionend'); // 组词结束才真正去搜
+    await waitFor(() => root.querySelectorAll('.feast-card').length < allCount, '按词筛出结果');
+
+    const active = document.activeElement;
+    assert.ok(active, '重画后焦点还在');
+    assert.equal(active.tagName, 'INPUT', '焦点回到了输入框');
+    assert.equal(active.value, '豆腐', '重画后搜索词还在');
+    assert.equal(active.selectionStart, 2, '光标位置也放回去了');
+    assert.equal(root.findAll((n) => n === active).length, 1, '拿到焦点的输入框在面板里');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：一起吃饭记一笔打到一半，她分一口过来重画也不丢字、不丢焦点', async () => {
+  const { mount, world, panels, intervals } = await mountPanels();
+  try {
+    await world.inviteTogether();
+    const root = await mount('menu');
+    const noteOf = () => root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('我在吃'));
+    const note = noteOf();
+    assert.ok(note, '缺记一笔的输入框');
+    note.focus();
+    note.selectionStart = 4;
+    note.selectionEnd = 4;
+    note.value = '我在吃一碗';
+    note.fire('input');
+    assert.equal(document.activeElement, note, '焦点先落在输入框上');
+
+    // 她分了一口过来：会话条结构变了，走表一拍后整条重画
+    await herTool(world, { action: 'feed', dish: lib.dishes[1].id });
+    const ticker = intervals.find((e) => e.ms === 30_000);
+    assert.ok(ticker, '菜单面板该登记 30 秒的表');
+    ticker.fn();
+    await waitFor(() => root.findByText('接过来'), '她分的一口画出来');
+
+    const next = noteOf();
+    assert.ok(next && next !== note, '输入框被重画成了新节点');
+    assert.equal(next.value, '我在吃一碗', '打了一半的字没被吞');
+    assert.equal(document.activeElement, next, '焦点放回了新的输入框');
+    assert.equal(next.selectionStart, 4, '光标位置放回去了');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：攒桌搜索打字不丢焦点，点靠下的 chip 后滚动位置不跳顶', async () => {
+  const { mount, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const search = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('搜菜名'));
+    assert.ok(search, '缺攒桌搜索框');
+    search.focus();
+    search.value = '豆腐';
+    search.selectionStart = 2;
+    search.selectionEnd = 2;
+    search.fire('input'); // 同步重画
+    assert.equal(document.activeElement, search, '重画后焦点还在同一个搜索框');
+    assert.equal(root.findAll((n) => n === search).length, 1, '搜索框被重新挂回面板');
+    assert.equal(search.selectionStart, 2, '光标位置放回去了');
+    assert.ok(root.querySelector('.feast-pick'), '筛选后勾选区还在');
+
+    // 清掉搜索回到全量，把勾选区滚下去再点 chip：不该弹回顶
+    search.value = '';
+    search.fire('input');
+    const pick = root.querySelector('.feast-pick');
+    assert.ok(pick, '缺勾选区');
+    pick.scrollTop = 250;
+    const chip = root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes('麻婆豆腐'));
+    assert.ok(chip, '全量列表里该有麻婆豆腐');
+    chip.fire('click');
+    const nextPick = root.querySelector('.feast-pick');
+    assert.equal(nextPick.scrollTop, 250, '点 chip 后勾选区不该跳回顶');
+    assert.ok(nextPick.querySelectorAll('.feast-chip').some((c) => c.classList.contains('is-on')
+      && c.textContent.includes('麻婆豆腐')), 'chip 勾上了');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：攒的桌能改（名字和勾选带进攒桌区，保存带 id）', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const chips = () => root.querySelectorAll('.feast-chip');
+    chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    chips().find((c) => c.textContent.includes('东坡肉')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    const input = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('名字'));
+    input.value = '改前桌';
+    input.fire('input');
+    root.querySelectorAll('.feast-set-acts').at(-1).findAll((n) => n.tagName === 'BUTTON')
+      .find((b) => b.textContent.trim() === '攒一桌').fire('click');
+    await waitFor(() => root.textContent.includes('改前桌'), '先攒出一张桌');
+
+    const myCard = () => root.querySelectorAll('.feast-set').find((c) => c.textContent.includes('改前桌'));
+    myCard().findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.trim() === '改').fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    const nameInput = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('名字'));
+    assert.equal(nameInput.value, '改前桌', '名字带进了攒桌区');
+    assert.ok(root.querySelector('.feast-build').textContent.includes('已选 2'), '勾选带进了攒桌区');
+    assert.ok(root.querySelectorAll('.feast-chip').some((c) => c.classList.contains('is-on')
+      && c.textContent.includes('麻婆豆腐')), '原来勾的菜还亮着');
+
+    // 加一道再存：这次 save 要带 id，改的是同一张桌
+    root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes('腌笃鲜')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    root.querySelectorAll('.feast-set-acts').at(-1).findAll((n) => n.tagName === 'BUTTON')
+      .find((b) => b.textContent.trim() === '改').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'save' && i.args[0]?.id), '改桌的保存带 id');
+    const call = invocations.filter((i) => i.method === 'save').pop();
+    assert.equal(call.args[0].name, '改前桌', '名字没变');
+    assert.equal(call.args[0].dishes.length, 3, '改成三道了');
+    await waitFor(() => root.querySelector('.feast-build').textContent.includes('已选 0'), '存完攒桌区清空');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('套餐面板：删要按两次（第一次只亮确认话术，第二次才真删）', async () => {
+  const { mount, invocations, world, panels } = await mountPanels();
+  try {
+    const root = await mount('combo');
+    const chips = () => root.querySelectorAll('.feast-chip');
+    chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    const input = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('名字'));
+    input.value = '待删桌';
+    input.fire('input');
+    root.querySelectorAll('.feast-set-acts').at(-1).findAll((n) => n.tagName === 'BUTTON')
+      .find((b) => b.textContent.trim() === '攒一桌').fire('click');
+    await waitFor(() => root.textContent.includes('待删桌'), '先攒出一张待删的桌');
+
+    const myCard = () => root.querySelectorAll('.feast-set').find((c) => c.textContent.includes('待删桌'));
+    const delOf = (card) => card.findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.trim() === '删');
+    delOf(myCard()).fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(!invocations.some((i) => i.method === 'remove'), '第一次点没真删');
+    assert.ok(myCard().textContent.includes('再点一次就删掉'), '该变成确认话术');
+
+    // 确认态下按钮文案变了，按新文案找到它再点
+    const confirmOf = (card) => card.findAll((n) => n.tagName === 'BUTTON')
+      .find((b) => b.textContent.trim() === '再点一次就删掉');
+    confirmOf(myCard()).fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'remove'), '第二次点才调 remove');
+    await waitFor(() => !root.textContent.includes('待删桌'), '删完列表里没了');
   } finally {
     panels.lastHandle?.dispose?.();
   }
