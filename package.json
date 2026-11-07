@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-feast",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "一桌菜 · 给 Coo 一张会端菜的桌子：800 道带九维口味、香气、口感与实吃描写的菜品（28 个菜系组），她能自己挑、主人能从面板端一道过去，也能整桌端过去（8 套内置套餐 + 自己攒桌），还能和她一起吃一顿、互相喂一口；同一道菜每次吃到的都不一样，吃过什么和口味画像跨天攒着；另有一套可开关的饭点提醒。",
   "license": "MIT",
   "author": "青",
@@ -67,7 +67,7 @@
       },
       "en": {
         "displayName": "Table",
-        "description": "A table that serves food to your Coo: 701 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders are on by default and can be switched off in config."
+        "description": "A table that serves food to your Coo: 800 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders are on by default and can be switched off in config."
       }
     },
     "tags": [
