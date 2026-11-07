@@ -12,9 +12,9 @@ import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, ta
 const HERE = dirname(fileURLToPath(import.meta.url));
 const lib = await loadDishes();
 
-test('库里正好 700 道地域菜 + 白米饭 1 道 = 701 道 / 28 个菜系组', () => {
-  // 700 是地域菜的契约（中餐 420 + 外餐 280），白米饭是唯一的非地域例外，单独算一道。
-  assert.equal(lib.dishes.length, 701, `有 ${lib.dishes.length} 道`);
+test('库里正好 799 道地域菜 + 白米饭 1 道 = 800 道 / 28 个菜系组', () => {
+  // 800 是地域菜的总量（0.6.2 补到 700，再补 99 道饮品甜品到 799），白米饭是唯一的非地域例外，单独算一道。
+  assert.equal(lib.dishes.length, 800, `有 ${lib.dishes.length} 道`);
   assert.equal(lib.cuisines.length, 28, `有 ${lib.cuisines.length} 个菜系`);
 });
 
