@@ -10,8 +10,9 @@
  * 而宿主可能是普通 DOM 也可能是 shadow root，注入 <style> 两边都成立。
  * 颜色主要走宿主主题的自定义属性（--surface/--foreground/--border/--accent…），
  * 自定义属性会继承进 shadow root，所以明暗两套主题都不用自己写。
- * 例外（菜单纸皮肤）：「端给她」等主按钮用固定的印章红 --fe-seal，
- * 菜名用衬线 --fe-serif（宋体系），深浅宿主下都按固定值渲染。
+ * 菜单纸皮肤（深浅宿主都生效）：把暖色颜料按固定比例混进宿主题色
+ * （color-mix：浅底 → 米纸色，深底 → 暖炭色），菜名走衬线 --fe-serif
+ * 与暖调墨 --fe-title，「端给她」等主按钮用固定的印章红 --fe-seal。
  *
  * 两个面板：
  *   menu    —— 翻菜单、看九维口味和实吃描写、点「端给她」
@@ -19,7 +20,7 @@
  */
 
 const CSS = `
-.feast{--fe-line:var(--border,#d3d1c7);--fe-ink:var(--foreground,#2c2c2a);--fe-dim:var(--muted-foreground,#5f5e5a);--fe-card:var(--surface,#fffdf8);--fe-accent:var(--accent,#00a870);--fe-seal:#a32d2d;--fe-serif:var(--font-serif,"Noto Serif SC","Songti SC","SimSun",serif);font:13px/1.6 var(--sans,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);color:var(--fe-ink);padding:4px 2px 24px}
+.feast{--fe-line:color-mix(in srgb,var(--border,#e3e4e3) 88%,#a08050);--fe-ink:var(--foreground,#1b1a1e);--fe-dim:var(--muted-foreground,#5c5c60);--fe-card:color-mix(in srgb,var(--surface,#fbfbfb) 90%,#c9a26a);--fe-accent:var(--accent,#00a870);--fe-seal:#a32d2d;--fe-title:color-mix(in srgb,var(--foreground,#1b1a1e) 92%,#c9a26a);--fe-serif:var(--font-serif,"Noto Serif SC","Songti SC","SimSun",serif);font:13px/1.6 var(--sans,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);color:var(--fe-ink);padding:4px 2px 24px}
 .feast *{box-sizing:border-box}
 .feast-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
 .feast input,.feast select,.feast button{font:inherit;color:inherit;background:var(--fe-card);border:1px solid var(--fe-line);border-radius:var(--radius-sm,6px);padding:5px 9px;outline:none}
@@ -39,7 +40,7 @@ const CSS = `
 .feast-card{text-align:left;border:1px solid var(--fe-line);border-radius:var(--radius-md,10px);background:var(--fe-card);padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:4px;transition:border-color .12s,transform .12s}
 .feast-card:hover{border-color:var(--fe-accent);transform:translateY(-1px)}
 .feast-card-h{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.feast-card-n{font-family:var(--fe-serif);font-weight:600;font-size:14px}
+.feast-card-n{font-family:var(--fe-serif);font-weight:600;font-size:14px;color:var(--fe-title)}
 .feast-card-m{color:var(--fe-dim);font-size:11.5px}
 .feast-card-s{color:var(--fe-dim);font-size:12px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .feast-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
@@ -47,7 +48,7 @@ const CSS = `
 .feast-once{font-size:11px;color:var(--fe-accent);border:1px solid var(--fe-accent);border-radius:999px;padding:1px 6px;white-space:nowrap}
 .feast-detail{display:flex;flex-direction:column;gap:12px;max-width:760px}
 .feast-detail-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;border-bottom:3px double var(--fe-line);padding-bottom:10px}
-.feast-detail-n{font-family:var(--fe-serif);font-size:19px;font-weight:600;line-height:1.3}
+.feast-detail-n{font-family:var(--fe-serif);font-size:19px;font-weight:600;line-height:1.3;color:var(--fe-title)}
 .feast-detail-m{color:var(--fe-dim);font-size:12px;margin-top:2px}
 .feast-block{border:1px solid var(--fe-line);border-radius:var(--radius-md,10px);background:var(--fe-card);padding:10px 13px}
 .feast-block-t{font-size:11px;letter-spacing:.06em;color:var(--fe-dim);margin-bottom:6px;text-transform:uppercase}
@@ -82,7 +83,7 @@ const CSS = `
 .feast-combo-h:first-of-type{margin-top:4px}
 .feast-set{border:1px solid var(--fe-line);border-radius:var(--radius-md,10px);background:var(--fe-card);padding:10px 13px;display:flex;flex-direction:column;gap:7px}
 .feast-set-h{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
-.feast-set-n{font-family:var(--fe-serif);font-weight:600;font-size:14px}
+.feast-set-n{font-family:var(--fe-serif);font-weight:600;font-size:14px;color:var(--fe-title)}
 .feast-set-m{color:var(--fe-dim);font-size:11.5px}
 .feast-set-d{color:var(--fe-dim);font-size:12px;line-height:1.5}
 .feast-set-dishes{display:flex;gap:5px;flex-wrap:wrap}
