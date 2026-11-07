@@ -1,7 +1,7 @@
 ﻿﻿# install.ps1 —— 把「一桌菜」装进 Coo（Windows）
 #
 # 用法：
-#   powershell -ExecutionPolicy Bypass -File .\install.ps1 -CooRoot "C:\Users\asus\Coopanion"
+#   powershell -ExecutionPolicy Bypass -File .\install.ps1 -CooRoot "E:\Coopanion"
 #   预演：... -DryRun      （只打印会做什么，不写任何文件）
 #
 # 做的事：
