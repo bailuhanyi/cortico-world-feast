@@ -11,7 +11,7 @@
  * 临时目录故意不删：见 life.test.mjs 末尾的说明（删目录会被沙箱当批量删除拦下）。
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -20,6 +20,7 @@ import { FeastWorld, FEAST_TOOL_DECLS } from '../src/world.js';
 import { feastDefinition } from '../src/definition.js';
 import { DEFAULTS, EVENT_LIFE_FREE, EVENT_LIFE_MOMENT, EVENT_LIFE_PLAN } from '../src/config.js';
 import { addDays, dateLabel, listDays, readDay, readPlay, templateDay, writeDay } from '../src/life/index.js';
+import { clearWardrobeCache } from '../src/life/wardrobe.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP_ROOT = join(HERE, '.tmp');
@@ -903,6 +904,160 @@ test('自由时间：清「她的一天」把记录一起清掉，但不碰吃�
   assert.ok((await tools.feast_history({})).text.includes('吃过 1 回'), '把吃过的也清了');
   const combos = await world.webUi('zh').invoke('combo', 'list', [{}]);
   assert.equal(combos.custom.length, 1, '把攒的套餐也清了');
+  await world.stop();
+});
+
+// --------------------------------------------------------------------------
+// 生图工作室联动（0.7.1）：World 接缝
+// --------------------------------------------------------------------------
+
+/** 在 dataDir 下建一个迷你 imggen-library：1 人物（带情境穿搭 + 默认服饰）、2 衣服、1 场景。 */
+async function makeImggenLib(dataDir) {
+  const root = join(dataDir, 'imggen-library');
+  const mk = async (kind, name, obj) => {
+    const d = join(root, kind, name);
+    await mkdir(d, { recursive: true });
+    await writeFile(join(d, 'entry.json'), JSON.stringify(obj), 'utf8');
+  };
+  await mk('characters', '青', {
+    name: '青', aliases: ['深深'], tags: ['蓝发'],
+    defaultOutfit: '女仆裙', outfitByContext: { 睡前: '睡衣', 通勤: '通勤衬衫' },
+  });
+  await mk('outfits', '睡衣', { name: '睡衣', aliases: ['居家服'], tags: ['睡衣'] });
+  await mk('outfits', '通勤衬衫', { name: '通勤衬衫', aliases: ['衬衫'], tags: ['通勤'] });
+  await mk('outfits', '女仆裙', { name: '女仆裙', aliases: ['女仆装'], tags: ['洛丽塔'] });
+  await mk('scenes', '卧室', { name: '卧室', aliases: [], tags: [] });
+}
+
+test('联动：库非空时 envPromptVars 带指向生图工作室的一句', async () => {
+  clearWardrobeCache();
+  const { world, runTick } = await makeWorld();
+  await makeImggenLib(world.dataDir);
+  await runTick(); // 拨一拍让 #lifeEnsure 刷新 wardrobe 快照（envPromptVars 同步读它）
+  const vars = world.envPromptVars();
+  assert.ok(vars.feast_life_block.includes('生图工作室'), '前缀里要有指向句');
+  assert.ok(vars.feast_life_block.includes('青'), '指向句带人物名');
+  await world.stop();
+});
+
+test('联动：请她写明天的事件正文里列出素材库', async () => {
+  clearWardrobeCache();
+  const clock = { t: NIGHT };
+  // 先建 dataDir + 库，再 makeWorld：start() 里就会 #lifeEnsure 推 plan，
+  // 必须那时库已就绪，否则 plan 正文（start 时推的那条）不带库。
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'lifew-lib-'));
+  await makeImggenLib(dataDir);
+  const { world, lifeEvents } = await makeWorld({ now: () => clock.t, dataDir });
+  const plan = lifeEvents(EVENT_LIFE_PLAN).at(-1);
+  assert.ok(plan, '该推了一条 plan 事件');
+  assert.ok(plan.text.includes('睡衣'), 'plan 正文列出衣柜');
+  assert.ok(plan.text.includes('卧室'), 'plan 正文列出场景');
+  assert.ok(plan.text.includes('睡前→睡衣'), 'plan 正文列出情境穿搭');
+  await world.stop();
+});
+
+test('联动：交回日程后自动补 outfit 并落盘（不覆盖她自己填的）', async () => {
+  clearWardrobeCache();
+  const { world, tools, dataDir, runTick } = await makeWorld();
+  await makeImggenLib(dataDir);
+  await runTick();
+  const tomorrow = addDays(DAY, 1);
+  await tools.feast_life_plan({
+    date: tomorrow,
+    dayType: 'restday',
+    title: '在家一天',
+    items: [
+      { start: '00:00', end: '08:00', activity: '睡觉', situation: '睡前' },
+      { start: '08:00', end: '12:00', activity: '起床', situation: '刚睡醒' },
+      { start: '12:00', end: '18:00', activity: '在家玩', outfit: '运动服' },
+      { start: '18:00', end: '24:00', activity: '准备睡觉', situation: '睡前' },
+    ],
+  });
+  const day = await readDay(dataDir, tomorrow);
+  assert.ok(day, '交回的日程该落盘');
+  assert.equal(day.items[0].outfit, '睡衣', '睡前段补睡衣（context）');
+  assert.equal(day.items[1].outfit, '睡衣', '刚睡醒段补睡衣（context）');
+  assert.equal(day.items[2].outfit, '运动服', '模型填的不覆盖');
+  assert.equal(day.items[3].outfit, '睡衣', '睡前段补睡衣（context）');
+  await world.stop();
+});
+
+test('联动：关掉 lifeWardrobeOn 时不补、不注入、plan 不带库', async () => {
+  clearWardrobeCache();
+  const clock = { t: NIGHT };
+  const { world, tools, dataDir, runTick, lifeEvents } = await makeWorld({
+    now: () => clock.t, cfg: { lifeWardrobeOn: false },
+  });
+  await makeImggenLib(dataDir);
+  await runTick();
+  const vars = world.envPromptVars();
+  assert.ok(!vars.feast_life_block.includes('生图工作室'), '关掉后前缀不带指向句');
+  const plan = lifeEvents(EVENT_LIFE_PLAN).at(-1);
+  assert.ok(plan);
+  assert.ok(!plan.text.includes('睡衣'), '关掉后 plan 不列库');
+  // 交回的日程不补
+  const tomorrow = addDays(DAY, 1);
+  await tools.feast_life_plan({
+    date: tomorrow, dayType: 'restday', items: [
+      { start: '00:00', end: '08:00', activity: '睡觉', situation: '睡前' },
+      { start: '08:00', end: '24:00', activity: '在家', situation: '休闲' },
+    ],
+  });
+  const day = await readDay(dataDir, tomorrow);
+  assert.ok(!day.items[0].outfit, '关掉后不补 outfit');
+  await world.stop();
+});
+
+test('联动：库读不到时静默降级，日程照常、前缀不炸', async () => {
+  clearWardrobeCache();
+  const { world, tools, dataDir, runTick } = await makeWorld(); // 不建 imggen-library
+  await runTick();
+  const vars = world.envPromptVars();
+  assert.ok(!vars.feast_life_block.includes('生图工作室'), '没库不带指向句');
+  assert.ok(vars.feast_life_block.length > 0, '前缀照常有（她的一天还在）');
+  // 交回日程不补，但正常落盘
+  const tomorrow = addDays(DAY, 1);
+  await tools.feast_life_plan({
+    date: tomorrow, dayType: 'restday', items: [
+      { start: '00:00', end: '12:00', activity: '睡觉', situation: '睡前' },
+      { start: '12:00', end: '24:00', activity: '在家' },
+    ],
+  });
+  const day = await readDay(dataDir, tomorrow);
+  assert.ok(day, '没库也照常落盘');
+  assert.ok(!day.items[0].outfit, '没库不补');
+  await world.stop();
+});
+
+test('联动：imggen 改了 libraryRoot，feast 自动跟上（不靠默认路径）', async () => {
+  clearWardrobeCache();
+  // 造一个独立 parent：config.json 在 parent/，dataDir 在 parent/data，
+  // 库建在 parent/自定义库/ 下（不是默认的 parent/data/imggen-library）。
+  const parent = join(TMP_ROOT, `libroot-${Date.now()}`);
+  const dataDir = join(parent, 'data');
+  await mkdir(dataDir, { recursive: true });
+  const customLib = join(parent, '自定义生图库');
+  await writeFile(join(parent, 'config.json'), JSON.stringify({
+    worlds: { imggen: { libraryRoot: customLib } },
+  }), 'utf8');
+  // 在自定义库路径下建迷你库
+  const mk = async (kind, name, obj) => {
+    const d = join(customLib, kind, name);
+    await mkdir(d, { recursive: true });
+    await writeFile(join(d, 'entry.json'), JSON.stringify(obj), 'utf8');
+  };
+  await mk('characters', '青', {
+    name: '青', aliases: ['深深'], tags: ['蓝发'],
+    defaultOutfit: '女仆裙', outfitByContext: { 睡前: '睡衣' },
+  });
+  await mk('outfits', '睡衣', { name: '睡衣', aliases: ['居家服'], tags: ['睡衣'] });
+  await mk('outfits', '女仆裙', { name: '女仆裙', aliases: ['女仆装'], tags: ['洛丽塔'] });
+
+  const { world, runTick } = await makeWorld({ dataDir });
+  await runTick();
+  const vars = world.envPromptVars();
+  assert.ok(vars.feast_life_block.includes('生图工作室'), '库在自定义路径下也读到了 → 前缀带指向句');
+  assert.ok(vars.feast_life_block.includes('青'), '指向句带人物名');
   await world.stop();
 });
 

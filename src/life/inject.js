@@ -26,7 +26,7 @@ function timeLabel(precision, minute) {
 const placeOf = (it) => (it.scene || it.location ? `（${it.scene || it.location}）` : '');
 
 /** 环境提示词里那一整段；关掉「她的一天」时返回空字符串。 */
-export function envBlock({ today, tomorrow = null, cfg = {}, tz = 'Asia/Shanghai', nowMs = Date.now(), who = {} } = {}) {
+export function envBlock({ today, tomorrow = null, cfg = {}, tz = 'Asia/Shanghai', nowMs = Date.now(), who = {}, wardrobe = '' } = {}) {
   if (cfg.lifeEnabled === false) return '';
   const z = zonedNow(tz, nowMs);
   const lines = [
@@ -50,6 +50,8 @@ export function envBlock({ today, tomorrow = null, cfg = {}, tz = 'Asia/Shanghai
   }
   const voice = voiceText(cfg, who);
   if (voice) lines.push(voice);
+  // 生图联动指向句：库非空才加（wardrobeHintLine 的结果），进前缀（一天变一两次级别，不变）。
+  if (wardrobe) lines.push(wardrobe);
   lines.push(priorityLine(who.name));
   lines.push(TOOL_LINE);
   return safe(lines.join('\n'));

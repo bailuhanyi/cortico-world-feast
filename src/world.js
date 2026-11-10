@@ -30,6 +30,10 @@ import {
   pickDayType, planEventText, planFreeTick, playDoneText, readDay, readPlay, recentSummary, recordPlay,
   segmentKey, skipFreeToday, templateDay, writeDay, writePlay, zonedNow,
 } from './life/index.js';
+import {
+  autoOutfit, clearWardrobeCache, emptyWardrobe, enrichItems, loadWardrobe,
+  wardrobeHintLine, wardrobeText,
+} from './life/wardrobe.js';
 import { briefLine, filterDishes, findDish, findDishExact, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
 import {
   MAX_TABLE, PRESETS, adhocCombo, comboIdFrom, comboProblem, comboSize, findCombo, findPreset,
@@ -314,6 +318,8 @@ export class FeastWorld {
   #lifeSegment = null;
   /** 今天的自由时间记录（叫醒过哪几档、记了几笔）。懒加载，见 #freePlay。 */
   #play = null;
+  /** 生图素材库快照：envPromptVars() 是同步的，不能 await，读这里。tick 里刷新（见 #lifeEnsure）。 */
+  #wardrobe = emptyWardrobe();
 
   constructor(opts = {}) {
     this.id = ID;
@@ -397,6 +403,31 @@ export class FeastWorld {
     return this.cfg?.lifeEnabled !== false;
   }
 
+  /** 生图联动总开关。lifeWardrobeOn 关掉=不扫库、不列、不补、不注入。 */
+  #wardrobeOn() {
+    return this.#lifeOn() && this.cfg?.lifeWardrobeOn !== false;
+  }
+
+  #wardrobeAutoOutfit() {
+    return this.cfg?.lifeWardrobeAutoOutfit !== false;
+  }
+
+  /**
+   * 刷新素材库快照（tick 里调，每拍一次；缓存命中时只 stat 不重扫）。
+   * 开关关着、或库读不到，都让 #wardrobe 停在空库——envBlock / planEventText 判 empty 就跳过。
+   *
+   * 库目录由 loadWardrobe 内部解析（优先级：lifeWardrobeDir > imggen 的 libraryRoot > 默认），
+   * 这里只传 dataDir 和手动覆盖。
+   */
+  async #refreshWardrobe() {
+    if (!this.#wardrobeOn()) { this.#wardrobe = emptyWardrobe(); return; }
+    try {
+      this.#wardrobe = await loadWardrobe(this.dataDir, { cfgDir: this.cfg?.lifeWardrobeDir });
+    } catch {
+      this.#wardrobe = emptyWardrobe();
+    }
+  }
+
   // -------------------------------------------------------------------------
   // 提示词
   // -------------------------------------------------------------------------
@@ -415,8 +446,9 @@ export class FeastWorld {
       const z = zonedNow(this.timezone, now);
       const today = this.#lifeToday?.date === z.date ? this.#lifeToday : null;
       const tomorrow = this.#lifeTomorrow?.items?.length ? this.#lifeTomorrow : null;
+      const wardrobe = this.#wardrobeOn() ? wardrobeHintLine(this.#wardrobe) : '';
       return {
-        feast_life_block: envBlock({ today, tomorrow, cfg: this.cfg, tz: this.timezone, nowMs: now }),
+        feast_life_block: envBlock({ today, tomorrow, cfg: this.cfg, tz: this.timezone, nowMs: now, wardrobe }),
       };
     } catch (err) {
       this.#host?.log?.warn?.('一桌菜：她的一天环境提示词算不出来', { err: msg(err) });
@@ -1445,13 +1477,19 @@ export class FeastWorld {
   /** 今天没有日程（或还停在占位）就模板兜底；到点请 Coo 自己写明天。 */
   async #lifeEnsure(now) {
     if (!this.#lifeOn()) return;
+    // 先刷新素材库快照：envBlock / planEventText / enrichItems 都读它。缓存命中时只 stat。
+    await this.#refreshWardrobe();
     const z = zonedNow(this.timezone, now);
     const today = await readDay(this.dataDir, z.date);
     if (!today || today.source === 'pending' || !today.items.length) {
-      const filled = templateDay(z.date, {
+      let filled = templateDay(z.date, {
         dayTypeId: this.#lifeDayType(), rand: this.#random, now,
         by: 'catch-up', maxItems: this.#lifeMaxItems(),
       });
+      // 模板日程也补 outfit（库非空时）——否则模板兜底的日子永远没穿着，联动断在兜底上。
+      if (this.#wardrobeOn() && this.#wardrobeAutoOutfit()) {
+        filled = { ...filled, items: enrichItems(filled.items, this.#wardrobe) };
+      }
       await writeDay(this.dataDir, filled);
       this.#lifeToday = filled;
     } else {
@@ -1483,13 +1521,14 @@ export class FeastWorld {
     if (!host?.pushEvent) throw new Error('宿主没有 pushEvent');
     const recent = await recentSummary(this.dataDir, fromDate, 3);
     const slots = typeof this.cfg?.mealSlots === 'string' ? this.cfg.mealSlots : DEFAULTS.mealSlots;
+    const wardrobe = this.#wardrobeOn() ? wardrobeText(this.#wardrobe) : '';
     await host.pushEvent({
       type: EVENT_LIFE_PLAN,
       source: this.id,
       senderKey: 'feast-life-plan',
       origin: 'internal',
       ts: new Date(now).toISOString(),
-      text: planEventText({ date, type, recent, mealSlots: slots }),
+      text: planEventText({ date, type, recent, mealSlots: slots, wardrobe }),
       meta: { date, dayType: type.id },
     }, { deliver: true, trigger: 'flush' });
   }
@@ -1582,6 +1621,11 @@ export class FeastWorld {
       day = normalizePlan(raw, date, { maxItems: this.#lifeMaxItems() });
     } catch (err) {
       return { text: `[记日程失败] ${msg(err)}`, failed: true };
+    }
+    // 生图联动：库非空且开关开着时，按习惯补 outfit / 归一 scene 正名。
+    // 只补空槽，不覆盖她自己填的；库读不到就是空库，enrichItems 直接原样返回。
+    if (this.#wardrobeOn() && this.#wardrobeAutoOutfit()) {
+      day = { ...day, items: enrichItems(day.items, this.#wardrobe) };
     }
     day.by = 'coo';
     await writeDay(this.dataDir, day);

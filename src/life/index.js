@@ -6,3 +6,4 @@ export * from './store.js';
 export * from './inject.js';
 export * from './plan.js';
 export * from './free.js';
+export * from './wardrobe.js';

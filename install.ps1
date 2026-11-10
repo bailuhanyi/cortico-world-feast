@@ -169,6 +169,9 @@ $defaults = [ordered]@{
   lifeFreeMaxRetries = 1
   lifeFreeMenu      = "- 出去转转，走一小段路，看看外面现在什么样`n- 找点想看的东西看一会儿（视频、番、随便什么都行）`n- 发一条自己的动态，写一两句今天的心情`n- 就在家待着，听点东西、发会儿呆"
   lifeFreeAskReport = $true
+  lifeWardrobeOn    = $true
+  lifeWardrobeDir   = ""
+  lifeWardrobeAutoOutfit = $true
 }
 if (-not (Test-Path $companionCfg)) {
   Say "WARN 没找到 $companionCfg（Coo 还没初始化过？先启动一次 Coo 再装）"

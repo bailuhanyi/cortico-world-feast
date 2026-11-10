@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-feast",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "一桌菜 · 给 Coo 一张会端菜的桌子：800 道带九维口味的菜（28 个菜系组），她能自己挑，主人能从面板端一道或整桌过去，也能和她一起吃一顿。0.7.0 起她还有自己的日子：每晚自己写明天怎么过，到点过自己的时间、做完记一笔。",
   "license": "MIT",
   "author": "青",
@@ -45,13 +45,13 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
+    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
     "dishes": "node tools/validate-dishes.mjs",
     "selfcheck": "node tools/selfcheck.mjs",
     "check:install": "node tools/check-install.mjs",
     "check:publish": "node tools/publish-check.mjs --online",
     "describe": "node tools/make-describe.mjs",
-    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
+    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
   },
   "cortico": {
     "kind": "world",

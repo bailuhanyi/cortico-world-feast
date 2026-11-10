@@ -98,6 +98,13 @@ export const DEFAULTS = Object.freeze({
   ].join('\n'),
   /** 做完要不要提醒她跟主人说一句。 */
   lifeFreeAskReport: true,
+  // ---- 生图工作室联动（0.7.1）----
+  /** 联动总开关：扫素材库、列给 Coo、自动补 outfit、注入指向句。关掉=纯文本日程，不碰库。 */
+  lifeWardrobeOn: true,
+  /** 素材库目录；留空 = 用默认路径 <数据目录>/imggen-library（和生图工作室默认一致）。 */
+  lifeWardrobeDir: '',
+  /** 自动补 outfit：模型没填时按「延续上一段 > 情境穿搭 > 场景默认 > 默认服饰」补。关掉只列库不补。 */
+  lifeWardrobeAutoOutfit: true,
 });
 
 const ZH = {
@@ -173,6 +180,12 @@ const ZH = {
     lifeFreeMenuDesc: '原样贴进叫醒事件里，措辞上明确写着「这些只是例子，不照着也行」。默认只写通用说法（不点名别的扩展的工具——World 不该依赖别的扩展）。想让她真用上某个工具，在这里写明，例如「去花语乡转转（bloom_inbox peek）」。改完下一档生效。',
     lifeFreeAskReport: '做完说一声',
     lifeFreeAskReportDesc: '开启时，叫醒和记账回执都会提醒她「跟主人说一句你刚才玩了什么」。',
+    lifeWardrobeOn: '生图联动',
+    lifeWardrobeOnDesc: '扫生图工作室的素材库（<数据目录>/imggen-library），写日程时列出衣柜/场景/道具和穿搭习惯，模型没填 outfit 时按习惯自动补，并在提示词里加一句指向生图工作室。关掉=纯文本日程，不碰库、不联动。库读不到时自动静默降级，不影响她的一天。',
+    lifeWardrobeDir: '素材库目录',
+    lifeWardrobeDirDesc: '生图工作室的素材库根目录；留空时自动读 imggen 的 libraryRoot（用户在 imggen 那边改了库目录，这边自动跟上），读不到再降级到 <数据目录>/imggen-library。手动填这里只用于 imggen 没配 libraryRoot 又想指定路径的情况。',
+    lifeWardrobeAutoOutfit: '自动补穿着',
+    lifeWardrobeAutoOutfitDesc: '模型没写 outfit 时，按「延续上一段 > 情境穿搭（睡前→睡衣这种）> 场景默认 > 她的默认服饰」补上。关掉=只列库不补，写成什么就是什么。',
   },
   storage: {
     label: '吃过的记录',
@@ -257,6 +270,12 @@ const EN = {
     lifeFreeMenuDesc: 'Pasted verbatim into the wake-up event, worded so it is clear these are only examples. Defaults stay generic on purpose — a World must not depend on another extension. To point her at a specific tool, name it here, e.g. "go for a walk (bloom_inbox peek)".',
     lifeFreeAskReport: 'Tell the owner',
     lifeFreeAskReportDesc: 'When on, both the wake-up and the logging receipt remind her to say one sentence about what she just did.',
+    lifeWardrobeOn: 'Image-gen link',
+    lifeWardrobeOnDesc: 'Scans the image-gen studio library (<dataDir>/imggen-library), lists wardrobe/scene/props and outfit habits when she writes her day, auto-fills outfit from habits when the model leaves it blank, and adds one line in the prompt pointing at the studio. Off = plain-text schedule, no library, no link. Degrades silently when the library is missing; her day is never affected.',
+    lifeWardrobeDir: 'Library root',
+    lifeWardrobeDirDesc: 'Root of the image-gen studio library; blank = auto-follow imggen libraryRoot (if the user changed it in imggen, this follows), then fall back to <dataDir>/imggen-library. Set this manually only when imggen has no libraryRoot and you need a specific path.',
+    lifeWardrobeAutoOutfit: 'Auto-fill outfit',
+    lifeWardrobeAutoOutfitDesc: 'When the model omits outfit, fill it by: carry the previous slot > context habit (bedtime→pyjamas) > scene default > her default outfit. Off = list the library but do not fill; whatever she wrote stays.',
   },
   storage: {
     label: 'Eating history',
@@ -522,6 +541,24 @@ export function configGroup(language = 'zh') {
           type: 'boolean',
           title: t.lifeFreeAskReport,
           description: t.lifeFreeAskReportDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeWardrobeOn`]: {
+          type: 'boolean',
+          title: t.lifeWardrobeOn,
+          description: t.lifeWardrobeOnDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeWardrobeDir`]: {
+          type: 'string',
+          title: t.lifeWardrobeDir,
+          description: t.lifeWardrobeDirDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeWardrobeAutoOutfit`]: {
+          type: 'boolean',
+          title: t.lifeWardrobeAutoOutfit,
+          description: t.lifeWardrobeAutoOutfitDesc,
           'x-hot': true,
         },
       },
