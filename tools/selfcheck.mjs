@@ -118,7 +118,7 @@ if (world) {
     if (vars !== null && (typeof vars !== 'object' || Array.isArray(vars))) {
       failures.push('envPromptVars() 必须返回对象或 null');
     } else {
-      ok.push(`envPromptVars(): ${vars === null ? 'null' : `${Object.keys(vars).length} 个键`}（刻意留空，避免打穿前缀缓存）`);
+      ok.push(`envPromptVars(): ${vars === null ? 'null' : `${Object.keys(vars).length} 个键`}（只放一天一变的低频变量，避免打穿前缀缓存）`);
     }
   } catch (err) {
     failures.push(`envPromptVars() 抛错：${err.message}`);

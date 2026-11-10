@@ -1,4 +1,4 @@
-﻿﻿# install.ps1 —— 把「一桌菜」装进 Coo（Windows）
+﻿# install.ps1 —— 把「一桌菜」装进 Coo（Windows）
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 -CooRoot "E:\Coopanion"
@@ -152,6 +152,23 @@ $defaults = [ordered]@{
   togetherInviteMin = 20
   togetherMaxInvites = 2
   togetherTTLMin    = 60
+  lifeEnabled       = $true
+  lifeGenerateAt    = '22:00'
+  lifePrecision     = 'halfhour'
+  lifeUpcoming      = 3
+  lifeTomorrowAfter = '18:00'
+  lifeMomentEvents  = $true
+  lifeDayType       = ''
+  lifeVoiceOn       = $true
+  lifeMaxItems      = 24
+  lifeAdjustPast    = $false
+  lifeFreeSlots     = '10:00,14:00,21:00'
+  lifeFreeGoal      = 3
+  lifeFreeGraceMin  = 20
+  lifeFreeRetryMin  = 40
+  lifeFreeMaxRetries = 1
+  lifeFreeMenu      = "- 出去转转，走一小段路，看看外面现在什么样`n- 找点想看的东西看一会儿（视频、番、随便什么都行）`n- 发一条自己的动态，写一两句今天的心情`n- 就在家待着，听点东西、发会儿呆"
+  lifeFreeAskReport = $true
 }
 if (-not (Test-Path $companionCfg)) {
   Say "WARN 没找到 $companionCfg（Coo 还没初始化过？先启动一次 Coo 再装）"

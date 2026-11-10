@@ -33,8 +33,19 @@ for (const line of block[1].split('\n')) {
 const unquote = (raw) => {
   if (raw === '$true') return true;
   if (raw === '$false') return false;
-  const m = raw.match(/^'(.*)'$/);
-  if (m) return m[1];
+  // 单引号：PowerShell 里原样字符串，不转义。
+  const single = raw.match(/^'(.*)'$/s);
+  if (single) return single[1];
+  // 双引号：PowerShell 会解释 `n / `t / `" 这些转义，得先还原成真正的字符再比。
+  const double = raw.match(/^"([\s\S]*)"$/);
+  if (double) {
+    return double[1]
+      .replace(/`n/g, '\n')
+      .replace(/`r/g, '\r')
+      .replace(/`t/g, '\t')
+      .replace(/`"/g, '"')
+      .replace(/``/g, '`');
+  }
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
 };

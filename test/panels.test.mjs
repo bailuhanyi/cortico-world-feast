@@ -11,6 +11,7 @@ import { test, report } from './harness.mjs';
 import { FeastWorld } from '../src/world.js';
 import { loadDishes } from '../src/dishes.js';
 import { DEFAULTS } from '../src/config.js';
+import { templateDay, writeDay } from '../src/life/index.js';
 
 const lib = await loadDishes();
 
@@ -200,12 +201,12 @@ function fakeClock(clock) {
   return () => { Date.now = realTime; };
 }
 
-async function mountPanels({ language = 'zh', failList = false, clock = null } = {}) {
+async function mountPanels({ language = 'zh', failList = false, clock = null, cfg = {} } = {}) {
   // 每次一个独立目录：共用一个的话，上一个用例端过的菜、吃过的记录会漏到下一个用例里，
   // 于是"刚端上来"和"早就吃完了"混在一起，测出来的东西是假的。
   const dataDir = `.tmp/panels/${panelRun}/${panelSeq += 1}`;
   const world = new FeastWorld({
-    cfg: { ...DEFAULTS, enabled: true },
+    cfg: { ...DEFAULTS, enabled: true, ...cfg },
     dataDir,
     timezone: 'Asia/Shanghai',
     now: clock ? () => clock.now : () => Date.parse('2026-11-05T12:05:00+08:00'),
@@ -262,10 +263,15 @@ async function mountPanels({ language = 'zh', failList = false, clock = null } =
 
 // --------------------------------------------------------------------------
 
-test('bundle 形状对：三个面板，mount 都是函数', async () => {
+test('bundle 形状对：面板 id 与服务端声明一一对上，mount 都是函数', async () => {
   const b = await import('../dist/webui.js');
-  assert.deepEqual(Object.keys(b.default.panels).sort(), ['combo', 'history', 'menu']);
-  for (const id of ['menu', 'combo', 'history']) {
+  // 不写死面板数（不变式 3）：webUi() 声明了几个就要求客户端导出几个。
+  // 面板 id 对不上不会报错，只会在宿主里点进去是一片空白——所以这条必须钉住。
+  const { mount: _mount, decl } = await mountPanels();
+  const declared = decl.panels.map((p) => p.id).sort();
+  assert.deepEqual(Object.keys(b.default.panels).sort(), declared,
+    `客户端导出的面板 ${Object.keys(b.default.panels).sort().join('、')} 与服务端声明的 ${declared.join('、')} 对不上`);
+  for (const id of declared) {
     assert.equal(typeof b.default.panels[id].mount, 'function', `${id} 缺 mount`);
   }
   assert.ok(!Array.isArray(b.default.panels));
@@ -1030,6 +1036,221 @@ test('套餐面板：英文界面的按钮和标题是英文', async () => {
     // 套餐名、菜名是数据，跟整个菜品库一样是中文——英文界面不译数据。
     // 这一条把那个界线钉住：证明确实是"内容中文、界面英文"，不是漏翻了界面。
     assert.ok(text.includes('四菜一汤'), '套餐名属于内容，仍应是中文');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+// --------------------------------------------------------------------------
+// 今天面板（她的一天）
+// --------------------------------------------------------------------------
+
+/**
+ * 今天面板要靠服务端已经有今天的日程。启动时 #lifeEnsure 会用模板兜底落一天，
+ * 但这条路径依赖「今天没有文件」；每个用例一个独立目录，所以天然满足。
+ */
+test('今天面板：画出今天的时间线和「此刻」，此刻那一段被点亮', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    assert.ok(invocations.some((i) => i.method === 'list'), '没拉 list');
+    assert.ok(root.querySelector('style'), '没注入样式');
+
+    // 时间线画出来了，且覆盖到 00:00 和 24:00（模板一天的首尾）。
+    const rows = root.querySelectorAll('.feast-tl-row');
+    assert.ok(rows.length > 2, `时间线只有 ${rows.length} 段`);
+    assert.ok(rows.some((r) => r.textContent.includes('00:00')));
+    assert.ok(rows.some((r) => r.textContent.includes('24:00')));
+
+    // 「此刻」那一条：12:05 落在吃午饭（模板上班日 12:00–13:00）。
+    const strip = root.querySelector('.feast-strip');
+    assert.ok(strip, '缺「此刻」那条');
+    assert.ok(strip.textContent.includes('12:05'), `此刻条没报当前时刻：${strip.textContent}`);
+    assert.ok(strip.textContent.includes('吃午饭'), `此刻条没落到午饭那段：${strip.textContent}`);
+
+    // 点亮的是那一段，且只有一段。
+    const lit = root.querySelectorAll('.feast-tl-row.is-now');
+    assert.equal(lit.length, 1, `该点亮一段，点亮了 ${lit.length} 段`);
+    assert.ok(lit[0].textContent.includes('吃午饭'));
+    // 早于此刻的段被压暗。
+    assert.ok(root.querySelectorAll('.feast-tl-row.is-past').length > 0, '过去的段没压暗');
+
+    // 今天和明天两段都在
+    assert.ok(root.texts('feast-day').some((s) => s.includes('今天')));
+    assert.ok(root.texts('feast-day').some((s) => s.includes('明天')));
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：点「请她写明天」会调 plan，并把明天的来源变成「等她写」', async () => {
+  const clock = { now: Date.parse('2026-11-05T21:30:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    // 21:30 已经过了 lifeGenerateAt（22:00 之前，所以启动不会自动推）——
+    // 先确认没有明天，再手点，免得测的是自动流程而不是这个按钮。
+    const ask = root.findByText('请她写明天');
+    assert.ok(ask, '缺「请她写明天」按钮');
+    ask.fire('click');
+
+    await waitFor(() => invocations.some((i) => i.method === 'plan'), '调了 plan');
+    // 推完会 refresh 一次，明天的来源该显示成「等她写」。
+    await waitFor(() => root.querySelectorAll('.feast-flag')
+      .some((f) => f.textContent.includes('等她写')), '明天的来源变成等她写', 3000);
+    // 「等她写」是空壳，别有 items——空壳下面不该画时间线。
+    assert.ok(root.textContent.includes('这一天她还没想好怎么过'), '空壳没给说明');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：临时改主意会带上日期和时间段调 adjust，改完时间线跟着变', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    const form = root.querySelector('.feast-form');
+    assert.ok(form, '缺改主意表单');
+    const [startIn, endIn] = form.findAll((n) => n.tagName === 'INPUT');
+    const actIn = form.findAll((n) => n.tagName === 'INPUT').at(-1);
+    startIn.value = '20:00';
+    endIn.value = '21:00';
+    actIn.value = '下楼买布丁';
+    form.findAll((n) => n.tagName === 'BUTTON')[0].fire('click');
+
+    await waitFor(() => invocations.some((i) => i.method === 'adjust'), '调了 adjust');
+    const call = invocations.filter((i) => i.method === 'adjust').pop();
+    assert.equal(call.args[0].start, '20:00');
+    assert.equal(call.args[0].end, '21:00');
+    assert.equal(call.args[0].activity, '下楼买布丁');
+    assert.equal(call.args[0].date, '2026-11-05', '得带上改的是哪一天');
+
+    // 「下楼买布丁」这句话在 toast 里就已经有了，等它等于测了个假的——
+    // 要等的是**时间线里**多出这一段。
+    await waitFor(() => root.querySelectorAll('.feast-tl-row')
+      .some((r) => r.textContent.includes('下楼买布丁')), '改完时间线里出现新安排', 3000);
+    assert.equal(invocations.filter((i) => i.method === 'list').length >= 2, true, '改完没重拉 list');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：「做什么」留空 = 不做了，真的会把那一段取消掉', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    // 取消 20:00–23:00：「自己的时间」那一段被吃掉，时间线里不该再有一个横跨 20 点后的它。
+    const before = root.querySelectorAll('.feast-tl-row')
+      .filter((r) => r.textContent.includes('自己的时间'));
+    assert.ok(before.length, '模板上班日里没有「自己的时间」，这条测试的前提变了');
+
+    const form = root.querySelector('.feast-form');
+    const inputs = form.findAll((n) => n.tagName === 'INPUT');
+    inputs[0].value = '20:00';
+    inputs[1].value = '23:00';
+    // 最后一格（做什么）故意留空
+    form.findAll((n) => n.tagName === 'BUTTON')[0].fire('click');
+
+    await waitFor(() => invocations.some((i) => i.method === 'adjust'), '调了 adjust');
+    // 空 activity 要原样传过去，不能在前端就被拦下或被替换成占位字。
+    assert.equal(invocations.filter((i) => i.method === 'adjust').pop().args[0].activity, '');
+
+    // 别用「段数变少」判断：取消会把一段截短，截出来的残余段和吃掉的那段数量可能正好抵消
+    // （19:45–23:00 的「自己的时间」被挖掉 20:00–23:00 后剩 19:45–20:00）。
+    await waitFor(() => !root.querySelectorAll('.feast-tl-row')
+      .some((r) => r.textContent.includes('自己的时间') && r.textContent.includes('23:00')),
+    '取消后那一段不该再横到 23:00', 3000);
+
+    const rows = root.querySelectorAll('.feast-tl-row');
+    assert.ok(rows.length > 0);
+    assert.ok(rows[0].textContent.includes('00:00'), '取消后没从 00:00 开始');
+    assert.ok(rows.at(-1).textContent.includes('24:00'), '取消后没排到 24:00');
+    // 取消后时间线仍然首尾相接，不能留空档。
+    const spans = rows.map((r) => r.textContent);
+    assert.ok(spans.some((s) => s.includes('20:00')), '20:00 之后应该由后一段接上');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：关掉 lifeEnabled 时给一句说明，不硬画时间线', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeEnabled: false } });
+  try {
+    const root = await mount('today');
+    assert.ok(root.textContent.includes('关着'), `关掉时该有说明：${root.textContent.slice(0, 120)}`);
+    assert.equal(root.querySelectorAll('.feast-tl-row').length, 0, '关掉时不该画时间线');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：点往期某一天会拉那一天的 day，并给出收起', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    // 先手造一天往期：面板的「往期」读的是 list 里的 recent。
+    await writeDay(world.dataDir, templateDay('2026-11-03', { now: clock.now, dayTypeId: 'restday' }));
+    const root = await mount('today');
+    const past = root.querySelectorAll('.feast-item.is-click');
+    if (!past.length) {
+      // 没有往期也要能挂住，不算失败——但下面那段就跳过，别把它测成假通过。
+      assert.ok(root.textContent.includes('还没有往期'),
+        '既没有往期条目，也没有「还没有往期」的说明');
+      return;
+    }
+    past[0].fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'day'), '调了 day');
+    assert.equal(invocations.filter((i) => i.method === 'day').pop().args[0], '2026-11-03');
+    await waitFor(() => root.findByText('← 收起'), '往期展开后给出收起');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：画出「她自己的时间」那一块（记了几件、下一档、做过什么）', async () => {
+  const clock = { now: Date.parse('2026-11-05T21:02:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 3 } });
+  try {
+    // 先让 world 那一拍叫醒她，再记一笔，面板才该显示出进度。
+    const tools = Object.fromEntries(world.tools().map((x) => [x.name, x.handler]));
+    await tools.feast_life_play({ activity: '出去走走', note: '看见一只三花猫' });
+
+    const root = await mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('她自己的时间'));
+    assert.ok(block, '没有「她自己的时间」那一块');
+    assert.ok(/今天记了 1 件/.test(block.textContent), `没显示记了几件：${block.textContent.slice(0, 120)}`);
+    // 措辞得清是「不再按点叫」，不是「还差几件任务」。
+    assert.ok(block.textContent.includes('不再按点叫'), '没讲清那是叫醒上限');
+    assert.ok(!/还差 \d+ 件/.test(block.textContent), `面板写成了任务额度：${block.textContent.slice(0, 160)}`);
+    assert.ok(block.textContent.includes('出去走走'), '没显示她做过什么');
+    assert.ok(block.textContent.includes('看见一只三花猫'), '没显示那笔的细节');
+    // 提示语要说清单只是举例。
+    assert.ok(/只是例子/.test(block.textContent), '没说明单子只是举例');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：自由时间关着时只说一句，不硬画进度', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeFreeEnabled: false } });
+  try {
+    const root = await mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('她自己的时间'));
+    assert.ok(block, '缺自由时间那一块');
+    assert.ok(block.textContent.includes('关着'), `关着时该有说明：${block.textContent.slice(0, 100)}`);
   } finally {
     panels.lastHandle?.dispose?.();
   }

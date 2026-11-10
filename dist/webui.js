@@ -14,9 +14,11 @@
  * （color-mix：浅底 → 米纸色，深底 → 暖炭色），菜名走衬线 --fe-serif
  * 与暖调墨 --fe-title，「端给她」等主按钮用固定的印章红 --fe-seal。
  *
- * 两个面板：
+ * 四个面板：
  *   menu    —— 翻菜单、看九维口味和实吃描写、点「端给她」
+ *   combo   —— 一桌一桌地端：现成套餐，或自己攒一桌
  *   history —— 她吃过什么、攒出来的口味画像
+ *   today   —— 她自己写下的这一天：此刻在哪一段、今天/明天的时间线、往期
  */
 
 const CSS = `
@@ -107,6 +109,28 @@ const CSS = `
 .feast-together-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--fe-dim);font-size:12px}
 .feast-together-bar{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .feast-together-bar .feast-search{flex:1;min-width:130px}
+/* --- 今天（她的一天）面板 --- */
+.feast-tl{display:flex;flex-direction:column;gap:0}
+.feast-tl-row{display:flex;gap:10px;align-items:baseline;padding:6px 8px;border-bottom:1px solid var(--fe-line);border-left:2px solid transparent}
+.feast-tl-row:last-child{border-bottom:0}
+.feast-tl-row.is-now{border-left-color:var(--fe-accent);background:color-mix(in srgb,var(--fe-accent) 9%,transparent)}
+.feast-tl-row.is-past{opacity:.62}
+.feast-tl-t{color:var(--fe-dim);font-size:11.5px;flex:none;width:6.8em;font-variant-numeric:tabular-nums}
+.feast-tl-n{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.feast-tl-a{font-weight:600}
+.feast-tl-d{color:var(--fe-dim);font-size:11.5px;line-height:1.5}
+.feast-tl-row.is-now .feast-tl-a{color:var(--fe-accent)}
+.feast-day{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:16px 0 7px}
+.feast-day b{font-weight:600}
+.feast-day:first-child{margin-top:0}
+.feast-day .feast-dim{color:var(--fe-dim);font-size:12px}
+.feast-form{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.feast-form .feast-time{flex:none;width:5.6em;min-width:0;text-align:center;font-variant-numeric:tabular-nums}
+.feast-form .feast-activity{flex:1;min-width:130px}
+.feast-act{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.feast-note{color:var(--fe-dim);font-size:12px;line-height:1.55;margin-top:6px}
+.feast-item.is-click{cursor:pointer}
+.feast-item.is-click:hover .feast-item-n{text-decoration:underline}
 `;
 
 const TABLE = {
@@ -205,6 +229,48 @@ const TABLE = {
     togetherEndWhyOwner: '主人说散了',
     togetherEndWhyTtl: '放太久了，收了',
     togetherEndWhyHer: '她先收了',
+    /* --- 今天（她的一天）面板 --- */
+    dayNow: '此刻',
+    dayNowAt: (hm) => `现在是 ${hm}`,
+    daySleeping: '她睡着了',
+    dayNothingNow: '这会儿没有安排',
+    dayToday: '今天',
+    dayTomorrow: '明天',
+    dayPast: '往期',
+    dayNoDay: '这一天她还没想好怎么过。',
+    dayOff: '「她的一天」现在关着。到配置里打开 lifeEnabled 才会开始给她排日子。',
+    dayAsk: '请她写明天',
+    dayAsking: '已经跟她说了…',
+    daySourceCoo: '她自己写的',
+    daySourceTemplate: '临时顶上的',
+    daySourcePending: '等她写',
+    daySourceManual: '改过的',
+    dayChange: '临时改主意',
+    dayChangePh: '做什么（留空 = 不做了）',
+    dayChangeGo: '改这一段时间',
+    dayChangeGo2: '改',
+    dayChangeHint: '填一段时间和一件事；不想做了就把「做什么」留空，那一段时间会空出来。原来压在这段上的安排会被截断或拆开。已经过去的时间改不了（那是事实）。',
+    dayChanges: (n) => `临时改过 ${n} 次`,
+    dayCount: (n) => `${n} 段`,
+    daySleep: '睡觉',
+    dayEmpty: '还没有任何一天的记录。',
+    dayNoPast: '还没有往期的那一天。',
+    dayBack: '← 收起',
+    /* --- 自由时间 --- */
+    freeTitle: '她自己的时间',
+    freeOff: '自由时间关着。',
+    freeGoal: (n, g) => `今天记了 ${n} 件 · 到 ${g} 件就不再按点叫`,
+    freeDone: (n) => `今天记了 ${n} 件`,
+    freeEnough: '已到数 · 不再按点叫',
+    freePending: (slot) => `在等她记「${slot}」这一档`,
+    freeNext: (hm) => `下一档 ${hm}`,
+    freeNone: '还没有排档',
+    freeSkipped: '今天不按点叫了（她随时能自己动）',
+    freeNotYet: '今天还没记过什么（不记也不影响她做事）。',
+    freeHint: '到点会叫醒她「现在是你自己的时间」。下面这些只是例子：单子外的事、临时起意的都算，做不做、做几件都由她，想开始随时能开始、不用等叫醒。到她睡觉或上班的时段不会叫。',
+    freeLog: '她刚做了什么',
+    freeLogPh: '一句话，比如「出去走了走」',
+    freeAnyHint: '做什么都算，不限于上面的例子。',
   },
   en: {
     allCuisines: 'All cuisines',
@@ -301,6 +367,48 @@ const TABLE = {
     togetherEndWhyOwner: 'you called it',
     togetherEndWhyTtl: 'it sat too long',
     togetherEndWhyHer: 'she closed it',
+    /* --- 今天（她的一天）面板 --- */
+    dayNow: 'Right now',
+    dayNowAt: (hm) => `${hm} now`,
+    daySleeping: 'She is asleep',
+    dayNothingNow: 'Nothing planned this minute',
+    dayToday: 'Today',
+    dayTomorrow: 'Tomorrow',
+    dayPast: 'Earlier days',
+    dayNoDay: 'She has not decided how to spend this day yet.',
+    dayOff: 'Her day is switched off. Turn on lifeEnabled in config to start it.',
+    dayAsk: 'Ask her to write tomorrow',
+    dayAsking: 'Asked her…',
+    daySourceCoo: 'written by her',
+    daySourceTemplate: 'stood in',
+    daySourcePending: 'waiting for her',
+    daySourceManual: 'adjusted',
+    dayChange: 'Change of plan',
+    dayChangePh: 'what she does (blank = skip it)',
+    dayChangeGo: 'Change this block',
+    dayChangeGo2: 'Change',
+    dayChangeHint: 'Give a time range and an activity; leave the activity blank to skip that stretch instead. Whatever was planned there is trimmed or split. Hours that are already over cannot be changed — they are what happened.',
+    dayChanges: (n) => `adjusted ${n}×`,
+    dayCount: (n) => `${n} blocks`,
+    daySleep: 'asleep',
+    dayEmpty: 'No days recorded yet.',
+    dayNoPast: 'Nothing here yet.',
+    dayBack: '← Close',
+    /* --- free time --- */
+    freeTitle: 'Her own time',
+    freeOff: 'Free time is off.',
+    freeGoal: (n, g) => `${n} logged · stops calling at ${g}`,
+    freeDone: (n) => `${n} logged today`,
+    freeEnough: 'at the number · no more scheduled wake-ups',
+    freePending: (slot) => `waiting on her to log the ${slot} slot`,
+    freeNext: (hm) => `next ${hm}`,
+    freeNone: 'no slots',
+    freeSkipped: 'no scheduled wake-ups today (she can still do anything)',
+    freeNotYet: 'Nothing logged yet (not logging does not stop her doing things).',
+    freeHint: 'She is woken at these slots. The list is only examples — anything at all counts, and she may do as much or as little as she likes, starting whenever she wants without waiting for a wake-up. Never while the schedule says she is asleep or at work.',
+    freeLog: 'What she just did',
+    freeLogPh: 'one line, e.g. "went for a walk"',
+    freeAnyHint: 'Anything counts, not just the examples above.',
   },
 };
 
@@ -958,6 +1066,379 @@ const historyPanel = {
 };
 
 // ---------------------------------------------------------------------------
+// 今天面板（她的一天）
+// ---------------------------------------------------------------------------
+
+/**
+ * 她自己写下的这一天。
+ *
+ * 与别的面板不同，这一页是**读**为主：今天/明天的时间线、此刻落在哪一段、
+ * 有几天往期。能动手的只有两处——请她写明天、临时改一段。
+ *
+ * 「此刻」不调 momentLine：那是给模型看的，末尾带着「不用特意跟主人汇报」。
+ * 服务端 list 给的是 nowItem（当前那一段）和 nowMinute，这里自己拼句子。
+ */
+const todayPanel = {
+  async mount(ctx) {
+    const t = tableFor(ctx.language);
+    const root = ctx.root;
+    root.classList.add('feast');
+    const style = el('style');
+    style.textContent = CSS;
+    root.appendChild(style);
+
+    const wrap = el('div');
+    root.appendChild(wrap);
+
+    /** 面板数据（list 的整份回执）。 */
+    let data = null;
+    /** 正在看哪一天；null = 就用服务端给的今天。 */
+    let viewing = null;
+    /** 「请她写明天」正在等回执，按钮别连点。 */
+    let asking = false;
+    /** 改主意表单里有没有没提交的草稿：有就说明人正在打字，别重画。 */
+    let draftNode = null;
+    const hasDraft = () => Boolean(draftNode
+      && (draftNode.value || draftNode === document.activeElement));
+
+    const sourceLabel = (s) => (s === 'coo' ? t.daySourceCoo
+      : s === 'template' ? t.daySourceTemplate
+        : s === 'pending' ? t.daySourcePending
+          : s === 'manual' ? t.daySourceManual : '');
+    const isSleep = (it) => /睡/.test(String(it?.activity ?? ''));
+
+    /** 'HH:MM' → 当天第几分钟；坏值给 null（时间线不该因为一行脏数据整页不画）。 */
+    function minuteOf(hm) {
+      const m = /^\s*(\d{1,2})\s*[:：]\s*(\d{2})\s*$/.exec(String(hm ?? ''));
+      if (!m) return null;
+      const h = Number(m[1]);
+      const mi = Number(m[2]);
+      if (mi > 59 || h > 24 || (h === 24 && mi !== 0)) return null;
+      return h * 60 + mi;
+    }
+    /** 服务端给的 nowMinute 只对「今天」有意义；看往期时不能高亮。 */
+    const isToday = () => (viewing ?? data?.date) === data?.date;
+
+    /** 一天的时间线。now 给了就高亮落在 now 上的那一段、并把过去的压暗。 */
+    function timeline(day, now = null) {
+      const list = el('div', 'feast-tl');
+      for (const it of day?.items ?? []) {
+        const row = el('div', 'feast-tl-row');
+        row.appendChild(el('span', 'feast-tl-t', `${it.start}–${it.end}`));
+        const mid = el('div', 'feast-tl-n');
+        const where = it.scene || it.location;
+        mid.appendChild(el('div', 'feast-tl-a', it.activity + (where ? `（${where}）` : '')));
+        const bits = [];
+        if (it.detail) bits.push(it.detail);
+        if (it.outfit) bits.push(`穿着${it.outfit}`);
+        if (it.props?.length) bits.push(`手边有${it.props.join('、')}`);
+        if (it.with?.length) bits.push(`和${it.with.join('、')}`);
+        if (bits.length) mid.appendChild(el('div', 'feast-tl-d', bits.join('；')));
+        row.appendChild(mid);
+        if (now !== null) {
+          const s = minuteOf(it.start);
+          const e = minuteOf(it.end);
+          if (s !== null && e !== null) {
+            if (s <= now && now < e) row.classList.add('is-now');
+            else if (e <= now) row.classList.add('is-past');
+          }
+        }
+        list.appendChild(row);
+      }
+      return list;
+    }
+
+    /** 一天的头：日期、日型、她写的标题与心情、来源。 */
+    function dayHead(day, label) {
+      const head = el('div', 'feast-day');
+      head.appendChild(el('b', null, label));
+      head.appendChild(el('span', 'feast-dim', day?.dayType?.name ?? ''));
+      if (day?.title) head.appendChild(el('span', null, `——${day.title}`));
+      if (day?.mood) head.appendChild(el('span', 'feast-dim', `心情：${day.mood}`));
+      const src = sourceLabel(day?.source);
+      if (src) head.appendChild(el('span', 'feast-flag', src));
+      if (day?.changes?.length) head.appendChild(el('span', 'feast-flag', t.dayChanges(day.changes.length)));
+      return head;
+    }
+
+    function nowStrip() {
+      const box = el('div', 'feast-strip');
+      box.appendChild(el('b', null, t.dayNow));
+      const it = data?.nowItem;
+      if (!data?.enabled) {
+        box.appendChild(el('span', 'feast-dim', t.dayOff));
+        return box;
+      }
+      if (!it) {
+        box.appendChild(el('span', 'feast-dim', t.dayNothingNow));
+      } else if (isSleep(it)) {
+        box.appendChild(el('span', null, t.daySleeping));
+        box.appendChild(el('span', 'feast-dim', `${it.start}–${it.end}`));
+      } else {
+        const where = it.scene || it.location;
+        box.appendChild(el('span', null, `${it.activity}${where ? `（${where}）` : ''}`));
+        box.appendChild(el('span', 'feast-dim', `${it.start}–${it.end}`));
+      }
+      if (data?.nowHm) box.appendChild(el('span', 'feast-left', t.dayNowAt(data.nowHm)));
+      return box;
+    }
+
+    /** 一句话的空日程说明，别让面板只剩一片白。 */
+    function emptyDay(text) {
+      const list = el('div', 'feast-list');
+      list.appendChild(el('div', 'feast-empty', text));
+      return list;
+    }
+
+    function daySection(label, day, now) {
+      const box = el('div');
+      box.appendChild(dayHead(day, label));
+      box.appendChild(day?.items?.length ? timeline(day, now) : emptyDay(t.dayNoDay));
+      return box;
+    }
+
+    /** 临时改主意的表单：起止时间 + 做什么。 */
+    function changeForm(date) {
+      const box = el('div', 'feast-block');
+      box.appendChild(el('div', 'feast-block-t', t.dayChange));
+      const form = el('div', 'feast-form');
+      const startIn = el('input', 'feast-time');
+      startIn.placeholder = '20:00';
+      startIn.value = '';
+      const endIn = el('input', 'feast-time');
+      endIn.placeholder = '21:30';
+      endIn.value = '';
+      const actIn = el('input', 'feast-activity');
+      actIn.placeholder = t.dayChangePh;
+      actIn.value = '';
+      actIn.addEventListener('input', () => { draftNode = actIn; });
+      draftNode = actIn;
+      const go = el('button', 'feast-btn-primary', t.dayChangeGo);
+      form.appendChild(startIn);
+      form.appendChild(el('span', 'feast-dim', '–'));
+      form.appendChild(endIn);
+      form.appendChild(actIn);
+      form.appendChild(go);
+      box.appendChild(form);
+      box.appendChild(el('div', 'feast-note', t.dayChangeHint));
+
+      go.onclick = async () => {
+        const start = String(startIn.value ?? '').trim();
+        const end = String(endIn.value ?? '').trim();
+        const activity = String(actIn.value ?? '').trim();
+        go.disabled = true;
+        try {
+          const r = await ctx.invoke('adjust', [{ date, start, end, activity }]);
+          if (r?.ok) {
+            toast(root, ctx, r.message ?? '记下了');
+            await refresh();
+          } else {
+            toast(root, ctx, r?.message ?? '改不了', true);
+            go.disabled = false;
+          }
+        } catch (err) {
+          toast(root, ctx, t.failed(err?.message ?? err), true);
+          go.disabled = false;
+        }
+      };
+      return box;
+    }
+
+    /** 她自己的时间：今天记了几件、下一档几点、她刚做了什么。 */
+    function freeSection() {
+      const f = data?.free;
+      if (!f) return null;
+      const box = el('div', 'feast-block');
+      box.appendChild(el('div', 'feast-block-t', t.freeTitle));
+
+      const head = el('div', 'feast-day');
+      if (!f.enabled) {
+        head.appendChild(el('span', 'feast-dim', t.freeOff));
+      } else if (f.skipped) {
+        head.appendChild(el('span', 'feast-dim', t.freeSkipped));
+      } else {
+        head.appendChild(el('b', null, f.goal > 0 ? t.freeGoal(f.done.length, f.goal) : t.freeDone(f.done.length)));
+        if (f.left === 0) head.appendChild(el('span', 'feast-flag is-owner', t.freeEnough));
+        if (f.pendingSlot) head.appendChild(el('span', 'feast-flag', t.freePending(f.pendingSlot)));
+        if (f.next) head.appendChild(el('span', 'feast-left', f.next === '没排档' || !f.slots.length ? t.freeNone : t.freeNext(f.next)));
+      }
+      box.appendChild(head);
+
+      if (f.done.length) {
+        const list = el('div', 'feast-list');
+        for (const d of f.done) {
+          const row = el('div', 'feast-item');
+          // 时刻只写本地 HH:MM：服务端给的是毫秒，面板自己截。
+          const when = new Date(d.at);
+          const hh = String(when.getHours()).padStart(2, '0');
+          const mm = String(when.getMinutes()).padStart(2, '0');
+          row.appendChild(el('span', 'feast-item-t', `${hh}:${mm}`));
+          row.appendChild(el('span', 'feast-item-n', `${d.activity}${d.note ? `——${d.note}` : ''}`));
+          list.appendChild(row);
+        }
+        box.appendChild(list);
+      } else if (f.enabled && !f.skipped) {
+        box.appendChild(el('div', 'feast-empty', t.freeNotYet));
+      }
+
+      box.appendChild(el('div', 'feast-note', t.freeHint));
+      return box;
+    }
+
+    function pastSection() {
+      const box = el('div');
+      box.appendChild(el('div', 'feast-combo-h', t.dayPast));
+      const days = (data?.recent ?? []).filter((d) => d.date !== data?.date);
+      if (!days.length) {
+        box.appendChild(el('div', 'feast-empty', t.dayNoPast));
+        return box;
+      }
+      const list = el('div', 'feast-list');
+      for (const d of days) {
+        const row = el('div', 'feast-item is-click');
+        const [, mo, dd] = String(d.date ?? '').split('-');
+        row.appendChild(el('span', 'feast-item-t', mo && dd ? `${Number(mo)}/${Number(dd)}` : d.date));
+        row.appendChild(el('span', 'feast-item-n',
+          `${d.dayType || ''}${d.title ? ` · ${d.title}` : ''}`));
+        const src = sourceLabel(d.source);
+        if (src) row.appendChild(el('span', 'feast-flag', src));
+        row.appendChild(el('span', 'feast-item-t', t.dayCount(d.count ?? 0)));
+        row.onclick = async () => {
+          viewing = d.date;
+          await openDay(d.date);
+        };
+        list.appendChild(row);
+      }
+      box.appendChild(list);
+      return box;
+    }
+
+    /** 看某一天（往期用）：单独拉一次 day，不重画整页。 */
+    async function openDay(date) {
+      try {
+        const r = await ctx.invoke('day', [date]);
+        if (!r?.ok) {
+          toast(root, ctx, r?.message ?? '取不到这一天', true);
+          viewing = null;
+          render();
+          return;
+        }
+        let seen = wrap.querySelector('.feast-seen');
+        if (!seen) {
+          seen = el('div', 'feast-seen');
+          wrap.prepend(seen);
+        }
+        seen.replaceChildren();
+        const back = el('button', null, t.dayBack);
+        back.onclick = () => { viewing = null; render(); };
+        seen.appendChild(back);
+        seen.appendChild(daySection(date, r.day, null));
+      } catch (err) {
+        toast(root, ctx, t.failed(err?.message ?? err), true);
+        viewing = null;
+        render();
+      }
+    }
+
+    function render() {
+      const scrollTop = wrap.scrollTop;
+      draftNode = null;
+      wrap.replaceChildren();
+
+      if (!data) return;
+
+      if (!data.enabled) {
+        wrap.appendChild(el('div', 'feast-empty', t.dayOff));
+        return;
+      }
+
+      wrap.appendChild(nowStrip());
+
+      // 今天：只有看今天时才给 nowMinute 高亮。
+      wrap.appendChild(daySection(t.dayToday, data.today, isToday() && !viewing ? data.nowMinute : null));
+
+      // 明天：来源是 pending 就说明已经问过她、还没交回。
+      wrap.appendChild(daySection(t.dayTomorrow, data.tomorrow, null));
+
+      const acts = el('div', 'feast-act');
+      const ask = el('button', 'feast-btn-primary', asking ? t.dayAsking : t.dayAsk);
+      ask.disabled = asking;
+      ask.onclick = async () => {
+        asking = true;
+        render();
+        try {
+          const r = await ctx.invoke('plan', []);
+          if (r?.ok) toast(root, ctx, r.message ?? t.dayAsking);
+          else toast(root, ctx, r?.message ?? '请不动', true);
+        } catch (err) {
+          toast(root, ctx, t.failed(err?.message ?? err), true);
+        } finally {
+          asking = false;
+          await refresh();
+        }
+      };
+      acts.appendChild(ask);
+      wrap.appendChild(acts);
+
+      // 改主意只对已经排好的一天有意义；pick 是「等她写」的空壳，改了也没东西可截。
+      if (data.today?.items?.length && data.today.source !== 'pending') {
+        wrap.appendChild(changeForm(data.date));
+      }
+
+      const free = freeSection();
+      if (free) wrap.appendChild(free);
+
+      wrap.appendChild(pastSection());
+      wrap.scrollTop = scrollTop;
+    }
+
+    async function refresh() {
+      try {
+        data = await ctx.invoke('list', []);
+        render();
+      } catch (err) {
+        wrap.replaceChildren(el('div', 'feast-empty is-bad', t.failed(err?.message ?? err)));
+      }
+    }
+
+    try {
+      data = await ctx.invoke('list', []);
+      render();
+    } catch (err) {
+      wrap.replaceChildren(el('div', 'feast-empty is-bad', t.failed(err?.message ?? err)));
+      return { dispose() {} };
+    }
+
+    // 钟自己走：整点过后换一段了，「此刻」那个条该跟上（每 60 秒让服务端重算一遍）。
+    // 只在「此刻那一段」或「日期」真的变了才重画 —— 否则会把正在填的改主意表单打断。
+    let lastKey = `${data?.nowItem?.start ?? ''}|${data?.date ?? ''}`;
+    const ticker = ctx.interval?.(() => {
+      if (ctx.signal?.aborted) return;
+      void (async () => {
+        try {
+          const next = await ctx.invoke('list', []);
+          const key = `${next?.nowItem?.start ?? ''}|${next?.date ?? ''}`;
+          // 看往期、或者表单里有没提交的草稿时，别擅自重画把人打断了。
+          if (key === lastKey || viewing || hasDraft()) {
+            data = next;
+            return;
+          }
+          data = next;
+          lastKey = key;
+          render();
+        } catch { /* 这一拍没拉到就算了，下一拍再来 */ }
+      })();
+    }, 60_000);
+
+    return {
+      dispose() {
+        ticker?.dispose?.();
+      },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // 套餐面板
 // ---------------------------------------------------------------------------
 
@@ -1385,4 +1866,4 @@ const comboPanel = {
   },
 };
 
-export default { panels: { menu: menuPanel, combo: comboPanel, history: historyPanel } };
+export default { panels: { menu: menuPanel, combo: comboPanel, history: historyPanel, today: todayPanel } };

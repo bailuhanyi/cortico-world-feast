@@ -11,7 +11,8 @@ import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
 import { FeastWorld, FEAST_TOOL_DECLS } from '../src/world.js';
 import { loadDishes } from '../src/dishes.js';
-import { DEFAULTS, EVENT_FEED, EVENT_MEAL, EVENT_TABLE, EVENT_TOGETHER } from '../src/config.js';
+import { DEFAULTS } from '../src/config.js';
+import * as config from '../src/config.js';
 
 const lib = await loadDishes();
 
@@ -158,15 +159,18 @@ test('饭点：到点推一条 internal 事件，催一次之后放掉', async (
   // 时钟自己走：41 分钟后催一次，再 41 分钟放掉。
   const clock = { t: MEAL_TIME };
   const { world: w2, events: e2, runTick: tick2 } = await makeWorld({ now: () => clock.t });
+  // 只数饭点事件：别的线（她的一天）也会往 events 里推东西，
+  // 用 e2[n] 按下标取会拿到别人的事件——这条测试就变成碰运气。
+  const meals = () => e2.filter((e) => e.type === 'feast.meal');
   await tick2();                                   // 11:35 → 叫一次
-  assert.equal(e2.filter((e) => e.type === 'feast.meal').length, 1);
+  assert.equal(meals().length, 1);
   clock.t += 41 * 60_000;                          // 12:16
   await tick2();                                   // 催一次
-  assert.equal(e2.filter((e) => e.type === 'feast.meal').length, 2);
-  assert.ok(e2[1].text.includes('再问一句'));
+  assert.equal(meals().length, 2);
+  assert.ok(meals()[1].text.includes('再问一句'));
   clock.t += 41 * 60_000;                          // 12:57
   await tick2();                                   // 放掉，不再叫
-  assert.equal(e2.filter((e) => e.type === 'feast.meal').length, 2);
+  assert.equal(meals().length, 2);
   await w2.stop();
 });
 
@@ -360,7 +364,8 @@ test('套餐面板：清「吃过的记录」不会把攒的桌一起删了', as
   await ui.invoke('combo', 'save', [{ name: '要留住的桌', dishes: ['mapo-tofu'] }]);
 
   const st = world.webUi('zh').storage;
-  assert.equal(st.length, 2, '该有「吃过的记录」和「主人攒的套餐」两项');
+  // 不写死存储项数（不变式 3）：按 key 找，加一项不该让这条红。
+  assert.ok(st.length >= 2, '至少该有「吃过的记录」和「主人攒的套餐」两项');
   const stateItem = st.find((s) => s.key === 'state');
   await stateItem.clear();
 
@@ -404,7 +409,11 @@ test('主人端菜：端不存在的菜会被拒', async () => {
 test('面板数据面：菜单、单道、历史', async () => {
   const { world } = await makeWorld();
   const ui = world.webUi('zh');
-  assert.deepEqual(ui.panels.map((p) => p.id), ['menu', 'combo', 'history']);
+  // 面板 id 不写死（不变式 3）：这条只钉「菜单面板排在第一、且没有写操作混进 GET」。
+  const ids = ui.panels.map((p) => p.id);
+  assert.equal(ids[0], 'menu', `第一个面板该是菜单，现在是 ${ids[0]}`);
+  assert.ok(ids.includes('combo') && ids.includes('history'), `缺面板：${ids.join('、')}`);
+  assert.equal(new Set(ids).size, ids.length, '面板 id 有重复');
   assert.ok(ui.panels[0].getMethods.includes('list'));
   assert.ok(!ui.panels[0].getMethods.includes('feed'), 'feed 是写操作，不该允许 GET');
 
@@ -743,9 +752,11 @@ test('面板与配置声明齐全', async () => {
   // 工具数从声明算：加工具时这里不该再红一次。
   assert.equal(desc.feastDefinition.describe.tools.length, FEAST_TOOL_DECLS.length,
     'describe 里的工具数和声明对不上（跑 node tools/make-describe.mjs 重生）');
-  // 事件清单也从常量算：再加事件时这里不该再红一次（不变式 3）。
-  assert.deepEqual(desc.feastDefinition.describe.events.map((e) => e.type),
-    [EVENT_MEAL, EVENT_FEED, EVENT_TABLE, EVENT_TOGETHER],
+  // 事件清单也从 config.js 的 EVENT_* 常量算：再加事件时这里不该再红一次（不变式 3）。
+  // 之前这里手写了 4 个常量，等于没算——加 feast.life.* 就红了一次。
+  const declared = Object.entries(config).filter(([k]) => k.startsWith('EVENT_'))
+    .map(([, v]) => v).sort();
+  assert.deepEqual([...desc.feastDefinition.describe.events.map((e) => e.type)].sort(), declared,
     'describe 里的事件和 config.js 声明的对不上');
   await world.stop();
 });

@@ -17,13 +17,13 @@ cd 'E:\deep seek\feed-world'
 node tools/validate-dishes.mjs      # 菜品库：字段、九维、类别、套话、菜系与文件名一致
 node tools/selfcheck.mjs            # 复刻 Coo 的干装载检查
 node tools/publish-check.mjs --online  # 市场收录口径 + npm 包名占用
-node test/dishes.test.mjs; node test/eat.test.mjs; node test/state.test.mjs; node test/combos.test.mjs; node test/together.test.mjs; node test/world.test.mjs; node test/panels.test.mjs
+npm test                            # 9 个文件，275 项
 node tools/make-describe.mjs --check
 ```
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态（0.6.2）：**19 项通过、0 失败、1 条警告**（没截 `screenshots`——离线的另外那 1 条警告是因为没查 npm，带 `--online` 就没有了）；190 项测试全绿。
+当前状态（0.7.0）：**17 项通过、0 失败、3 条警告**（没截 `screenshots`、工具数提示 yellow、没查 npm——带 `--online` 最后那条就没有了）；**275 项测试全绿**（9 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 35 · life-world 37 · world 40 · panels 41）。
 
 ---
 
@@ -118,8 +118,8 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-0.6.2 应该是 **46 个文件**（`publish-check` 数出来是 47 个，它把目录条目也算一个），压缩后约 580KB、
-解包约 1.7MB：`package.json`、`src/`（含 28 个菜品 json + 9 个 js）、`dist/webui.js`、`describe.json`、
+0.7.0 应该是 **54 个文件**（`publish-check` 数出来也是 54，它把目录条目也算一个），解包约 1.86MB：
+`package.json`、`src/`（含 28 个菜品 json + `src/life/` 7 个 js）、`dist/webui.js`、`describe.json`、
 `assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`、`GUIDE.md`。
 
 `test/`、`tools/`、`install.ps1`、`COMBO-SPEC.md`、`TOGETHER-SPEC.md`、`DISH-SPEC.md` 都在 `files` 之外，
@@ -133,16 +133,17 @@ npm pack --dry-run
 npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
-这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
-`latest` 会从 **0.6.1** 走到 **0.6.2**。**0.7.0 这个号从来没有真正发布过**：套餐 + 一起吃饭并进了 0.6.0，
-所以版本序列是 0.6.0 → 0.6.1 → 0.6.2，中间没有 0.7.0。
+这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
+
+`latest` 会从 **0.6.3** 走到 **0.7.0**。版本序列是 0.6.0 → 0.6.1 → 0.6.2 → 0.6.3 → 0.7.0；
+中间是没有 0.5.x / 0.7.0 之前那几个号的（套餐 + 一起吃饭并进了 0.6.0，当时跳过了 0.7.0）。
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.6.2
+npm view cortico-world-feast version          # 应回 0.7.0
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
-npm view cortico-world-feast dist-tags        # latest 应是 0.6.2
+npm view cortico-world-feast dist-tags        # latest 应是 0.7.0
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -177,15 +178,16 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 1. 重启 Coo，世界页开「一桌菜」
 2. 「菜单」页签截一张（能同时看到筛选条、卡片、顶部的「一起吃饭」条最好）
 3. 「吃过什么」页签截一张（口味画像那张）
-4. 存成 `assets/screenshot-1.png`、`assets/screenshot-2.png`（每张 ≤2MB，最多 8 张）
-5. 在 `package.json` 的 `cortico` 块里加：
+4. **「今天」页签截一张**（0.7.0 新面板：此刻那条 + 时间线点亮此刻那段）
+5. 存成 `assets/screenshot-1.png`、`-2.png`、`-3.png`（每张 ≤2MB，最多 8 张）
+6. 在 `package.json` 的 `cortico` 块里加：
 
 ```jsonc
-"screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png"],
+"screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png", "assets/screenshot-3.png"],
 ```
 
-6. 截图塞进**当前这一版**：现在的版本号已经是 `0.6.2`（还没发），加完直接 `npm publish` 就行；
-   要是 0.6.2 已经发出去了，就再升到 `0.6.3` 重发
+7. 截图塞进**当前这一版**：现在的版本号已经是 `0.7.0`（还没发），加完直接 `npm publish` 就行；
+   要是 0.7.0 已经发出去了，就再升到 `0.7.1` 重发
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 
@@ -207,7 +209,9 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 
 之前写过 `food` 和 `local`，两个都不对：`food` 不在词表里（市场不认，写了等于没写）；`local` 的意思是「在本机跑模型、要算力和显存」，我们一行推理都不跑。已删掉。
 
-**没声明的**：`injection-risk` 不该有——我们推的四条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么），没有一句是别人写的文字。`high-cost` 也不该有——9 个工具合计约 1.4k token，饭点一天最多 3 次。
+**没声明的**：`injection-risk` 不该有——我们推的七条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么、日程里的活动名），没有一句是别人写的文字。`high-cost` 也不该有——15 个工具合计约 2.5k token，饭点一天最多 3 次，日程一天一次、时段事件换一件事才一句、自由时间一天三档。
+
+> 0.7.0 起 `internal-state` 这条更该照实声明了：这个 World 现在还在 Memory 之外记着**她自己写的日程**和**她自己的时间做了什么的记账**（`feast/life/*.json`）。
 
 如果官方后续加了什么标签，`index.json` 的 `overrides` 里会有 `note` 说明原因；想去掉自己声明的那几个，开一个 `[标签]` issue 就行。
 
@@ -222,8 +226,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 3. World 扩展不直接依赖其他 World 扩展
 4. **至少有过一次后续更新**
 
-第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 都发过，**0.6.1 就是那次后续更新**，
-所以现在就可以申请（想把截图一并带上再申请也行，那就等 0.6.2 发出去）。
+第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 都发过，
+早就满足了；想把截图一并带上再申请也行，那就等 0.7.0 发出去。
 
 申请方式是开一个 `[认证]` issue：
 

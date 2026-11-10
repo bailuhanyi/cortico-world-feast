@@ -16,6 +16,12 @@ export const EVENT_FEED = 'feast.feed';
 export const EVENT_TABLE = 'feast.table';
 /** 0.6.0：「陪主人吃饭」的一切——邀请、喂一口、主人自己吃了什么、回喂的回应、散桌。 */
 export const EVENT_TOGETHER = 'feast.together';
+/** 0.7.0：「她的一天」——每晚请她自己写明天。 */
+export const EVENT_LIFE_PLAN = 'feast.life.plan';
+/** 0.7.0：时段切换时搭车补一句「这会儿在做什么」。 */
+export const EVENT_LIFE_MOMENT = 'feast.life.moment';
+/** 0.7.0：到她自己的时间——叫醒她，让她挑一件事做。 */
+export const EVENT_LIFE_FREE = 'feast.life.free';
 
 /** `worlds.feast` 段的默认值；`enabled` 由框架的 World 开关管理。 */
 export const DEFAULTS = Object.freeze({
@@ -50,6 +56,48 @@ export const DEFAULTS = Object.freeze({
   togetherMaxInvites: 2,
   /** 一顿"一起吃饭"最多挂多少分钟，到点自动散桌。 */
   togetherTTLMin: 60,
+
+  // ---- 「她的一天」（0.7.0 融合自 dsh-daily-schedule）----
+  /** 总开关。关掉后不生成、不注入、不推时段事件；一桌菜的饭点照旧。 */
+  lifeEnabled: true,
+  /** 每晚几点请她自己写明天（24 小时制 HH:MM）。 */
+  lifeGenerateAt: '22:00',
+  /** 此刻文本与时段事件的时间精度：minute / halfhour / block。 */
+  lifePrecision: 'halfhour',
+  /** 「待会儿想做」列几件。 */
+  lifeUpcoming: 3,
+  /** 傍晚几点之后，环境提示词里附上明天的打算。 */
+  lifeTomorrowAfter: '18:00',
+  /** 时段切换时搭车推一条轻量事件（debounce，不打断）。 */
+  lifeMomentEvents: true,
+  /** 强制日型（id 或名字）；留空按星期加权随机。 */
+  lifeDayType: '',
+  /** 要不要附上「怎么把这些带进聊天」那段说话方式。 */
+  lifeVoiceOn: true,
+  /** 一天最多几段（Coo 交回时也按这个上限裁）。 */
+  lifeMaxItems: 24,
+  /** 允许她自己改「今天已经过完」的时段（默认不允许：那是事实，不是计划）。 */
+  lifeAdjustPast: false,
+  // ---- 自由时间（0.7.0 从 playtime World 并进来）----
+  /** 她自己的时间：几点叫醒她。留空 = 不叫（但工具和面板还在）。 */
+  lifeFreeSlots: '10:00,14:00,21:00',
+  /** 到几条就不再**按点叫**（不是任务额度：到了照样能记、能继续做）。0 = 只叫不计数。 */
+  lifeFreeGoal: 3,
+  /** 到点后多少分钟内还算这一档（应用刚启动的容错）。 */
+  lifeFreeGraceMin: 20,
+  /** 叫醒后没记账，隔多少分钟催一次。 */
+  lifeFreeRetryMin: 40,
+  /** 一档最多催几次；0 = 不催。 */
+  lifeFreeMaxRetries: 1,
+  /** 叫醒时贴给她的例子，原样进事件；默认只给通用说法，不点名别的扩展的工具。 */
+  lifeFreeMenu: [
+    '- 出去转转，走一小段路，看看外面现在什么样',
+    '- 找点想看的东西看一会儿（视频、番、随便什么都行）',
+    '- 发一条自己的动态，写一两句今天的心情',
+    '- 就在家待着，听点东西、发会儿呆',
+  ].join('\n'),
+  /** 做完要不要提醒她跟主人说一句。 */
+  lifeFreeAskReport: true,
 });
 
 const ZH = {
@@ -58,7 +106,7 @@ const ZH = {
   stopped: '未启动',
   badgeToday: '今天',
   badgeNext: '下一顿',
-  prompt: '一桌菜 World 的环境说明：这里有一张会端菜的桌子。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。',
+  prompt: '一桌菜 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
   config: {
     title: '一桌菜',
     mealReminder: '饭点提醒',
@@ -91,12 +139,48 @@ const ZH = {
     togetherMaxInvitesDesc: '她自己主动开口邀请你一起吃的次数上限；0 = 她不再主动邀请（你仍然可以邀请她）。',
     togetherTTLMin: '一起吃饭最多挂多久',
     togetherTTLMinDesc: '一顿「一起吃饭」最多挂多久，到点自动散桌，免得面板上一直写着"正一起吃"。',
+    lifeEnabled: '她的一天',
+    lifeEnabledDesc: '总开关。关掉后不再生成日程、不再往系统提示里放她的日子，也不推时段事件；一桌菜的饭点照旧。',
+    lifeGenerateAt: '请她写明天的时间',
+    lifeGenerateAtDesc: '每晚几点推一条事件，请她自己写明天怎么过。她交回之前先放一个占位，不会重复叫；她没写就第二天用模板兜底。',
+    lifePrecision: '时间精度',
+    lifePrecisionDesc: '她查「此刻在干嘛」时说的是精确时刻、约到半小时，还是只说这一阵。只影响工具和事件，不进系统前缀。',
+    lifeUpcoming: '待会儿列几件',
+    lifeUpcomingDesc: '「她待会儿想做」最多列几件，也用于时段事件里那句轻轻的预告。',
+    lifeTomorrowAfter: '几点之后提明天',
+    lifeTomorrowAfterDesc: '傍晚过了这个点，环境提示词里会附上明天的打算。一天只变一次，不会打穿前缀缓存。',
+    lifeMomentEvents: '换事情时补一句',
+    lifeMomentEventsDesc: '时段切换时搭车推一条很轻的事件（debounce，不打断、睡觉时不推），补上系统前缀没法实时更新的「此刻」。',
+    lifeDayType: '固定日型',
+    lifeDayTypeDesc: '留空 = 按工作日/周末加权挑一种；填 id 或名字（workday / restday / outing / homebody / overtime / slacking）就固定用它。',
+    lifeVoiceOn: '带上说话方式',
+    lifeVoiceOnDesc: '附上「怎么把这些带进聊天」：别把日子说成任务清单、别报时间段、别提「日程」。',
+    lifeMaxItems: '一天最多几段',
+    lifeMaxItemsDesc: '她自己写明天时的段数上限；写多了按时间顺序裁掉后面的，再补齐 00:00–24:00。',
+    lifeAdjustPast: '允许她改过去',
+    lifeAdjustPastDesc: '默认关着：今天已经过完的时段她不能改——日程是计划，过去的应该是事实，回头篡改就等于编自己做过什么。打开后她也能改今天早上的安排（主人从面板改不受这个开关限制）。',
+    lifeFreeSlots: '她自己的时间',
+    lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点叫醒她一次「现在是你自己的时间，做点自己想做的」；日程说这会儿在睡觉就不叫。留空 = 不叫（工具和面板照样能用）。',
+    lifeFreeGoal: '记到几件就不再叫',
+    lifeFreeGoalDesc: '注意这是**叫醒的上限，不是任务额度**：记到这个数只表示「今天不再按点叫你了」，不表示不许再动——她想做什么随时能做，记多少都算数。0 = 只叫不计数（会一直叫到晚上，不推荐）。',
+    lifeFreeGraceMin: '档位容错',
+    lifeFreeGraceMinDesc: '到点后多少分钟内还算这一档；应用刚启动或短暂卡顿时不至于直接跳过。',
+    lifeFreeRetryMin: '没记就催',
+    lifeFreeRetryMinDesc: '叫醒后没记账，隔多少分钟再催一次。',
+    lifeFreeMaxRetries: '最多催几次',
+    lifeFreeMaxRetriesDesc: '一档催完还没记就放掉，等下一档；0 = 不催。',
+    lifeFreeMenu: '叫醒时给的例子',
+    lifeFreeMenuDesc: '原样贴进叫醒事件里，措辞上明确写着「这些只是例子，不照着也行」。默认只写通用说法（不点名别的扩展的工具——World 不该依赖别的扩展）。想让她真用上某个工具，在这里写明，例如「去花语乡转转（bloom_inbox peek）」。改完下一档生效。',
+    lifeFreeAskReport: '做完说一声',
+    lifeFreeAskReportDesc: '开启时，叫醒和记账回执都会提醒她「跟主人说一句你刚才玩了什么」。',
   },
   storage: {
     label: '吃过的记录',
     note: '清掉之后她不记得吃过什么、口味画像也会重来，正在一起吃的这一顿也会收摊（喂过的口、主人吃的那份都清了）。菜品库和主人攒的套餐都不受影响。',
     combosLabel: '主人攒的套餐',
     combosNote: '这是主人自己攒的桌。清掉之后套餐面板只剩内置的那几套；她吃过的记录不受影响。',
+    lifeLabel: '她的一天',
+    lifeNote: '清掉之后今天和往期的日程、她写过的标题和心情都会重来；吃过的记录、口味画像和主人攒的套餐都不受影响。',
   },
 };
 
@@ -106,7 +190,7 @@ const EN = {
   stopped: 'not running',
   badgeToday: 'Today',
   badgeNext: 'Next meal',
-  prompt: 'The Table world: a table that serves food. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed.',
+  prompt: 'The Table world: a table that serves food, and a day of her own. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
   config: {
     title: 'Table',
     mealReminder: 'Meal reminders',
@@ -139,12 +223,48 @@ const EN = {
     togetherMaxInvitesDesc: 'How many times a day she may ask you to eat together; 0 = she never asks (you still can).',
     togetherTTLMin: 'A shared meal lasts',
     togetherTTLMinDesc: 'How long a shared meal may stay open before it closes itself, so the panel never says "eating together" forever.',
+    lifeEnabled: 'Her day',
+    lifeEnabledDesc: 'Master switch. Off: no generation, no day in the system prefix, no moment events. Meal reminders are unaffected.',
+    lifeGenerateAt: 'When to ask for tomorrow',
+    lifeGenerateAtDesc: 'The nightly event asking her to write tomorrow herself. A placeholder prevents repeat asks; if she never replies, a template fills the day.',
+    lifePrecision: 'Time precision',
+    lifePrecisionDesc: 'How precise "right now" is in tools and events: exact minute, half hour, or just the block. Never enters the system prefix.',
+    lifeUpcoming: 'Upcoming items',
+    lifeUpcomingDesc: 'How many things "she wants to do next" lists, also used in the light moment events.',
+    lifeTomorrowAfter: 'Mention tomorrow after',
+    lifeTomorrowAfterDesc: 'After this hour the environment note adds tomorrow. Changes once a day, so the prefix cache stays intact.',
+    lifeMomentEvents: 'Nudge on a switch',
+    lifeMomentEventsDesc: 'A very light debounced event when her current activity changes (never while asleep), covering what the system prefix cannot refresh live.',
+    lifeDayType: 'Fixed day type',
+    lifeDayTypeDesc: 'Blank = weighted pick by weekday/weekend. Set an id or name to always use that type.',
+    lifeVoiceOn: 'Include the voice note',
+    lifeVoiceOnDesc: 'Adds "how to bring this into chat": never a task list, never clock times, never the word schedule.',
+    lifeMaxItems: 'Max items per day',
+    lifeMaxItemsDesc: 'Upper bound when she writes a day; extra items are dropped and 00:00–24:00 is filled in.',
+    lifeAdjustPast: 'Let her edit the past',
+    lifeAdjustPastDesc: 'Off by default: hours of today that are already over cannot be changed by her. The schedule is a plan; the past should be what happened. Turning this on lets her edit this morning too (edits you make from the panel are never restricted).',
+    lifeFreeSlots: 'Her own time',
+    lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. She is woken once per slot and told this is her own time; skipped while the schedule says she is asleep. Blank = never wake her (tools and panel still work).',
+    lifeFreeGoal: 'Stop calling after',
+    lifeFreeGoalDesc: 'This is a cap on wake-ups, **not a quota**: reaching it only means she is not woken on schedule any more — she may still do things whenever she likes, and anything she logs still counts. 0 = wake but never count (not recommended).',
+    lifeFreeGraceMin: 'Slot grace',
+    lifeFreeGraceMinDesc: 'How many minutes after a slot still count as that slot; keeps a restart from skipping it.',
+    lifeFreeRetryMin: 'Retry after',
+    lifeFreeRetryMinDesc: 'If she has not logged anything, wait this many minutes before nudging again.',
+    lifeFreeMaxRetries: 'Max retries',
+    lifeFreeMaxRetriesDesc: 'Give up on a slot after this many nudges; 0 = never retry.',
+    lifeFreeMenu: 'Example ideas',
+    lifeFreeMenuDesc: 'Pasted verbatim into the wake-up event, worded so it is clear these are only examples. Defaults stay generic on purpose — a World must not depend on another extension. To point her at a specific tool, name it here, e.g. "go for a walk (bloom_inbox peek)".',
+    lifeFreeAskReport: 'Tell the owner',
+    lifeFreeAskReportDesc: 'When on, both the wake-up and the logging receipt remind her to say one sentence about what she just did.',
   },
   storage: {
     label: 'Eating history',
     note: 'Clearing this erases what she has eaten and the taste profile, and closes any shared meal in progress (the bites and your own food go too). The dish library and your saved set meals are untouched.',
     combosLabel: 'Your saved set meals',
     combosNote: 'Set meals you put together yourself. Clearing this leaves only the built-in sets; her eating history is untouched.',
+    lifeLabel: 'Her day',
+    lifeNote: 'Clearing this erases today and all past days, including titles and moods she wrote. Eating history, taste profile and your saved set meals are untouched.',
   },
 };
 
@@ -285,6 +405,125 @@ export function configGroup(language = 'zh') {
           'x-suffix': ' 分钟',
           'x-hot': true,
         },
+        [`${K}.lifeEnabled`]: {
+          type: 'boolean',
+          title: t.lifeEnabled,
+          description: t.lifeEnabledDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeGenerateAt`]: {
+          type: 'string',
+          title: t.lifeGenerateAt,
+          description: t.lifeGenerateAtDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifePrecision`]: {
+          type: 'string',
+          title: t.lifePrecision,
+          description: t.lifePrecisionDesc,
+          enum: ['minute', 'halfhour', 'block'],
+          'x-hot': true,
+        },
+        [`${K}.lifeUpcoming`]: {
+          type: 'integer',
+          title: t.lifeUpcoming,
+          description: t.lifeUpcomingDesc,
+          minimum: 0,
+          maximum: 6,
+          'x-hot': true,
+        },
+        [`${K}.lifeTomorrowAfter`]: {
+          type: 'string',
+          title: t.lifeTomorrowAfter,
+          description: t.lifeTomorrowAfterDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeMomentEvents`]: {
+          type: 'boolean',
+          title: t.lifeMomentEvents,
+          description: t.lifeMomentEventsDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeDayType`]: {
+          type: 'string',
+          title: t.lifeDayType,
+          description: t.lifeDayTypeDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeVoiceOn`]: {
+          type: 'boolean',
+          title: t.lifeVoiceOn,
+          description: t.lifeVoiceOnDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeMaxItems`]: {
+          type: 'integer',
+          title: t.lifeMaxItems,
+          description: t.lifeMaxItemsDesc,
+          minimum: 8,
+          maximum: 40,
+          'x-hot': true,
+        },
+        [`${K}.lifeAdjustPast`]: {
+          type: 'boolean',
+          title: t.lifeAdjustPast,
+          description: t.lifeAdjustPastDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeSlots`]: {
+          type: 'string',
+          title: t.lifeFreeSlots,
+          description: t.lifeFreeSlotsDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeGoal`]: {
+          type: 'integer',
+          title: t.lifeFreeGoal,
+          description: t.lifeFreeGoalDesc,
+          minimum: 0,
+          maximum: 12,
+          'x-suffix': ' 件',
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeGraceMin`]: {
+          type: 'integer',
+          title: t.lifeFreeGraceMin,
+          description: t.lifeFreeGraceMinDesc,
+          minimum: 1,
+          maximum: 180,
+          'x-suffix': ' 分钟',
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeRetryMin`]: {
+          type: 'integer',
+          title: t.lifeFreeRetryMin,
+          description: t.lifeFreeRetryMinDesc,
+          minimum: 5,
+          maximum: 240,
+          'x-suffix': ' 分钟',
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeMaxRetries`]: {
+          type: 'integer',
+          title: t.lifeFreeMaxRetries,
+          description: t.lifeFreeMaxRetriesDesc,
+          minimum: 0,
+          maximum: 5,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeMenu`]: {
+          type: 'string',
+          title: t.lifeFreeMenu,
+          description: t.lifeFreeMenuDesc,
+          'x-multiline': true,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeAskReport`]: {
+          type: 'boolean',
+          title: t.lifeFreeAskReport,
+          description: t.lifeFreeAskReportDesc,
+          'x-hot': true,
+        },
       },
     },
   };
@@ -297,11 +536,13 @@ export function panelText(language = 'zh') {
       menu: { title: 'Menu', description: 'Browse dishes, read a full flavour profile, put one on her table, or share a meal with her.' },
       combo: { title: 'Set meals', description: 'Serve a whole table: a ready-made set, or pick a few dishes and save your own.' },
       history: { title: 'What she ate', description: 'What she has eaten, and the taste profile that has accumulated.' },
+      today: { title: 'Today', description: 'The day she wrote for herself, the hours around her meals, and the days before.' },
     };
   }
   return {
     menu: { title: '菜单', description: '翻菜品、看完整的味道档案，端起一道放到她面前，或者和她一起吃一顿。' },
     combo: { title: '套餐', description: '一桌一桌地端：现成的套餐，或者勾几道自己攒一桌存下来。' },
     history: { title: '吃过什么', description: '她吃过的东西，以及攒出来的口味画像。' },
+    today: { title: '今天', description: '她自己写下的这一天：饭点之外的那些时段，还有往期。' },
   };
 }

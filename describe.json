@@ -250,6 +250,247 @@
         "zh": "陪主人一起吃：问他要不要一起、分他一口、这顿先收了。",
         "en": "Eat together: ask the owner to share a meal, offer him a bite, or close the meal."
       }
+    },
+    {
+      "name": "feast_life_now",
+      "description": "看看自己这会儿在做什么、待会儿想做什么、今天早些时候做过什么。想知道「我刚才在干嘛」「现在几点了、我在哪儿」时用它；回执是你自己的生活背景，别照着念给主人听。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tags": [
+        "read",
+        "snapshot"
+      ],
+      "summary": {
+        "zh": "查她此刻在做什么、待会儿想做什么、今天早些时候做过什么。",
+        "en": "What she is doing right now, what she wants to do next, and what she did earlier today."
+      }
+    },
+    {
+      "name": "feast_life_view",
+      "description": "看今天、明天或某一天给自己写下的打算。date 填 today / tomorrow / YYYY-MM-DD，留空就是今天。回执是全天的时间线，跟人说起时挑一两件用自己的话说，别报时间段、别列清单。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "today / tomorrow / YYYY-MM-DD；留空 = 今天。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "看今天 / 明天 / 某一天她给自己写下的打算。",
+        "en": "Read the day she wrote for herself: today, tomorrow, or any past date."
+      }
+    },
+    {
+      "name": "feast_life_plan",
+      "description": "把某一天（通常是明天）的打算交回来记下。收到「该想想明天怎么过」那条事件时用它：items 从 00:00 排到 24:00、不重叠不留空档，每段写清 start / end / activity，想加 location、detail、outfit 也行。写的是你自己想做的事，不是任务清单；交回来记好就行，不用跟主人复述。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD；留空 = 明天。"
+          },
+          "dayType": {
+            "type": "string",
+            "description": "日型的 id 或名字，例如 restday / 休息日；留空按事件里给的那个。"
+          },
+          "title": {
+            "type": "string",
+            "description": "给这一天起一句话，可选。"
+          },
+          "mood": {
+            "type": "string",
+            "description": "这一天的心情，可选。"
+          },
+          "items": {
+            "type": "array",
+            "description": "从 00:00 到 24:00 连续的几段，每段 { start, end, activity, location, detail }。",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "description": "HH:MM，例如 09:30。"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "HH:MM；最后一段写 24:00。"
+                },
+                "activity": {
+                  "type": "string",
+                  "description": "这会儿在做什么，一句短的。"
+                },
+                "location": {
+                  "type": "string",
+                  "description": "在哪儿，可选。"
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "一个小细节，可选。"
+                },
+                "outfit": {
+                  "type": "string",
+                  "description": "穿着，纯文本，可选。"
+                },
+                "props": {
+                  "type": "array",
+                  "description": "手边的东西，可选。",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "with": {
+                  "type": "array",
+                  "description": "和谁在一起，可选。",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "start",
+                "end",
+                "activity"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "把明天（或某一天）的打算交回来记下；收到「该想想明天」的事件时用它。",
+        "en": "Hand back the day she just wrote for herself, after the nightly \"think about tomorrow\" event."
+      }
+    },
+    {
+      "name": "feast_life_adjust",
+      "description": "临时改主意：用新的一段盖掉今天（或某天）的一段时间。start / end 用 HH:MM，activity 写清楚改成做什么了——不想做了就把 activity 留空（表示不做了，不要为了填而编一件没做的事）。已经过去的时段改不了（那是事实，不是计划）；真忘了之前在做啥用 feast_life_now。改完直接说决定本身（「算了不出门了」），别说「我调整一下日程」。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD；留空 = 今天。"
+          },
+          "start": {
+            "type": "string",
+            "description": "从几点开始，HH:MM。"
+          },
+          "end": {
+            "type": "string",
+            "description": "到几点结束，HH:MM，要晚于 start。"
+          },
+          "activity": {
+            "type": "string",
+            "description": "改成做什么。留空 = 不做了（取消这一段），不是必填。"
+          },
+          "location": {
+            "type": "string",
+            "description": "在哪儿，可选。"
+          },
+          "detail": {
+            "type": "string",
+            "description": "一个小细节，可选。"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "临时改主意：用新的一段盖掉这一天的某个时间区间。",
+        "en": "Change her mind: cover a stretch of the day with something else."
+      }
+    },
+    {
+      "name": "feast_life_play",
+      "description": "记一笔自己刚做了什么（自己的时间）。activity 写做了什么，note 一句细节。**做什么都算，不限于叫醒时给的那张单子**——临时起意、单子外的事、什么也没做只是发呆，都可以记；先做了再记也行。记不记都不影响你继续做别的事。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "activity": {
+            "type": "string",
+            "description": "你做了什么，例如「出去走走」「看了会儿视频」「在窗边发呆」。"
+          },
+          "note": {
+            "type": "string",
+            "description": "一句细节，例如「在楼下看见一只三花猫」。"
+          }
+        },
+        "required": [
+          "activity"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "记一笔自己刚做完的事（自己的时间）：记了才知道今天做了几件。",
+        "en": "Log something she just did on her own time, so the day adds up."
+      }
+    },
+    {
+      "name": "feast_life_skip",
+      "description": "今天不想玩了：跳过剩下的「自己的时间」，今天不再按时叫你。跟「不想吃饭」不是一回事；跳过了也随时可以自己动。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "为什么不想玩，可选，写给自己看。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "今天不想玩了：跳过剩下的「自己的时间」，今天不再按时叫（随时能自己动）。",
+        "en": "Skip the rest of today's own-time wake-ups; she can still do anything on her own."
+      }
+    },
+    {
+      "name": "feast_life_start",
+      "description": "不用等叫醒：现在就想干点什么的时候用。回执把「例子 + 怎么记账」直接给你，不必等下一档。做过什么用 feast_life_play 记；跳过了今天（feast_life_skip）也照样能用这个重新开始。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mood": {
+            "type": "string",
+            "description": "这会儿大概想干嘛，可选，一句话。只是帮你开口，不必照着做。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "不用等叫醒：现在就想干点什么时，用它拿一份例子和记账办法。",
+        "en": "Start without waiting for a wake-up: hands her example ideas and how to log it."
+      }
     }
   ],
   "events": [
@@ -284,6 +525,30 @@
         "en": "The shared-meal channel, owner to her only (she has no way to message the owner; her invitation just hangs on the panel and she says it herself). meta.kind tells the moments apart: invite (the owner asks, or accepts her invitation), bite (the owner feeds her one bite, the text carries how it lands), owner-ate (what the owner is eating himself: a library dish by name, or free text that says outright the library has no such dish), back (he took, or declined, the bite she offered), end (the meal closed: finished / he called it / it timed out). Internal origin, from the authenticated operator channel."
       },
       "trigger": "flush"
+    },
+    {
+      "type": "feast.life.plan",
+      "description": {
+        "zh": "每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天和饭点，请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。",
+        "en": "Nightly ask for the day she wants to have tomorrow: date, day type, recent days and meal slots, then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks."
+      },
+      "trigger": "flush"
+    },
+    {
+      "type": "feast.life.moment",
+      "description": {
+        "zh": "她换了一件事做（时段切换）：一句很轻的「这会儿在…」，用来补上系统前缀没法实时刷新的「此刻」。debounce 搭车投递，不打断、睡觉时段不推；origin 是 internal。在配置里可以关掉。",
+        "en": "She moved on to something else: one light line about what she is doing now, covering what the system prefix cannot refresh live. Debounced, never interrupts, never sent while asleep. Internal origin; can be switched off in config."
+      },
+      "trigger": "debounce"
+    },
+    {
+      "type": "feast.life.free",
+      "description": {
+        "zh": "到她自己的时间：一条 internal 事件叫醒她「现在是你自己的时间」，正文带上日程里此刻那一段和一份可配置的菜单，让她挑一件事做，做完用 feast_life_play 记一笔。日程说这会儿在睡觉或正在上班时**不推**（不把「现在是你的时间」硬塞给一个正在上班的人）。没记就催一次，催完放掉；origin 是 internal。",
+        "en": "Her own time: an internal event telling her this stretch is hers, with the schedule item she is currently in plus a configurable menu, asking her to pick something and log it with feast_life_play. Never sent while the schedule says she is asleep or busy at work — telling a working person \"this time is yours\" would contradict the schedule. One retry, then dropped. Internal origin."
+      },
+      "trigger": "flush"
     }
   ],
   "prompts": [
@@ -291,7 +556,7 @@
       "key": "worlds.feast.env",
       "title": "一桌菜",
       "role": "envPrompt",
-      "content": "## 一桌菜\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【一桌菜】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- 你也可以自己开一桌：`feast_combos` 看有哪些套餐（四菜一汤、清爽一餐……），`feast_combo` 开一桌。想一个人慢慢吃就别开一桌。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n"
+      "content": "## 一桌菜\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【一桌菜】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- 你也可以自己开一桌：`feast_combos` 看有哪些套餐（四菜一汤、清爽一餐……），`feast_combo` 开一桌。想一个人慢慢吃就别开一桌。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n\n{{feast_life_block}}\n"
     }
   ]
 }
