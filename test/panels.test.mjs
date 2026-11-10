@@ -503,6 +503,22 @@ test('历史面板：统计、口味画像、最近几口都画得出来', async
   await world.stop();
 });
 
+test('历史面板：「尝过的菜」是真实道数，不是「吃得最多的前 12 道」', async () => {
+  const { mount, world } = await mountPanels();
+  // 吃 20 道不重复的菜。服务端 top 被 slice(0, 12) 截过，
+  // 面板要是拿 top.length 当计数，这里就会显示 12 而不是 20。
+  const eat = world.tools().find((t) => t.name === 'feast_eat');
+  const picks = lib.dishes.slice(0, 20);
+  for (const d of picks) await eat.handler({ dish: d.name });
+
+  const root = await mount('history');
+  const values = root.texts('feast-stat-v');
+  assert.ok(values.includes('20'), `尝过的菜该是 20，实际显示：${values.join(' / ')}`);
+  assert.ok(!values.includes('12'), '别拿被截断的 top.length 当计数');
+  // 「吃得最多」那一块还是最多 12 条（那是列表，不是计数）
+  await world.stop();
+});
+
 test('英文界面：文案切过去，数据还是同一份', async () => {
   const { mount, world } = await mountPanels({ language: 'en' });
   const root = await mount('menu');

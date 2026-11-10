@@ -210,22 +210,15 @@ const TABLE = {
     comboHint: '点菜卡选或取消；选好了存下来，下次直接端。',
     comboTable: '这一桌',
     comboLeft: (n, t) => `还剩 ${n} / ${t} 道`,
-    comboDone: '这一桌吃完了',
     comboMissing: (s) => `少配了：${s}`,
     comboNoDish: '这一桌一道菜都选上',
-    comboReuse: (n) => `再端一次「${n}」`,
-    comboSizeLabel: '来一桌配几道',
-    comboAdhoc: '随便配一桌',
-    comboSeedHint: '看到的这几道就是会端过去的那几道。',
     /* --- 一起吃饭（菜单面板顶部那条） --- */
-    togetherTitle: '一起吃饭',
     togetherNow: (min) => `正一起吃${min ? ` · ${min} 分钟了` : ''}`,
     togetherStartedByOwner: '起头的是主人',
     togetherStartedByHer: '起头的是她',
     togetherInvite: '🍽 一起吃',
     togetherInvitePh: '想先跟她说一句（可留空）',
     togetherHerAsk: (m) => `🍽 她说想和你一起吃饭（还剩约 ${m} 分钟）`,
-    togetherHerAskDone: '🍽 她说想和你一起吃饭',
     togetherAccept: '好，一起吃',
     togetherDecline: '今天不了',
     togetherEnd: '散桌',
@@ -277,7 +270,6 @@ const TABLE = {
     dayNoPast: '还没有往期的那一天。',
     dayBack: '← 收起',
     dayMeal: '饭点',
-    dayMealEaten: '吃过',
     /* --- 自由时间 --- */
     freeTitle: '她自己的时间',
     freeOff: '自由时间关着。',
@@ -365,22 +357,15 @@ const TABLE = {
     comboHint: 'Tap cards to pick or unpick; save the table and serve it later.',
     comboTable: 'This table',
     comboLeft: (n, t) => `${n} of ${t} left`,
-    comboDone: 'this table is finished',
     comboMissing: (s) => `Missing: ${s}`,
     comboNoDish: 'Pick at least one dish',
-    comboReuse: (n) => `Serve “${n}” again`,
-    comboSizeLabel: 'Dishes per table',
-    comboAdhoc: 'Just pick a table',
-    comboSeedHint: 'What you see is what gets served.',
     /* --- eating together (the bar at the top of the menu panel) --- */
-    togetherTitle: 'Eating together',
     togetherNow: (min) => `Eating together${min ? ` · ${min} min in` : ''}`,
     togetherStartedByOwner: 'you started it',
     togetherStartedByHer: 'she started it',
     togetherInvite: '🍽 Eat together',
     togetherInvitePh: 'Say something first (optional)',
     togetherHerAsk: (m) => `🍽 She asked you to eat together (about ${m} min left)`,
-    togetherHerAskDone: '🍽 She asked you to eat together',
     togetherAccept: 'Okay, let’s eat',
     togetherDecline: 'Not today',
     togetherEnd: 'Clear the table',
@@ -432,7 +417,6 @@ const TABLE = {
     dayNoPast: 'Nothing here yet.',
     dayBack: '← Close',
     dayMeal: 'Meal',
-    dayMealEaten: 'eaten',
     /* --- free time --- */
     freeTitle: 'Her own time',
     freeOff: 'Free time is off.',
@@ -874,9 +858,18 @@ const menuPanel = {
         strip.appendChild(el('span', 'feast-dim', `${t.pending} · ${t.pendingHint}`));
         const left = el('span', 'feast-left', t.pendingLeft(remainMin(p)));
         const back = el('button', null, t.retract);
-        back.onclick = () => {
+        back.onclick = async () => {
           back.disabled = true;
-          void act('retract');
+          try {
+            const r = await ctx.invoke('retract', []);
+            // 服务端在真没东西可收时回 ok:false；act() 只管报错，这里要自己重画。
+            if (r?.ok) toast(root, ctx, r.message ?? t.retracted(p.name ?? ''));
+            else toast(root, ctx, r?.message ?? t.retractNone, true);
+          } catch (err) {
+            toast(root, ctx, t.failed(err?.message ?? err), true);
+          } finally {
+            await load();
+          }
         };
         strip.appendChild(back);
         strip.appendChild(left);
@@ -1093,7 +1086,9 @@ const historyPanel = {
     }
 
     const stats = el('div', 'feast-stats');
-    for (const [k, v] of [[t.statTotal, data.total], [t.statToday, data.today], [t.statKnown, data.top?.length ?? 0]]) {
+    // 「尝过的菜」取 data.known（服务端算的 Object.keys(counts).length），
+    // 不能取 data.top.length —— top 在服务端被 slice(0, 12) 截过，吃 20 道也只显示 12。
+    for (const [k, v] of [[t.statTotal, data.total], [t.statToday, data.today], [t.statKnown, data.known ?? 0]]) {
       const s = el('div', 'feast-stat');
       s.appendChild(el('div', 'feast-stat-v', v));
       s.appendChild(el('div', 'feast-stat-k', k));
