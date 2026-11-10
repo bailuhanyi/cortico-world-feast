@@ -1,4 +1,4 @@
-﻿# install.ps1 —— 把「一桌菜」装进 Coo（Windows）
+﻿# install.ps1 —— 把「食时」装进 Coo（Windows）
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 -CooRoot "E:\Coopanion"
@@ -213,8 +213,8 @@ if (-not $WhatIf) {
 Say ""
 Say "下一步："
 Say "  1) 重启 Coo（完全退出再打开）"
-Say "  2) 面板 → 世界 →「一桌菜」，确认状态 active；配置里能看到 16 项，第一项是「饭点提醒」开关"
-Say "  3) 面板里两个页签：「菜单」点一道菜看味道档案，右边「端给她」就会端过去；「吃过什么」看她的口味画像"
+Say "  2) 面板 → 世界 →「食时」，确认状态 active；配置里能看到 36 项（分 5 张卡），第一项是「饭点提醒」开关"
+Say "  3) 面板里四个页签：菜单点一道菜看味道档案、右边「端给她」就会端过去；套餐整桌端；吃过什么看口味画像；今天看她的一天"
 Say "  4) 不想按点被叫：把「饭点提醒」关掉即可（面板上的菜和工具都还在）"
 Say ""
 Say "不想要了：删 $linkDir 和 $destDir，把 *.bak-$stamp 改名回去，并从 package.json / config.json 里删掉 feast。"

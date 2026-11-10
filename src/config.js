@@ -1,12 +1,12 @@
 /**
- * 一桌菜的配置段与文案。
+ * 食时的配置段与文案。
  *
  * 段名是 `config.json` 的 `worlds.feast`。WebUI 热改就地写这个对象，
  * World 每次用时现读，所以这里只有默认值与 schema，不持有副本。
  */
 
 export const ID = 'feast';
-export const LABEL = '一桌菜';
+export const LABEL = '食时';
 
 /** 饭点提醒用的事件类型；也是 describe 里对外的名字。 */
 export const EVENT_MEAL = 'feast.meal';
@@ -58,7 +58,7 @@ export const DEFAULTS = Object.freeze({
   togetherTTLMin: 60,
 
   // ---- 「她的一天」（0.7.0 融合自 dsh-daily-schedule）----
-  /** 总开关。关掉后不生成、不注入、不推时段事件；一桌菜的饭点照旧。 */
+  /** 总开关。关掉后不生成、不注入、不推时段事件；食时的饭点照旧。 */
   lifeEnabled: true,
   /** 每晚几点请她自己写明天（24 小时制 HH:MM）。 */
   lifeGenerateAt: '22:00',
@@ -110,12 +110,12 @@ export const DEFAULTS = Object.freeze({
 });
 
 const ZH = {
-  label: '一桌菜',
-  lamp: '一桌菜',
+  label: '食时',
+  lamp: '食时',
   stopped: '未启动',
   badgeToday: '今天',
   badgeNext: '下一顿',
-  prompt: '一桌菜 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
+  prompt: '食时 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
   /** 配置卡片标题：0.7.2 把原来一张 35 项的巨卡拆成 5 张。 */
   groups: {
     meal: '饭点',
@@ -125,7 +125,7 @@ const ZH = {
     wardrobe: '生图联动',
   },
   config: {
-    title: '一桌菜',
+    title: '食时',
     mealReminder: '饭点提醒',
     mealReminderDesc: '关掉之后不再按点叫她吃饭，只剩「主人端菜过来」和「她自己想吃」。想自己挑时间就开着这里、改下面的档位。',
     mealSlots: '饭点档位',
@@ -157,7 +157,7 @@ const ZH = {
     togetherTTLMin: '一起吃饭最多挂多久',
     togetherTTLMinDesc: '一顿「一起吃饭」最多挂多久，到点自动散桌，免得面板上一直写着"正一起吃"。',
     lifeEnabled: '她的一天',
-    lifeEnabledDesc: '总开关。关掉后不再生成日程、不再往系统提示里放她的日子，也不推时段事件；一桌菜的饭点照旧。',
+    lifeEnabledDesc: '总开关。关掉后不再生成日程、不再往系统提示里放她的日子，也不推时段事件；食时的饭点照旧。',
     lifeGenerateAt: '请她写明天的时间',
     lifeGenerateAtDesc: '每晚几点推一条事件，请她自己写明天怎么过。她交回之前先放一个占位，不会重复叫；她没写就第二天用模板兜底。',
     lifePrecision: '时间精度',

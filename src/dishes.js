@@ -63,7 +63,7 @@ export async function loadDishes(logger) {
   try {
     files = (await readdir(DATA_DIR)).filter((f) => f.endsWith('.json')).sort();
   } catch (err) {
-    logger?.warn?.(`一桌菜：菜品目录读不到（${err?.message ?? err}）`);
+    logger?.warn?.(`食时：菜品目录读不到（${err?.message ?? err}）`);
   }
 
   for (const file of files) {
@@ -72,12 +72,12 @@ export async function loadDishes(logger) {
       arr = JSON.parse(await readFile(join(DATA_DIR, file), 'utf8'));
     } catch (err) {
       bad += 1;
-      logger?.warn?.(`一桌菜：${file} 解析失败，跳过 —— ${err?.message ?? err}`);
+      logger?.warn?.(`食时：${file} 解析失败，跳过 —— ${err?.message ?? err}`);
       continue;
     }
     if (!Array.isArray(arr)) {
       bad += 1;
-      logger?.warn?.(`一桌菜：${file} 顶层不是数组，跳过`);
+      logger?.warn?.(`食时：${file} 顶层不是数组，跳过`);
       continue;
     }
     for (const raw of arr) {

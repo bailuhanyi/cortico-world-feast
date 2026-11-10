@@ -22,8 +22,8 @@ export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:0
   const name = who.name || '她';
   const lines = [
     rewrite
-      ? `【一桌菜 · 她的一天】主人想请你重新想想 ${dateLabel(date)}（${date}）。不是主人找你，也不是待办，是你自己的日子。`
-      : `【一桌菜 · 她的一天】该想想 ${dateLabel(date)}（${date}）怎么过了。不是主人找你，也不是待办，是你自己的日子。`,
+      ? `【食时 · 她的一天】主人想请你重新想想 ${dateLabel(date)}（${date}）。不是主人找你，也不是待办，是你自己的日子。`
+      : `【食时 · 她的一天】该想想 ${dateLabel(date)}（${date}）怎么过了。不是主人找你，也不是待办，是你自己的日子。`,
     `这一天按「${type?.name || '普通的一天'}」来：${type?.guide || '照你平常的样子过一天。'}`,
   ];
   if (rewrite) {

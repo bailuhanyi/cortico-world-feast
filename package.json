@@ -1,7 +1,7 @@
 {
   "name": "cortico-world-feast",
   "version": "0.7.2",
-  "description": "一桌菜 · 给 Coo 一张会端菜的桌子：800 道带九维口味的菜（28 个菜系组），她能自己挑，主人能从面板端一道或整桌过去，也能和她一起吃一顿。0.7.0 起她还有自己的日子：每晚自己写明天怎么过，到点过自己的时间、做完记一笔。",
+  "description": "食时 · 给 Coo 一张会端菜的桌子：800 道带九维口味的菜（28 个菜系组），她能自己挑，主人能从面板端一道或整桌过去，也能和她一起吃一顿。0.7.0 起她还有自己的日子：每晚自己写明天怎么过，到点过自己的时间、做完记一笔。",
   "license": "MIT",
   "author": "青",
   "repository": {
@@ -56,17 +56,17 @@
   "cortico": {
     "kind": "world",
     "api": 6,
-    "displayName": "一桌菜",
+    "displayName": "食时",
     "icon": "assets/icon.png",
     "webUiClient": "dist/webui.js",
     "describe": "describe.json",
     "locales": {
       "zh": {
-        "displayName": "一桌菜",
+        "displayName": "食时",
         "description": "给 Coo 一张会端菜的桌子：800 道菜（28 个菜系组），每道都有九维口味、香气、口感、余韵和一段实吃描写。她能自己按菜系挑，主人也能从面板把一道菜端到她面前，或者整桌端过去（8 套内置套餐，也能自己勾几道攒成一桌存下来）；还能和她一起吃一顿：邀请她、互相喂一口，你吃了什么她也知道。同一道菜每次吃到的都不一样，吃过什么、对什么反应、口味画像跨天攒着。0.7.0 起她还有自己的日子：每晚到点请她自己写明天怎么过（零 API Key，用已配的模型），第二天按它过；到点还会有「她自己的时间」，让她挑件事做并记一笔。主人能在「今天」面板看今天和明天的时间线、此刻她在做什么、她做过什么、往前翻往期，也能临时改掉某一段。饭点提醒、「她的一天」和自由时间都能在配置里单独关掉。"
       },
       "en": {
-        "displayName": "Table",
+        "displayName": "Mealtime",
         "description": "A table that serves food to your Coo: 800 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Since 0.7.0 she also has a life of her own: every evening she is asked to write tomorrow herself (no API key — it uses the model you already have), and the next day she lives it; on her own-time slots she picks something to do and logs it. The Today panel shows today's and tomorrow's timeline, what she is doing right now, what she has been up to, past days, and lets you change a stretch of it. Meal reminders, her day, and her own time can each be switched off in config."
       }
     },

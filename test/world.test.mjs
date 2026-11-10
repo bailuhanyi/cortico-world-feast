@@ -743,7 +743,7 @@ test('一起吃饭：没开席时，喂/自己吃/摊牌这几件事都不该静
 test('面板与配置声明齐全', async () => {
   const { world } = await makeWorld();
   const zh = world.webUi('zh');
-  assert.equal(zh.label, '一桌菜');
+  assert.equal(zh.label, '食时');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealReminder'], '缺饭点开关');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealSlots']);
   assert.ok(zh.promptDocs[0].role === 'envPrompt');

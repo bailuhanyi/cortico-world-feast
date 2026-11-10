@@ -261,10 +261,10 @@ export function freeEventText({
   const p = playProgress(play, goal);
   const tag = slot === '补' ? '' : ` · ${slot}`;
   const head = retry
-    ? `【一桌菜 · 自己的时间】${slot === '补' ? '刚才那一档' : `${slot} 那档`}你还没记。`
+    ? `【食时 · 自己的时间】${slot === '补' ? '刚才那一档' : `${slot} 那档`}你还没记。`
     : (freeNow
-      ? `【一桌菜 · 你自己的时间${tag}】现在是你自己的时间，不是主人找你，也不是待办。`
-      : `【一桌菜 · 有点空档${tag}】这会儿手头没事，想做什么都可以，不是主人找你，也不是待办。`);
+      ? `【食时 · 你自己的时间${tag}】现在是你自己的时间，不是主人找你，也不是待办。`
+      : `【食时 · 有点空档${tag}】这会儿手头没事，想做什么都可以，不是主人找你，也不是待办。`);
 
   const lines = [head];
   if (where && !retry) {

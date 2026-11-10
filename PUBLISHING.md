@@ -23,7 +23,7 @@ node tools/make-describe.mjs --check
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态（0.7.0）：**17 项通过、0 失败、3 条警告**（没截 `screenshots`、工具数提示 yellow、没查 npm——带 `--online` 最后那条就没有了）；**275 项测试全绿**（9 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 35 · life-world 37 · world 40 · panels 41）。
+当前状态（0.7.2）：**18 项通过、0 失败、2 条警告**（没截 `screenshots`；工具数 / 工具 token 在卡片上会标 yellow——0.7.0 之后工具涨到 16 个）；**312 项测试全绿**（10 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 36 · wardrobe 20 · life-world 47 · world 40 · panels 47）。
 
 ---
 
@@ -118,8 +118,8 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-0.7.0 应该是 **54 个文件**（`publish-check` 数出来也是 54，它把目录条目也算一个），解包约 1.86MB：
-`package.json`、`src/`（含 28 个菜品 json + `src/life/` 7 个 js）、`dist/webui.js`、`describe.json`、
+0.7.2 应该是 **56 个文件**，压缩约 713KB、解包约 2.0MB：
+`package.json`、`src/`（含 28 个菜品 json + `src/life/` 9 个 js）、`dist/webui.js`、`describe.json`、
 `assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`、`GUIDE.md`。
 
 `test/`、`tools/`、`install.ps1`、`COMBO-SPEC.md`、`TOGETHER-SPEC.md`、`DISH-SPEC.md` 都在 `files` 之外，
@@ -133,17 +133,17 @@ npm pack --dry-run
 npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
-这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
+这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
 
-`latest` 会从 **0.6.3** 走到 **0.7.0**。版本序列是 0.6.0 → 0.6.1 → 0.6.2 → 0.6.3 → 0.7.0；
-中间是没有 0.5.x / 0.7.0 之前那几个号的（套餐 + 一起吃饭并进了 0.6.0，当时跳过了 0.7.0）。
+`latest` 会从 **0.7.1** 走到 **0.7.2**。版本序列是 0.6.0 → 0.6.1 → 0.6.2 → 0.6.3 → 0.7.0 → 0.7.1 → 0.7.2。
+（0.6.0 那会儿「0.7.0」这个号本来打算给套餐用、后来并进了 0.6.0；真正的 0.7.0 是后来「她的一天」才发的。）
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.7.0
+npm view cortico-world-feast version          # 应回 0.7.2
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
-npm view cortico-world-feast dist-tags        # latest 应是 0.7.0
+npm view cortico-world-feast dist-tags        # latest 应是 0.7.2
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -167,7 +167,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 
 > 0.2.0 那次没开成，等 Action 自己那一趟等了好几天——**发完就开一个**，别省这一步。
 
-之后在 Coo 的「扩展 → 市场」里搜「一桌菜」就能看到。第一次出现时会带**新品**徽标（`newDays: 14`）。
+之后在 Coo 的「扩展 → 市场」里搜「食时」就能看到。第一次出现时会带**新品**徽标（`newDays: 14`）。
 
 ---
 
@@ -175,7 +175,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 
 市场详情页现在只有图标和文字。截图要你自己截，脚本替不了：
 
-1. 重启 Coo，世界页开「一桌菜」
+1. 重启 Coo，世界页开「食时」
 2. 「菜单」页签截一张（能同时看到筛选条、卡片、顶部的「一起吃饭」条最好）
 3. 「吃过什么」页签截一张（口味画像那张）
 4. **「今天」页签截一张**（0.7.0 新面板：此刻那条 + 时间线点亮此刻那段）
@@ -186,8 +186,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 "screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png", "assets/screenshot-3.png"],
 ```
 
-7. 截图塞进**当前这一版**：现在的版本号已经是 `0.7.0`（还没发），加完直接 `npm publish` 就行；
-   要是 0.7.0 已经发出去了，就再升到 `0.7.1` 重发
+7. 截图塞进**当前这一版**：现在的版本号是 `0.7.2`（还没发），加完直接 `npm publish` 就行；
+   要是 0.7.2 已经发出去了，就再升一位重发
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 
@@ -226,8 +226,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 3. World 扩展不直接依赖其他 World 扩展
 4. **至少有过一次后续更新**
 
-第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 都发过，
-早就满足了；想把截图一并带上再申请也行，那就等 0.7.0 发出去。
+第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 都发过，
+早就满足了；想把截图一并带上再申请也行，那就等 0.7.2 发出去。
 
 申请方式是开一个 `[认证]` issue：
 

@@ -1,5 +1,5 @@
 /**
- * 一桌菜面板的浏览器端（Coo WebUI 扩展面板）。
+ * 食时面板的浏览器端（Coo WebUI 扩展面板）。
  *
  * 约定（见 build/cortico/src/web/shared/client-panel.ts）：
  *   · 默认导出 `{ panels: { <panelId>: { mount(ctx) } } }`

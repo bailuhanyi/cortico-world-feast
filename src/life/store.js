@@ -2,7 +2,7 @@
  * 「她的一天」的存取。
  *
  * 每天一个文件：<dataDir>/feast/life/YYYY-MM-DD.json。
- * 与一桌菜的 state.json / combos.json 分开：清空「吃过的记录」不该把她的日子也清掉。
+ * 与食时的 state.json / combos.json 分开：清空「吃过的记录」不该把她的日子也清掉。
  * 写入一律 tmp → rename（和 World 主状态同一套原子写，断电不会留半个 JSON）。
  *
  * 这里没有「配置」：所有开关都走 worlds.feast.*（ctx.cfg，热改），

@@ -1,5 +1,5 @@
 /**
- * 一桌菜 World。
+ * 食时 World。
  *
  * 做的是"让她真的吃到东西"这件事：
  *
@@ -456,7 +456,7 @@ export class FeastWorld {
         feast_life_block: envBlock({ today, tomorrow, cfg: this.cfg, tz: this.timezone, nowMs: now, wardrobe }),
       };
     } catch (err) {
-      this.#host?.log?.warn?.('一桌菜：她的一天环境提示词算不出来', { err: msg(err) });
+      this.#host?.log?.warn?.('食时：她的一天环境提示词算不出来', { err: msg(err) });
       return { feast_life_block: '' };
     }
   }
@@ -620,7 +620,7 @@ export class FeastWorld {
       tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的；端来时${shelfLifeText(left)}。）`);
     }
 
-    this.#host?.log?.info?.('一桌菜：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
+    this.#host?.log?.info?.('食时：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
     return { text: [body, '', tail.join('')].join('\n') };
   }
 
@@ -698,7 +698,7 @@ export class FeastWorld {
     await this.#save();
 
     const word = action === 'like' ? '合口味' : action === 'dislike' ? '不太对付' : '一般';
-    this.#host?.log?.info?.('一桌菜：记了一句反应', { dish: id, action });
+    this.#host?.log?.info?.('食时：记了一句反应', { dish: id, action });
     return { text: `记下了：${entry.name || entry.id}——${word}${entry.note ? `，${entry.note}` : ''}。` };
   }
 
@@ -709,7 +709,7 @@ export class FeastWorld {
     skipToday(this.#state, day);
     await this.#save();
     const reason = typeof args.reason === 'string' && args.reason.trim() ? `（${args.reason.trim().slice(0, 80)}）` : '';
-    this.#host?.log?.info?.('一桌菜：今天不吃', { reason });
+    this.#host?.log?.info?.('食时：今天不吃', { reason });
     return { text: `好，今天剩下的饭点不叫你了${reason}。主人端菜过来还是会告诉你；想吃随时自己来。` };
   }
 
@@ -730,7 +730,7 @@ export class FeastWorld {
       await this.#lifeMoment(now);
       await this.#freeTick(now);
     } catch (err) {
-      this.#host?.log?.warn?.('一桌菜：她的一天这一拍没跑完', { err: msg(err) });
+      this.#host?.log?.warn?.('食时：她的一天这一拍没跑完', { err: msg(err) });
     }
     // 一起吃饭这一顿到点也自己散（面板没开着也得散）。
     await this.#togetherSettle();
@@ -741,7 +741,7 @@ export class FeastWorld {
     if (plan.action === 'drop') {
       this.#state.pending = null;
       await this.#save();
-      this.#host?.log?.info?.('一桌菜：放掉这一顿', { reason: plan.reason });
+      this.#host?.log?.info?.('食时：放掉这一顿', { reason: plan.reason });
       return;
     }
 
@@ -749,12 +749,12 @@ export class FeastWorld {
       await this.#pushMeal(plan);
     } catch (err) {
       // 发不出去就不记账，下一拍再试。
-      this.#host?.log?.warn?.('一桌菜：叫饭失败', { err: msg(err) });
+      this.#host?.log?.warn?.('食时：叫饭失败', { err: msg(err) });
       return;
     }
     markNudged(this.#state, now, plan.slot, plan.action === 'retry');
     await this.#save();
-    this.#host?.log?.info?.('一桌菜：叫饭', {
+    this.#host?.log?.info?.('食时：叫饭', {
       slot: plan.slot,
       retry: plan.action === 'retry',
       ...(plan.dropped ? { dropped: plan.dropped } : {}),
@@ -768,8 +768,8 @@ export class FeastWorld {
     const state = this.#state;
 
     const head = plan.action === 'retry'
-      ? `【一桌菜 · 再问一句】${plan.slot} 那顿你还没吃。`
-      : `【一桌菜 · ${plan.slot}】到饭点了。不是主人找你，也不是待办，是你自己该吃了。`;
+      ? `【食时 · 再问一句】${plan.slot} 那顿你还没吃。`
+      : `【食时 · ${plan.slot}】到饭点了。不是主人找你，也不是待办，是你自己该吃了。`;
 
     const lines = [head, `今天已经吃过：${eatenTodayText(state, this.timezone, now)}。`];
     // 融合点：饭点本来就在她的一天里，顺带说清她这会儿原本在做什么。
@@ -845,7 +845,7 @@ export class FeastWorld {
       throw new Error('宿主没有 pushEvent，端不过去');
     }
 
-    this.#host?.log?.info?.('一桌菜：主人端了一道菜', { dish: dish.id });
+    this.#host?.log?.info?.('食时：主人端了一道菜', { dish: dish.id });
     return { ok: true, message: `端过去了：${dish.name}`, dish: this.#panelDish(dish), pending: this.#servedView() };
   }
 
@@ -897,7 +897,7 @@ export class FeastWorld {
       throw new Error('宿主没有 pushEvent，端不过去');
     }
 
-    this.#host?.log?.info?.('一桌菜：主人端了一桌', { combo: combo?.id, n: dishes.length });
+    this.#host?.log?.info?.('食时：主人端了一桌', { combo: combo?.id, n: dishes.length });
     return {
       ok: true,
       message: `端过去了：${name}（${dishes.length} 道）`,
@@ -990,7 +990,7 @@ export class FeastWorld {
     const ended = finishTogether(this.#state.together, { nowMs: this.#now(), why });
     if (!ended) return null;
     await this.#save();
-    this.#host?.log?.info?.('一桌菜：这一顿散了', { why, bites: ended.bites });
+    this.#host?.log?.info?.('食时：这一顿散了', { why, bites: ended.bites });
     if (push) await this.#pushTogether(this.#endLines(ended), { kind: 'end', why });
     return ended;
   }
@@ -1037,7 +1037,7 @@ export class FeastWorld {
       '他喂你一口、或者他自己吃了什么，都会告诉你。不想吃就直说——feast_skip 管的是饭点提醒，不管这个。',
     ], { kind: 'invite' });
 
-    this.#host?.log?.info?.('一桌菜：邀请她一起吃');
+    this.#host?.log?.info?.('食时：邀请她一起吃');
     return { ok: true, message: '问她了：一起吃点？', together: this.#togetherView() };
   }
 
@@ -1068,7 +1068,7 @@ export class FeastWorld {
       this.#askReaction() ? '说一句这一口什么味儿——一句话就够。' : '',
     ], { kind: 'bite', dish: dish.id, name: dish.name });
 
-    this.#host?.log?.info?.('一桌菜：喂了她一口', { dish: dish.id, nth });
+    this.#host?.log?.info?.('食时：喂了她一口', { dish: dish.id, nth });
     return { ok: true, message: `喂了一口：${dish.name}`, together: this.#togetherView() };
   }
 
@@ -1115,7 +1115,7 @@ export class FeastWorld {
       ];
     await this.#pushTogether(lines, { kind: 'owner-ate', ...(dish ? { dish: dish.id, name: dish.name } : {}) });
 
-    this.#host?.log?.info?.('一桌菜：主人也吃了点什么', { kind: entry.kind, matched });
+    this.#host?.log?.info?.('食时：主人也吃了点什么', { kind: entry.kind, matched });
     const said = entry.kind === 'dish'
       ? (matched
         ? `记下了：你在吃${dish.name}——这句正好是库里那道，按它记了。`
@@ -1139,7 +1139,7 @@ export class FeastWorld {
       '那就 feast_eat 吃起来（dish 留空就吃桌上还没吃的那道）；也可以 feast_together（action 填 feed）分他一口。',
     ], { kind: 'invite', accepted: true });
 
-    this.#host?.log?.info?.('一桌菜：接住了一起吃的邀请');
+    this.#host?.log?.info?.('食时：接住了一起吃的邀请');
     return { ok: true, message: '应了：这顿一起吃。', together: this.#togetherView() };
   }
 
@@ -1172,7 +1172,7 @@ export class FeastWorld {
         '（大概是客气或者吃不下，不是不喜欢。别追问，也别往心里去。）',
       ], { kind: 'back', dish: g.id, name: g.name, accepted: ok === true });
 
-    this.#host?.log?.info?.('一桌菜：回喂的回应', { dish: g.id, accepted: ok === true });
+    this.#host?.log?.info?.('食时：回喂的回应', { dish: g.id, accepted: ok === true });
     return {
       ok: true,
       message: ok === true ? `记下了：他吃了${g.name || g.id}。` : '记下了：这次没要。',
@@ -1751,7 +1751,7 @@ export class FeastWorld {
         meta: { date: today.date, reason: 'adjust' },
       }, { deliver: true, trigger: 'debounce' });
     } catch (err) {
-      this.#host?.log?.warn?.('一桌菜：改完日程后补的时段事件没发出去', { err: msg(err) });
+      this.#host?.log?.warn?.('食时：改完日程后补的时段事件没发出去', { err: msg(err) });
     }
   }
 
@@ -1828,7 +1828,7 @@ export class FeastWorld {
     if (plan.action === 'drop') {
       play.pending = null;
       await writePlay(this.dataDir, play);
-      this.#host?.log?.info?.('一桌菜：放掉这一档自己的时间', { reason: plan.reason });
+      this.#host?.log?.info?.('食时：放掉这一档自己的时间', { reason: plan.reason });
       return;
     }
 
@@ -1843,7 +1843,7 @@ export class FeastWorld {
         [plan.slot]: { at: now, doing: String(item.activity ?? '').slice(0, 40) },
       };
       await writePlay(this.dataDir, play);
-      this.#host?.log?.info?.('一桌菜：这一档不算她的自由时间', {
+      this.#host?.log?.info?.('食时：这一档不算她的自由时间', {
         slot: plan.slot, doing: item.activity,
       });
       return;
@@ -1853,12 +1853,12 @@ export class FeastWorld {
       await this.#pushFree(plan, play, now, Boolean(item && isFreeActivity(item)));
     } catch (err) {
       // 发不出去就不记账，下一拍再试。
-      this.#host?.log?.warn?.('一桌菜：叫醒她过自己的时间失败', { err: msg(err) });
+      this.#host?.log?.warn?.('食时：叫醒她过自己的时间失败', { err: msg(err) });
       return;
     }
     markFreeNudged(play, now, plan.slot, plan.action === 'retry');
     await writePlay(this.dataDir, play);
-    this.#host?.log?.info?.('一桌菜：她自己的时间', {
+    this.#host?.log?.info?.('食时：她自己的时间', {
       slot: plan.slot, retry: plan.action === 'retry', done: play.done.length,
     });
   }
@@ -1916,7 +1916,7 @@ export class FeastWorld {
     await writePlay(this.dataDir, play);
     const reason = typeof args?.reason === 'string' && args.reason.trim()
       ? `（${args.reason.trim().slice(0, 80)}）` : '';
-    this.#host?.log?.info?.('一桌菜：今天不玩了', { reason });
+    this.#host?.log?.info?.('食时：今天不玩了', { reason });
     return { text: `好，今天剩下的档不叫了${reason}。想玩随时可以自己来。` };
   }
 
@@ -1958,7 +1958,7 @@ export class FeastWorld {
   }
 
   #ensureStarted() {
-    if (!this.#started || !this.#state) throw new Error('一桌菜还没启动；等它启用后再试。');
+    if (!this.#started || !this.#state) throw new Error('食时还没启动；等它启用后再试。');
   }
 
   // -------------------------------------------------------------------------
@@ -2049,13 +2049,13 @@ export class FeastWorld {
     this.#lifeTomorrow = null;
     this.#lifeSegment = null;
     this.#play = null;
-    this.#host?.log?.info?.('一桌菜：她的一天已清空', { days: n, plays: p });
+    this.#host?.log?.info?.('食时：她的一天已清空', { days: n, plays: p });
     return `她的 ${n} 天日程${p ? `和 ${p} 天的自由时间记录` : ''}清了；吃过的记录、口味画像和主人攒的套餐都没动。`;
   }
 
   async #clearCombos() {
     await this.#saveCombos([]);
-    this.#host?.log?.info?.('一桌菜：自定义套餐已清空');
+    this.#host?.log?.info?.('食时：自定义套餐已清空');
     return '主人攒的桌清了；内置的套餐和她吃过的记录都没动。';
   }
 
@@ -2068,7 +2068,7 @@ export class FeastWorld {
     fresh.skippedDay = this.#state?.skippedDay ?? '';
     this.#state = fresh;
     await this.#save();
-    this.#host?.log?.info?.('一桌菜：吃过的记录已清空');
+    this.#host?.log?.info?.('食时：吃过的记录已清空');
     return '吃过的记录清了；菜单、菜品库和主人攒的套餐都没动。';
   }
 
@@ -2245,7 +2245,7 @@ export class FeastWorld {
           const names = s.ids.map((id) => this.#lib.byId.get(id)?.name ?? id);
           this.#state.served = null;
           await this.#save();
-          this.#host?.log?.info?.('一桌菜：主人把端过去的菜收回去了', { ids: s.ids });
+          this.#host?.log?.info?.('食时：主人把端过去的菜收回去了', { ids: s.ids });
           return {
             ok: true,
             message: `收回来了：${names.join('、')}`,
@@ -2376,7 +2376,7 @@ export class FeastWorld {
           const play = await this.#freePlay(this.#now());
           skipFreeToday(play);
           await writePlay(this.dataDir, play);
-          this.#host?.log?.info?.('一桌菜：主人替她把今天剩下的档停了');
+          this.#host?.log?.info?.('食时：主人替她把今天剩下的档停了');
           return { ok: true, message: '好了，今天剩下的档不叫了。她随时能自己动。' };
         }
         case 'freeStart': {
@@ -2395,7 +2395,7 @@ export class FeastWorld {
             origin: 'internal',
             ts: new Date(now).toISOString(),
             text: [
-              '【一桌菜 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
+              '【食时 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
               `今天已经记了 ${play.done.length} 件${goal > 0 ? `（到 ${goal} 件只是不再按点叫你，不是上限）` : ''}。`,
               '想做什么都行，下面只是个例子，不照着也行：',
               menu,
@@ -2440,7 +2440,7 @@ export class FeastWorld {
       }
     }
 
-    throw new Error(`一桌菜没有这个面板：${panel}`);
+    throw new Error(`食时没有这个面板：${panel}`);
   }
 
   // -------------------------------------------------------------------------
@@ -2460,15 +2460,15 @@ export class FeastWorld {
       // 自由时间的记录也先读进来：状态行和面板要用，别等到第一拍 tick 才读。
       await this.#freePlay(this.#now());
     } catch (err) {
-      host?.log?.warn?.('一桌菜：她的一天没读进来', { err: msg(err) });
+      host?.log?.warn?.('食时：她的一天没读进来', { err: msg(err) });
     }
-    host?.log?.info?.('一桌菜已启动', {
+    host?.log?.info?.('食时已启动', {
       dishes: this.#lib.dishes.length,
       cuisines: this.#lib.cuisines.length,
       bad: this.#lib.bad,
       eaten: this.#state.eaten.length,
     });
-    if (this.#lib.bad) host?.log?.warn?.(`一桌菜：跳过了 ${this.#lib.bad} 条坏数据`);
+    if (this.#lib.bad) host?.log?.warn?.(`食时：跳过了 ${this.#lib.bad} 条坏数据`);
 
     // 启动后先看一拍（应用可能刚过饭点），之后按 tickSec 看表。
     this.#timer = this.#setInterval(() => { void this.#serial(() => this.#tick()); }, this.#tickMs());

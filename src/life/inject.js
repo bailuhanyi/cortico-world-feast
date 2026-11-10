@@ -104,7 +104,7 @@ export function momentLine({ today, cfg = {}, tz = 'Asia/Shanghai', nowMs = Date
   const t = timeLabel(cfg.lifePrecision ?? 'halfhour', z.minute);
   const upcoming = Math.max(0, Math.min(3, Number(cfg.lifeUpcoming) || 3));
   const next = today.items.slice(i + 1, i + 1 + upcoming).map((it) => it.activity).join('、');
-  const head = `【一桌菜 · 她的一天】${t ? `${t}，` : ''}你这会儿在${cur.activity}${placeOf(cur)}`;
+  const head = `【食时 · 她的一天】${t ? `${t}，` : ''}你这会儿在${cur.activity}${placeOf(cur)}`;
   const tail = next ? `；待会儿想${next}` : '';
   return safe(`${head}${tail}。（这是你自己的日子，不用特意跟主人汇报，聊到时自然带一句就好。）`);
 }
