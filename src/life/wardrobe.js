@@ -23,6 +23,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { isAsleepActivity } from './free.js';
+
 const KINDS = ['characters', 'outfits', 'scenes', 'props'];
 const text = (v, max) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 const list = (v, max = 40) => (Array.isArray(v) ? v : []).map((x) => text(x, max)).filter(Boolean);
@@ -291,7 +293,8 @@ export function autoOutfit(item, lib, prevOutfit = '') {
     return { outfit: match ? match.name : text(item.outfit, 40), source: 'model' };
   }
 
-  const sleeping = /睡/.test(String(item.activity));
+  // 睡觉的判据和「她自己的时间」共用一处：/睡/ 认不出「回笼觉」「打盹」。
+  const sleeping = isAsleepActivity(item);
   const char = lib.characters[0];
   const sit = text(item.situation, 20);
 

@@ -54,7 +54,11 @@ export async function buildDescribe() {
       key: doc.key,
       title: doc.title,
       ...(doc.role ? { role: doc.role } : {}),
-      content: readFileSync(doc.path, 'utf8'),
+      // 统一成 LF 再进 describe.json。
+      // 这台机器 core.autocrlf=true，检出的 .md 是 CRLF；不归一的话，
+      // 「同一个源码」会因为在哪个 checkout 里跑而产出两份不同的 describe.json，
+      // --check 时红一次、发版时又红一次（0.7.2 真的踩到了）。
+      content: readFileSync(doc.path, 'utf8').replace(/\r\n/g, '\n'),
     });
   }
 

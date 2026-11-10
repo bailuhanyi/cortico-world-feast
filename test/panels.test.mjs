@@ -12,6 +12,7 @@ import { FeastWorld } from '../src/world.js';
 import { loadDishes } from '../src/dishes.js';
 import { DEFAULTS } from '../src/config.js';
 import { templateDay, writeDay } from '../src/life/index.js';
+import { parseSlots } from '../src/state.js';
 
 const lib = await loadDishes();
 
@@ -174,6 +175,26 @@ async function waitFor(check, what = '条件', timeoutMs = 2000) {
   }
 }
 
+/**
+ * 在菜单面板上点开某道菜的详情卡。
+ *
+ * 0.7.2 起菜单首屏只画 MENU_PAGE 张，「麻婆豆腐」不再保证一开始就在页面上——
+ * 所以先搜一下把它筛出来，再点。搜不到就直接失败，别让后面的断言拿到 undefined.fire。
+ */
+async function openDishCard(root, name) {
+  const find = () => root.querySelectorAll('.feast-card').find((c) => c.textContent.includes(name));
+  if (!find()) {
+    const search = root.findAll((n) => n.tagName === 'INPUT').find((i) => String(i.placeholder ?? '').includes('搜菜名'));
+    assert.ok(search, '缺搜索框，没法把菜筛出来');
+    search.value = name;
+    search.fire('input');
+    await waitFor(find, `搜出 ${name}`);
+  }
+  const card = find();
+  assert.ok(card, `没找到 ${name} 那张卡`);
+  card.fire('click');
+}
+
 // --------------------------------------------------------------------------
 // 夹具
 // --------------------------------------------------------------------------
@@ -277,25 +298,75 @@ test('bundle 形状对：面板 id 与服务端声明一一对上，mount 都是
   assert.ok(!Array.isArray(b.default.panels));
 });
 
-test('菜单面板：挂载后拉到菜、画出卡片、注入了样式', async () => {
+test('菜单面板：挂载后拉到菜、画出首屏卡片、注入了样式', async () => {
   const { mount, invocations, world } = await mountPanels();
   const root = await mount('menu');
   assert.equal(invocations[0].method, 'list');
   assert.ok(root.querySelector('style'), '没注入样式');
   const cards = root.querySelectorAll('.feast-card');
-  assert.equal(cards.length, lib.dishes.length, `只画了 ${cards.length} 张卡`);
-  assert.ok(root.texts('feast-card-n').includes('麻婆豆腐'));
+  // 0.7.2 起首屏只画 MENU_PAGE 张，剩下的按「再看 N 道」加——
+  // 800 道一次全画是 8000 多个节点，而一屏最多看十几张。所以这里钉的是「分页」不是「全画」。
+  assert.ok(cards.length > 0, '一张卡都没画');
+  assert.ok(cards.length < lib.dishes.length, `首屏不该把 ${lib.dishes.length} 道全画出来`);
   assert.ok(root.texts('feast-count')[0].includes(`共 ${lib.dishes.length} 道`));
   assert.ok(root.texts('feast-tag').length > 0, '标签没画出来');
+  await world.stop();
+});
+
+test('菜单面板：首屏之后「再看 N 道」能把剩下的翻出来，翻到底按钮就没了', async () => {
+  const { mount, world, panels } = await mountPanels();
+  try {
+    const root = await mount('menu');
+    const first = root.querySelectorAll('.feast-card').length;
+    assert.ok(first > 0 && first < lib.dishes.length);
+
+    // 一路点到底。每点一次卡片只会变多，不会重拉（数据已经在手里）。
+    for (let guard = 0; guard < 40; guard += 1) {
+      const more = root.findAll((n) => n.tagName === 'BUTTON' && /再看 \d+ 道/.test(n.textContent));
+      if (!more.length) break;
+      more[0].fire('click');
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    assert.equal(root.querySelectorAll('.feast-card').length, lib.dishes.length,
+      '翻到底应该把整库都画出来');
+    assert.ok(!root.findAll((n) => n.tagName === 'BUTTON' && /再看 \d+ 道/.test(n.textContent)).length,
+      '画完了就不该再留「再看」');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('菜单面板：换筛选会回到第一页', async () => {
+  const { mount, world, panels } = await mountPanels();
+  try {
+    const root = await mount('menu');
+    // 先翻一页
+    root.findAll((n) => n.tagName === 'BUTTON' && /再看 \d+ 道/.test(n.textContent))[0].fire('click');
+    await new Promise((r) => setTimeout(r, 0));
+    const grown = root.querySelectorAll('.feast-card').length;
+
+    // 再筛一个结果很少的条件：应该回到第一页，而不是带着上一次的分页位置。
+    const selects = root.findAll((n) => n.tagName === 'SELECT');
+    selects[1].value = '川菜';
+    selects[1].fire('change');
+    // 川菜 45 道，一页 60 张装得下，所以「再看」不该出现。
+    await waitFor(() => root.querySelectorAll('.feast-card').length
+      === lib.dishes.filter((d) => d.cuisine === '川菜').length, '筛出川菜');
+    assert.ok(grown > 0);
+    assert.equal(root.querySelectorAll('.feast-card').length,
+      lib.dishes.filter((d) => d.cuisine === '川菜').length);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
   await world.stop();
 });
 
 test('菜单面板：点一张卡进详情，九维条、食材、实吃描写都在', async () => {
   const { mount, invocations, world } = await mountPanels();
   const root = await mount('menu');
-  const card = root.querySelectorAll('.feast-card').find((c) => c.textContent.includes('麻婆豆腐'));
-  assert.ok(card, '没找到麻婆豆腐那张卡');
-  card.fire('click');
+  // 麻婆豆腐不一定落在首屏那 60 张里：先筛出来再点（openDishCard 会搜）。
+  await openDishCard(root, '麻婆豆腐');
   await waitFor(() => root.querySelector('.feast-detail'), '详情画出来');
 
   assert.ok(invocations.some((i) => i.method === 'dish'), '没请求单道详情');
@@ -312,7 +383,7 @@ test('菜单面板：点一张卡进详情，九维条、食材、实吃描写�
 test('菜单面板：点「端给她」会真的推到世界，并回到菜单带上等待条', async () => {
   const { mount, invocations, world } = await mountPanels();
   const root = await mount('menu');
-  root.querySelectorAll('.feast-card').find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+  await openDishCard(root, '麻婆豆腐');
   await new Promise((r) => setTimeout(r, 0));
 
   const serve = root.findByText('端给她');
@@ -459,7 +530,7 @@ test('菜单面板：端来的那道写着还剩多久，钟走一格就变小�
     const root = await mount('menu');
 
     // 从面板上端：端完它会自己回菜单并重拉一次，等待条这时就该出现
-    root.querySelectorAll('.feast-card').find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
+    await openDishCard(root, '麻婆豆腐');
     await waitFor(() => root.querySelector('.feast-detail'), '详情画出来', 4000);
     root.findByText('端给她').fire('click');
     await waitFor(() => root.querySelector('.feast-left'), '等待条上出现倒计时', 4000);
@@ -645,15 +716,14 @@ test('菜单面板：菜品详情里能「喂她一口」和「我也吃这道�
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('menu');
-    const open = (name) => root.querySelectorAll('.feast-card').find((c) => c.textContent.includes(name));
-    open('麻婆豆腐').fire('click');
+    await openDishCard(root, '麻婆豆腐');
     await waitFor(() => root.querySelector('.feast-detail'), '详情画出来');
     assert.ok(!root.findByText('我也吃这道'), '没在吃的时候不该有「我也吃这道」');
     assert.ok(!root.findByText('喂她一口'), '没在吃的时候不该有「喂她一口」');
 
     await world.inviteTogether();
     await mount('menu');
-    open('麻婆豆腐').fire('click');
+    await openDishCard(root, '麻婆豆腐');
     await waitFor(() => root.querySelector('.feast-detail'), '详情又画出来');
 
     // 喂她一口：主人的投喂动作，走 bite（进她的吃过记录，但不算吃掉一道）
@@ -855,7 +925,8 @@ test('菜单面板：搜索框打完字重拉，焦点和光标还在输入框�
   try {
     const root = await mount('menu');
     const allCount = root.querySelectorAll('.feast-card').length;
-    assert.ok(allCount > 100, '先确认全量卡片在');
+    // 0.7.2 起首屏只画 MENU_PAGE 张，所以这里不再是 800；要断言的是「一页正经的卡」。
+    assert.ok(allCount > 10, '先确认首屏卡片在');
 
     const search = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('搜菜名'));
     assert.ok(search, '缺搜索框');
@@ -1080,6 +1151,94 @@ test('今天面板：画出今天的时间线和「此刻」，此刻那一段�
     // 今天和明天两段都在
     assert.ok(root.texts('feast-day').some((s) => s.includes('今天')));
     assert.ok(root.texts('feast-day').some((s) => s.includes('明天')));
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：她已经写好明天时，按钮变成「请她重新想想」而不是抹掉重来', async () => {
+  const clock = { now: Date.parse('2026-11-05T21:30:00+08:00') };
+  const { mount, invocations, world, panels } = await mountPanels({ clock });
+  try {
+    // 先让她真写好明天（走工具，和服务端那条路一致）。
+    const plan = world.tools().find((tool) => tool.name === 'feast_life_plan');
+    await plan.handler({
+      date: 'tomorrow',
+      title: '写好的明天',
+      items: [
+        { start: '00:00', end: '08:00', activity: '睡觉' },
+        { start: '08:00', end: '12:00', activity: '她认真写的上午' },
+        { start: '12:00', end: '24:00', activity: '她认真写的下午' },
+      ],
+    });
+
+    const root = await mount('today');
+    assert.ok(root.textContent.includes('她认真写的上午'), '面板上该能看到她写的明天');
+    // 0.7.2：这时候不能再挂「请她写明天」——那一下会把写好的明天清空（服务端已修，
+    // 面板这一层也不该再让人误以为可以随便点）。
+    assert.ok(!root.findByText('请她写明天'), '已经写好了就不该还是「请她写明天」');
+    assert.ok(root.findByText('请她重新想想'), '该换成「请她重新想想」');
+
+    // 点它：要二次确认（测试里 window.confirm 默认没有，所以这里先补一个）
+    const calls = [];
+    const realConfirm = globalThis.window?.confirm;
+    globalThis.window = { ...(globalThis.window ?? {}), confirm: (msg) => { calls.push(msg); return true; } };
+    try {
+      root.findByText('请她重新想想').fire('click');
+      await waitFor(() => invocations.some((i) => i.method === 'plan'), '调了 plan');
+      assert.equal(calls.length, 1, '该先问一句再动手');
+    } finally {
+      if (realConfirm) globalThis.window.confirm = realConfirm;
+      else delete globalThis.window;
+    }
+    // 她写好的内容不能因为点了一下就没了。
+    await waitFor(() => root.textContent.includes('她认真写的上午'), '她的明天还在', 3000);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：点时间线某一段，起止和活动名自动填进改主意表单', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    const rows = root.querySelectorAll('.feast-tl-row');
+    assert.ok(rows.length > 0, '缺时间线');
+    // 找一行不是「此刻」的，免得和点亮那条混在一起
+    const row = rows.find((r) => !r.classList.contains('is-past')) ?? rows[0];
+    const label = row.querySelector('.feast-tl-t').textContent;
+    const activity = row.querySelector('.feast-tl-a').textContent;
+    row.fire('click');
+
+    const form = root.querySelector('.feast-form');
+    const inputs = form.findAll((n) => n.tagName === 'INPUT');
+    const [startIn, endIn] = inputs;
+    const actIn = inputs.at(-1);
+    const [s, e] = label.split('–');
+    assert.equal(startIn.value, s, '起始时间该填进去');
+    assert.equal(endIn.value, e, '结束时间该填进去');
+    assert.ok(actIn.value && activity.includes(actIn.value), `活动名该填进去：${actIn.value}`);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：饭点画进了时间线（到点的段上挂着「饭点 HH:MM」）', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    const marks = root.texts('feast-meal');
+    const slots = parseSlots(DEFAULTS.mealSlots).map((s) => s.hm);
+    assert.ok(marks.length >= slots.length,
+      `三顿饭应该各挂一个标，现在只有 ${marks.length} 个：${marks.join('、')}`);
+    for (const hm of slots) {
+      assert.ok(marks.some((m) => m.includes(hm)), `时间线上找不到 ${hm} 这一档：${marks.join('、')}`);
+    }
   } finally {
     panels.lastHandle?.dispose?.();
   }

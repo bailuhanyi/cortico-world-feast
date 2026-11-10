@@ -131,6 +131,13 @@ const CSS = `
 .feast-note{color:var(--fe-dim);font-size:12px;line-height:1.55;margin-top:6px}
 .feast-item.is-click{cursor:pointer}
 .feast-item.is-click:hover .feast-item-n{text-decoration:underline}
+/* --- 时间线：可点、饭点标记 --- */
+.feast-tl-row.is-click{cursor:pointer}
+.feast-tl-row.is-click:hover{background:color-mix(in srgb,var(--fe-accent) 6%,transparent)}
+.feast-tl-row.is-click:hover .feast-tl-a{text-decoration:underline}
+.feast-meal{font-size:10.5px;padding:1px 6px;border-radius:999px;border:1px dashed var(--fe-line);color:var(--fe-dim);flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.feast-meal.is-done{border-style:solid;border-color:var(--fe-accent);color:var(--fe-accent)}
+.feast-invite-note{flex:1;min-width:150px}
 `;
 
 const TABLE = {
@@ -176,6 +183,15 @@ const TABLE = {
     loading: '翻菜单…',
     failed: (e) => `取不到数据：${e}`,
     served: (n) => `端过去了：${n}`,
+    /* --- 通用回执（0.7.2：以前这些是散在各处的硬编码中文，切英文也不变） --- */
+    sayOk: '记下了',
+    sayNo: '不行',
+    sayCancel: '取消',
+    retract: '收回',
+    retracted: (n) => `收回来了：${n}`,
+    retractNone: '现在没有摆在她面前的菜。',
+    more: (n) => `再看 ${n} 道`,
+    shownOf: (a, b) => `画了 ${a} / ${b} 道`,
     /* --- 套餐面板 --- */
     comboPresets: '现成的套餐',
     comboCustom: '你自己攒的',
@@ -207,6 +223,7 @@ const TABLE = {
     togetherStartedByOwner: '起头的是主人',
     togetherStartedByHer: '起头的是她',
     togetherInvite: '🍽 一起吃',
+    togetherInvitePh: '想先跟她说一句（可留空）',
     togetherHerAsk: (m) => `🍽 她说想和你一起吃饭（还剩约 ${m} 分钟）`,
     togetherHerAskDone: '🍽 她说想和你一起吃饭',
     togetherAccept: '好，一起吃',
@@ -241,6 +258,10 @@ const TABLE = {
     dayOff: '「她的一天」现在关着。到配置里打开 lifeEnabled 才会开始给她排日子。',
     dayAsk: '请她写明天',
     dayAsking: '已经跟她说了…',
+    dayAskAgain: '请她重新想想',
+    dayAskAgainHint: '她写好了才会盖掉现在这一版；不想改就留着。',
+    dayRewriteConfirm: '明天她已经写好了。要请她重写吗？她想好了才会盖掉现在这一版。',
+    dayWaiting: '已经在等她写了，到点没写会用模板兜底。',
     daySourceCoo: '她自己写的',
     daySourceTemplate: '临时顶上的',
     daySourcePending: '等她写',
@@ -248,14 +269,15 @@ const TABLE = {
     dayChange: '临时改主意',
     dayChangePh: '做什么（留空 = 不做了）',
     dayChangeGo: '改这一段时间',
-    dayChangeGo2: '改',
-    dayChangeHint: '填一段时间和一件事；不想做了就把「做什么」留空，那一段时间会空出来。原来压在这段上的安排会被截断或拆开。已经过去的时间改不了（那是事实）。',
+    dayChangeHint: '填一段时间和一件事；不想做了就把「做什么」留空，那一段时间会空出来。原来压在这段上的安排会被截断或拆开。已经过去的时间改不了（那是事实）。点时间线上任意一段，会把它填进这里。',
+    dayChangePicked: (s, e, a) => `已填入 ${s}–${e} ${a}，改完按「改这一段时间」。`,
     dayChanges: (n) => `临时改过 ${n} 次`,
     dayCount: (n) => `${n} 段`,
-    daySleep: '睡觉',
-    dayEmpty: '还没有任何一天的记录。',
+    dayClickHint: '点这一段改主意',
     dayNoPast: '还没有往期的那一天。',
     dayBack: '← 收起',
+    dayMeal: '饭点',
+    dayMealEaten: '吃过',
     /* --- 自由时间 --- */
     freeTitle: '她自己的时间',
     freeOff: '自由时间关着。',
@@ -268,9 +290,11 @@ const TABLE = {
     freeSkipped: '今天不按点叫了（她随时能自己动）',
     freeNotYet: '今天还没记过什么（不记也不影响她做事）。',
     freeHint: '到点会叫醒她「现在是你自己的时间」。下面这些只是例子：单子外的事、临时起意的都算，做不做、做几件都由她，想开始随时能开始、不用等叫醒。到她睡觉或上班的时段不会叫。',
-    freeLog: '她刚做了什么',
-    freeLogPh: '一句话，比如「出去走了走」',
-    freeAnyHint: '做什么都算，不限于上面的例子。',
+    freeSkippedSlot: (doing) => `没叫：她那会儿在${doing}`,
+    freeSkipToday: '今天先别叫了',
+    freeSkipDone: '好了，今天剩下的档不叫了。',
+    freeStart: '现在就想动',
+    freeStartDone: '行，这会儿就由她自己安排。',
   },
   en: {
     allCuisines: 'All cuisines',
@@ -314,6 +338,15 @@ const TABLE = {
     loading: 'Loading…',
     failed: (e) => `Failed to load: ${e}`,
     served: (n) => `Served: ${n}`,
+    /* --- shared receipts (0.7.2: these used to be hard-coded Chinese) --- */
+    sayOk: 'Noted',
+    sayNo: 'Cannot',
+    sayCancel: 'Cancel',
+    retract: 'Take back',
+    retracted: (n) => `Taken back: ${n}`,
+    retractNone: 'Nothing is sitting in front of her right now.',
+    more: (n) => `Show ${n} more`,
+    shownOf: (a, b) => `showing ${a} of ${b}`,
     /* --- combo panel --- */
     comboPresets: 'Ready-made sets',
     comboCustom: 'Your own tables',
@@ -345,6 +378,7 @@ const TABLE = {
     togetherStartedByOwner: 'you started it',
     togetherStartedByHer: 'she started it',
     togetherInvite: '🍽 Eat together',
+    togetherInvitePh: 'Say something first (optional)',
     togetherHerAsk: (m) => `🍽 She asked you to eat together (about ${m} min left)`,
     togetherHerAskDone: '🍽 She asked you to eat together',
     togetherAccept: 'Okay, let’s eat',
@@ -379,6 +413,10 @@ const TABLE = {
     dayOff: 'Her day is switched off. Turn on lifeEnabled in config to start it.',
     dayAsk: 'Ask her to write tomorrow',
     dayAsking: 'Asked her…',
+    dayAskAgain: 'Ask her to rethink it',
+    dayAskAgainHint: 'Her version is only replaced if she actually writes a new one.',
+    dayRewriteConfirm: 'She has already written tomorrow. Ask her to rewrite it? Only a new reply from her replaces the current one.',
+    dayWaiting: 'Already waiting on her; a template fills in if she does not reply.',
     daySourceCoo: 'written by her',
     daySourceTemplate: 'stood in',
     daySourcePending: 'waiting for her',
@@ -386,14 +424,15 @@ const TABLE = {
     dayChange: 'Change of plan',
     dayChangePh: 'what she does (blank = skip it)',
     dayChangeGo: 'Change this block',
-    dayChangeGo2: 'Change',
-    dayChangeHint: 'Give a time range and an activity; leave the activity blank to skip that stretch instead. Whatever was planned there is trimmed or split. Hours that are already over cannot be changed — they are what happened.',
+    dayChangeHint: 'Give a time range and an activity; leave the activity blank to skip that stretch instead. Whatever was planned there is trimmed or split. Hours that are already over cannot be changed — they are what happened. Clicking any row on the timeline fills it in here.',
+    dayChangePicked: (s, e, a) => `Filled in ${s}–${e} ${a} — press “Change this block”.`,
     dayChanges: (n) => `adjusted ${n}×`,
     dayCount: (n) => `${n} blocks`,
-    daySleep: 'asleep',
-    dayEmpty: 'No days recorded yet.',
+    dayClickHint: 'Click to change this stretch',
     dayNoPast: 'Nothing here yet.',
     dayBack: '← Close',
+    dayMeal: 'Meal',
+    dayMealEaten: 'eaten',
     /* --- free time --- */
     freeTitle: 'Her own time',
     freeOff: 'Free time is off.',
@@ -406,9 +445,11 @@ const TABLE = {
     freeSkipped: 'no scheduled wake-ups today (she can still do anything)',
     freeNotYet: 'Nothing logged yet (not logging does not stop her doing things).',
     freeHint: 'She is woken at these slots. The list is only examples — anything at all counts, and she may do as much or as little as she likes, starting whenever she wants without waiting for a wake-up. Never while the schedule says she is asleep or at work.',
-    freeLog: 'What she just did',
-    freeLogPh: 'one line, e.g. "went for a walk"',
-    freeAnyHint: 'Anything counts, not just the examples above.',
+    freeSkippedSlot: (doing) => `skipped: she was ${doing}`,
+    freeSkipToday: 'No wake-ups today',
+    freeSkipDone: 'Done — no more scheduled wake-ups today.',
+    freeStart: 'Start something now',
+    freeStartDone: 'Fine — she can do whatever she likes right now.',
   },
 };
 
@@ -478,6 +519,9 @@ function line(label, value) {
   return p;
 }
 
+/** 首屏一次画多少张卡；「再看 N 道」往上加。800 张全画是 8000 多个节点。 */
+const MENU_PAGE = 60;
+
 function toast(root, ctx, text, bad = false) {
   const old = root.querySelector('.feast-toast');
   if (old) old.remove();
@@ -500,6 +544,8 @@ const menuPanel = {
     root.appendChild(style);
 
     const state = { filter: {}, cuisines: [], categories: [], categoryCuisines: {}, detail: null, pending: null, together: null, last: null };
+    /** 首屏画到第几张；换筛选/搜索要回到第一页（见 load）。 */
+    let shownCount = MENU_PAGE;
     /** 等待条右边那个"还剩多久"的节点，随钟走。 */
     let pendingBox = null;
     /** 会话条里要随钟走的那几个节点。 */
@@ -518,6 +564,8 @@ const menuPanel = {
     let noteNode = null;
     /** 会话条「记一笔」没提交的草稿：结构变了整条重画时别把人打了一半的字吞掉。 */
     let noteDraft = '';
+    /** 「一起吃」那栏带的这句话的草稿，同理。 */
+    let inviteDraft = '';
     const saveFocus = () => {
       const a = document.activeElement;
       // a 得先非空：谁都没聚焦时 a 是 null，而 searchNode 这时也是 null，
@@ -550,7 +598,7 @@ const menuPanel = {
     async function act(method, args) {
       try {
         const r = await ctx.invoke(method, args ?? []);
-        if (r?.ok === false) toast(root, ctx, r?.message ?? '不行', true);
+        if (r?.ok === false) toast(root, ctx, r?.message ?? t.sayNo, true);
         else if (r?.message) toast(root, ctx, r.message);
         await load();
       } catch (err) {
@@ -652,8 +700,21 @@ const menuPanel = {
       }
 
       const bar = el('div', 'feast-together-bar');
+      // 服务端 inviteTogether(note) 一直支持带一句话（会原样拼进推给她的事件），
+      // 0.7.1 的面板却只调 act('invite')、不传 note——主人想先交代一句「今天有点累」没法说。
+      // 用单独的 class（不叫 feast-search）：菜单面板顶上那个才是搜索框。
+      const note = el('input', 'feast-invite-note');
+      note.placeholder = t.togetherInvitePh;
+      note.value = inviteDraft;
+      note.oninput = () => { inviteDraft = String(note.value ?? ''); };
       const ask = el('button', null, t.togetherInvite);
-      ask.onclick = () => void act('invite');
+      ask.onclick = () => {
+        const said = String(note.value ?? '').trim();
+        inviteDraft = ''; // 发出去了就清草稿，重画后输入框跟着空
+        ask.disabled = true;
+        void act('invite', [said ? { note: said } : undefined]);
+      };
+      bar.appendChild(note);
       bar.appendChild(ask);
       if (tg.lastEnd) {
         bar.appendChild(el('span', 'feast-dim', t.togetherLastEnd(endWhy(tg.lastEnd.why))));
@@ -703,6 +764,9 @@ const menuPanel = {
 
     async function load() {
       saveFocus(); // 摘树之前存：一摘焦点就没了，事后想存也摸不到
+      // 换筛选/搜索回到第一页；顺带把滚动位置也带回来（0.7.1 这里不存，一搜就跳回顶部）。
+      shownCount = MENU_PAGE;
+      const keepScroll = wrap.scrollTop;
       wrap.replaceChildren(el('div', 'feast-empty', t.loading));
       let data;
       try {
@@ -710,7 +774,8 @@ const menuPanel = {
       } catch (err) {
         wrap.replaceChildren(el('div', 'feast-empty is-bad', t.failed(err?.message ?? err)));
         return;
-      }      state.cuisines = data.cuisines ?? [];
+      }
+      state.cuisines = data.cuisines ?? [];
       state.categories = data.categories ?? [];
       state.categoryCuisines = data.categoryCuisines ?? {};
       // 每次重拉都跟着服务端走：端来的菜可能是在别处端的，也可能已经被吃掉/过期收走。
@@ -719,10 +784,10 @@ const menuPanel = {
       state.together = data.together ?? null;
       // 会话条自己走表时要重画，而重画要的那份数据得留着。
       state.last = data;
-      render(data);
+      render(data, { scroll: keepScroll });
     }
 
-    function render(data) {
+    function render(data, opts = {}) {
       wrap.replaceChildren();
       pendingBox = null;
       togetherBox = null;
@@ -801,30 +866,40 @@ const menuPanel = {
       bar.appendChild(dice);
       wrap.appendChild(bar);
 
-      // 端过来还没吃的那道：右侧写着还剩多久，自己会走。
+      // 端过来还没吃的那道：右侧写着还剩多久，自己会走。端错了能就地收回来。
       if (state.pending) {
         const p = state.pending;
         const strip = el('div', 'feast-strip');
-        strip.appendChild(el('b', null, `🍽 ${p.name}`));
+        strip.appendChild(el('b', null, `🍽 ${p.name ?? (p.isTable ? t.comboTable : '')}`));
         strip.appendChild(el('span', 'feast-dim', `${t.pending} · ${t.pendingHint}`));
         const left = el('span', 'feast-left', t.pendingLeft(remainMin(p)));
+        const back = el('button', null, t.retract);
+        back.onclick = () => {
+          back.disabled = true;
+          void act('retract');
+        };
+        strip.appendChild(back);
         strip.appendChild(left);
         pendingBox = { el: left, p };
         wrap.appendChild(strip);
       }
 
+      // 首屏只画前 MENU_PAGE 张：库已经 800 道，全画一次是 8000 多个节点，
+      // 而主人一屏最多看十几张。剩下的按「再看 N 道」一批一批加，不重新拉数据。
+      const total = data.items.length;
+      const shown = Math.min(shownCount, total);
       wrap.appendChild(el('div', 'feast-count', data.matched < data.total
         ? t.matched(data.matched, data.total)
         : t.all(data.total)));
 
-      if (!data.items?.length) {
+      if (!total) {
         wrap.appendChild(el('div', 'feast-empty', t.empty));
         loadFocus();
         return;
       }
 
       const grid = el('div', 'feast-grid');
-      for (const d of data.items) {
+      for (const d of data.items.slice(0, shown)) {
         const card = el('button', 'feast-card');
         const h = el('div', 'feast-card-h');
         h.appendChild(el('span', 'feast-card-n', d.name));
@@ -840,7 +915,21 @@ const menuPanel = {
         grid.appendChild(card);
       }
       wrap.appendChild(grid);
+
+      if (shown < total) {
+        const moreBox = el('div', 'feast-act');
+        const more = el('button', null, t.more(Math.min(MENU_PAGE, total - shown)));
+        more.onclick = () => {
+          shownCount = Math.min(total, shown + MENU_PAGE);
+          render(data, { scroll: wrap.scrollTop });
+        };
+        moreBox.appendChild(more);
+        moreBox.appendChild(el('span', 'feast-count', t.shownOf(shown, total)));
+        wrap.appendChild(moreBox);
+      }
+
       loadFocus(); // 重画完把焦点和光标放回搜索框（或会话条输入框）
+      if (typeof opts.scroll === 'number') wrap.scrollTop = opts.scroll;
     }
 
     async function openDetail(id) {
@@ -883,7 +972,7 @@ const menuPanel = {
             // 端完回到菜单，让她自己看到"还在她面前"那条
             await load();
           } else {
-            toast(root, ctx, r?.message ?? '不行', true);
+            toast(root, ctx, r?.message ?? t.sayNo, true);
             serve.disabled = false;
             serve.textContent = t.serve;
           }
@@ -903,10 +992,10 @@ const menuPanel = {
             const r = await ctx.invoke('bite', [d.id]);
             if (r?.ok) {
               state.together = r.together ?? state.together;
-              toast(root, ctx, r.message ?? '喂了一口');
+              toast(root, ctx, r.message ?? t.sayOk);
               bite.disabled = false;
             } else {
-              toast(root, ctx, r?.message ?? '不行', true);
+              toast(root, ctx, r?.message ?? t.sayNo, true);
               bite.disabled = false;
             }
           } catch (err) {
@@ -923,10 +1012,10 @@ const menuPanel = {
             const r = await ctx.invoke('take', [{ id: d.id }]);
             if (r?.ok) {
               state.together = r.together ?? state.together;
-              toast(root, ctx, r.message ?? '记下了');
+              toast(root, ctx, r.message ?? t.sayOk);
               mine.disabled = false;
             } else {
-              toast(root, ctx, r?.message ?? '不行', true);
+              toast(root, ctx, r?.message ?? t.sayNo, true);
               mine.disabled = false;
             }
           } catch (err) {
@@ -1101,11 +1190,15 @@ const todayPanel = {
     const hasDraft = () => Boolean(draftNode
       && (draftNode.value || draftNode === document.activeElement));
 
+    /** 改主意表单的三个输入框，点时间线时往里填。 */
+    let changeInputs = null;
+
     const sourceLabel = (s) => (s === 'coo' ? t.daySourceCoo
       : s === 'template' ? t.daySourceTemplate
         : s === 'pending' ? t.daySourcePending
           : s === 'manual' ? t.daySourceManual : '');
-    const isSleep = (it) => /睡/.test(String(it?.activity ?? ''));
+    // 睡觉判据跟服务端对齐：/睡/ 认不出「回笼觉」「打盹」。
+    const isSleep = (it) => /睡|回笼觉|打盹|小憩|眯一会|补觉|午觉|赖床/.test(String(it?.activity ?? ''));
 
     /** 'HH:MM' → 当天第几分钟；坏值给 null（时间线不该因为一行脏数据整页不画）。 */
     function minuteOf(hm) {
@@ -1119,9 +1212,20 @@ const todayPanel = {
     /** 服务端给的 nowMinute 只对「今天」有意义；看往期时不能高亮。 */
     const isToday = () => (viewing ?? data?.date) === data?.date;
 
-    /** 一天的时间线。now 给了就高亮落在 now 上的那一段、并把过去的压暗。 */
-    function timeline(day, now = null) {
+    /**
+     * 一天的时间线。now 给了就高亮落在 now 上的那一段、并把过去的压暗。
+     *
+     * `meals` 给了就在对应的段上标出饭点（服务端手上本来就有档位，以前只在顶上写一句话）；
+     * `clickable` 为真时点一行会把起止和活动名填进「临时改主意」——以前那儿得手抄时间。
+     */
+    function timeline(day, now = null, opts = {}) {
       const list = el('div', 'feast-tl');
+      const meals = opts.meals ?? [];
+      const eatenMin = new Set((opts.eatenAt ?? []).map((at) => {
+        // 吃过的那一刻落在哪一档：取档位里最近的、且在她吃之后的。
+        const d = new Date(at);
+        return d.getHours() * 60 + d.getMinutes();
+      }));
       for (const it of day?.items ?? []) {
         const row = el('div', 'feast-tl-row');
         row.appendChild(el('span', 'feast-tl-t', `${it.start}–${it.end}`));
@@ -1135,6 +1239,21 @@ const todayPanel = {
         if (it.with?.length) bits.push(`和${it.with.join('、')}`);
         if (bits.length) mid.appendChild(el('div', 'feast-tl-d', bits.join('；')));
         row.appendChild(mid);
+
+        // 饭点标记：这一段时间里落进了哪一档，就在行尾挂一个小标。
+        const s0 = minuteOf(it.start);
+        const e0 = minuteOf(it.end);
+        if (s0 !== null && e0 !== null) {
+          for (const hm of meals) {
+            const m = minuteOf(hm);
+            if (m === null || m < s0 || m >= e0) continue;
+            const did = eatenMin.has(m) || eatenMin.has(m + 1) || eatenMin.has(m - 1)
+              || eatenMin.has(m + 2) || eatenMin.has(m - 2);
+            row.appendChild(el('span', `feast-meal${did ? ' is-done' : ''}`,
+              `${did ? '✓ ' : ''}${t.dayMeal} ${hm}`));
+          }
+        }
+
         if (now !== null) {
           const s = minuteOf(it.start);
           const e = minuteOf(it.end);
@@ -1143,9 +1262,31 @@ const todayPanel = {
             else if (e <= now) row.classList.add('is-past');
           }
         }
+        if (opts.clickable && it.start && it.end) {
+          row.classList.add('is-click');
+          row.title = t.dayClickHint;
+          row.onclick = () => fillChange(it);
+        }
         list.appendChild(row);
       }
       return list;
+    }
+
+    /** 点时间线某一段：把起止和活动名填进「临时改主意」，并滚过去。 */
+    function fillChange(it) {
+      if (!changeInputs) return;
+      const { startIn, endIn, actIn } = changeInputs;
+      startIn.value = String(it.start ?? '');
+      endIn.value = String(it.end ?? '');
+      actIn.value = String(it.activity ?? '');
+      draftNode = actIn;
+      draftNode.value = actIn.value; // 有草稿就别让走表重画把人打断
+      toast(root, ctx, t.dayChangePicked(it.start, it.end, it.activity));
+      const box = changeInputs.box;
+      if (box?.scrollIntoView) {
+        try { box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch { /* 老宿主没有就算了 */ }
+      }
+      try { actIn.focus(); } catch { /* 同上 */ }
     }
 
     /** 一天的头：日期、日型、她写的标题与心情、来源。 */
@@ -1190,14 +1331,14 @@ const todayPanel = {
       return list;
     }
 
-    function daySection(label, day, now) {
+    function daySection(label, day, now, opts = {}) {
       const box = el('div');
       box.appendChild(dayHead(day, label));
-      box.appendChild(day?.items?.length ? timeline(day, now) : emptyDay(t.dayNoDay));
+      box.appendChild(day?.items?.length ? timeline(day, now, opts) : emptyDay(t.dayNoDay));
       return box;
     }
 
-    /** 临时改主意的表单：起止时间 + 做什么。 */
+    /** 临时改主意的表单：起止时间 + 做什么。点时间线会自动填进来。 */
     function changeForm(date) {
       const box = el('div', 'feast-block');
       box.appendChild(el('div', 'feast-block-t', t.dayChange));
@@ -1213,6 +1354,7 @@ const todayPanel = {
       actIn.value = '';
       actIn.addEventListener('input', () => { draftNode = actIn; });
       draftNode = actIn;
+      changeInputs = { box, startIn, endIn, actIn };
       const go = el('button', 'feast-btn-primary', t.dayChangeGo);
       form.appendChild(startIn);
       form.appendChild(el('span', 'feast-dim', '–'));
@@ -1230,10 +1372,10 @@ const todayPanel = {
         try {
           const r = await ctx.invoke('adjust', [{ date, start, end, activity }]);
           if (r?.ok) {
-            toast(root, ctx, r.message ?? '记下了');
+            toast(root, ctx, r.message ?? t.sayOk);
             await refresh();
           } else {
-            toast(root, ctx, r?.message ?? '改不了', true);
+            toast(root, ctx, r?.message ?? t.sayNo, true);
             go.disabled = false;
           }
         } catch (err) {
@@ -1281,6 +1423,53 @@ const todayPanel = {
         box.appendChild(el('div', 'feast-empty', t.freeNotYet));
       }
 
+      // 到点了、但日程说她被占着所以没叫的那几档。不写出来，面板上就只剩「今天没有了」，
+      // 用户以为功能坏了（0.7.1 就是这样，实测她一天 13 段里 11 段都被判成"不算"）。
+      if (f.skippedSlots?.length) {
+        const list = el('div', 'feast-list');
+        for (const s of f.skippedSlots) {
+          const row = el('div', 'feast-item');
+          row.appendChild(el('span', 'feast-item-t', s.slot));
+          row.appendChild(el('span', 'feast-item-n', t.freeSkippedSlot(s.doing)));
+          list.appendChild(row);
+        }
+        box.appendChild(list);
+      }
+      // 面板上替她开口：0.7.1 只有一个「今天不叫了」是工具，主人点不到。
+      if (f.enabled && !f.skipped) {
+        const acts = el('div', 'feast-act');
+        const skip = el('button', null, t.freeSkipToday);
+        skip.onclick = async () => {
+          skip.disabled = true;
+          try {
+            const r = await ctx.invoke('freeSkip', []);
+            if (r?.ok) toast(root, ctx, r.message ?? t.freeSkipDone);
+            else toast(root, ctx, r?.message ?? t.sayNo, true);
+          } catch (err) {
+            toast(root, ctx, t.failed(err?.message ?? err), true);
+          } finally {
+            await refresh();
+          }
+        };
+        const start = el('button', null, t.freeStart);
+        start.onclick = async () => {
+          start.disabled = true;
+          try {
+            const r = await ctx.invoke('freeStart', []);
+            if (r?.ok) toast(root, ctx, r.message ?? t.freeStartDone);
+            else toast(root, ctx, r?.message ?? t.sayNo, true);
+          } catch (err) {
+            toast(root, ctx, t.failed(err?.message ?? err), true);
+          } finally {
+            start.disabled = false;
+            await refresh();
+          }
+        };
+        acts.appendChild(start);
+        acts.appendChild(skip);
+        box.appendChild(acts);
+      }
+
       box.appendChild(el('div', 'feast-note', t.freeHint));
       return box;
     }
@@ -1318,7 +1507,7 @@ const todayPanel = {
       try {
         const r = await ctx.invoke('day', [date]);
         if (!r?.ok) {
-          toast(root, ctx, r?.message ?? '取不到这一天', true);
+          toast(root, ctx, r?.message ?? t.sayNo, true);
           viewing = null;
           render();
           return;
@@ -1343,6 +1532,7 @@ const todayPanel = {
     function render() {
       const scrollTop = wrap.scrollTop;
       draftNode = null;
+      changeInputs = null;
       wrap.replaceChildren();
 
       if (!data) return;
@@ -1354,34 +1544,56 @@ const todayPanel = {
 
       wrap.appendChild(nowStrip());
 
-      // 今天：只有看今天时才给 nowMinute 高亮。
-      wrap.appendChild(daySection(t.dayToday, data.today, isToday() && !viewing ? data.nowMinute : null));
+      // 今天：只有看今天时才给 nowMinute 高亮。点任意一段能填进下面的改主意表单。
+      const canChangeToday = Boolean(data.today?.items?.length) && data.today.source !== 'pending';
+      wrap.appendChild(daySection(t.dayToday, data.today, isToday() && !viewing ? data.nowMinute : null, {
+        meals: data.mealSlots ?? [],
+        eatenAt: (data.eatenToday ?? []).map((e) => e.at),
+        clickable: canChangeToday && !viewing,
+      }));
 
       // 明天：来源是 pending 就说明已经问过她、还没交回。
       wrap.appendChild(daySection(t.dayTomorrow, data.tomorrow, null));
 
+      // 按钮跟着明天的状态走：没写 = 请她写；等她写 = 灰掉；已经写好 = 重写（要确认）。
+      // 0.7.1 无脑渲染「请她写明天」，而服务端会无条件覆盖——点一下就抹掉她写好的明天。
+      const tomorrowState = (data.tomorrow?.items?.length ?? 0) > 0
+        ? (data.tomorrow.source === 'pending' ? 'pending' : 'written')
+        : 'empty';
+
       const acts = el('div', 'feast-act');
-      const ask = el('button', 'feast-btn-primary', asking ? t.dayAsking : t.dayAsk);
-      ask.disabled = asking;
-      ask.onclick = async () => {
-        asking = true;
-        render();
-        try {
-          const r = await ctx.invoke('plan', []);
-          if (r?.ok) toast(root, ctx, r.message ?? t.dayAsking);
-          else toast(root, ctx, r?.message ?? '请不动', true);
-        } catch (err) {
-          toast(root, ctx, t.failed(err?.message ?? err), true);
-        } finally {
-          asking = false;
-          await refresh();
-        }
-      };
-      acts.appendChild(ask);
+      if (tomorrowState === 'pending') {
+        const ask = el('button', null, t.dayAsking);
+        ask.disabled = true;
+        acts.appendChild(ask);
+        acts.appendChild(el('span', 'feast-dim', t.dayWaiting));
+      } else {
+        const rewrite = tomorrowState === 'written';
+        const ask = el('button', rewrite ? null : 'feast-btn-primary',
+          asking ? t.dayAsking : (rewrite ? t.dayAskAgain : t.dayAsk));
+        ask.disabled = asking;
+        ask.onclick = async () => {
+          if (rewrite && !window.confirm(t.dayRewriteConfirm)) return;
+          asking = true;
+          render();
+          try {
+            const r = await ctx.invoke('plan', []);
+            if (r?.ok) toast(root, ctx, r.message ?? t.dayAsking);
+            else toast(root, ctx, r?.message ?? t.sayNo, true);
+          } catch (err) {
+            toast(root, ctx, t.failed(err?.message ?? err), true);
+          } finally {
+            asking = false;
+            await refresh();
+          }
+        };
+        acts.appendChild(ask);
+        if (rewrite) acts.appendChild(el('span', 'feast-dim', t.dayAskAgainHint));
+      }
       wrap.appendChild(acts);
 
       // 改主意只对已经排好的一天有意义；pick 是「等她写」的空壳，改了也没东西可截。
-      if (data.today?.items?.length && data.today.source !== 'pending') {
+      if (canChangeToday) {
         wrap.appendChild(changeForm(data.date));
       }
 
@@ -1589,7 +1801,7 @@ const comboPanel = {
             toast(root, ctx, t.served(`${c.name}（${r.dishes?.length ?? c.size}）`));
             applyList(await refresh());
           } else {
-            toast(root, ctx, r?.message ?? '不行', true);
+            toast(root, ctx, r?.message ?? t.sayNo, true);
             serve.disabled = false;
           }
         } catch (err) {
@@ -1617,10 +1829,10 @@ const comboPanel = {
           try {
             const r = await ctx.invoke('remove', [c.id]);
             if (r?.ok) {
-              toast(root, ctx, r.message ?? '删掉了。');
+              toast(root, ctx, r.message ?? t.sayOk);
               applyList(await refresh());
             } else {
-              toast(root, ctx, r?.message ?? '删不掉', true);
+              toast(root, ctx, r?.message ?? t.sayNo, true);
             }
           } catch (err) {
             toast(root, ctx, t.failed(err?.message ?? err), true);
@@ -1729,13 +1941,13 @@ const comboPanel = {
           if (editing) payload.id = editing;
           const r = await ctx.invoke('save', [payload]);
           if (r?.ok) {
-            toast(root, ctx, r.message ?? '存下来了');
+            toast(root, ctx, r.message ?? t.sayOk);
             editing = null;
             picked.clear();
             nameInput.value = '';
             applyList(await refresh());
           } else {
-            toast(root, ctx, r?.message ?? '存不下来', true);
+            toast(root, ctx, r?.message ?? t.sayNo, true);
             save.disabled = false;
             save.textContent = editing ? t.comboEdit : t.comboBuild;
           }
@@ -1766,7 +1978,7 @@ const comboPanel = {
             nameInput.value = '';
             applyList(await refresh());
           } else {
-            toast(root, ctx, r?.message ?? '不行', true);
+            toast(root, ctx, r?.message ?? t.sayNo, true);
             serveNow.disabled = false;
           }
         } catch (err) {
@@ -1777,7 +1989,7 @@ const comboPanel = {
       acts.appendChild(serveNow);
 
       if (editing) {
-        const cancel = el('button', null, '取消');
+        const cancel = el('button', null, t.sayCancel);
         cancel.onclick = () => { editing = null; picked.clear(); nameInput.value = ''; render(); };
         acts.appendChild(cancel);
       }

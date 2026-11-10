@@ -10,12 +10,14 @@
  *
  * 所有进系统前缀的文本都过 safe()：内容里万一出现 {{...}} 不能被当成模板变量。
  */
+import { isAsleepActivity } from './free.js';
 import { findItem } from './schedule.js';
 import { clock, dateLabel, parseClock, zonedNow } from './time.js';
 import { TOOL_LINE, priorityLine, voiceText } from './voice.js';
 
 const safe = (s) => String(s).replace(/\{\{/g, '{').replace(/\}\}/g, '}');
-const isSleep = (it) => /睡/.test(it.activity);
+// 睡觉的判据和「她自己的时间」共用一处，别各写一份 /睡/ —— 那样「回笼觉」会被当成醒着。
+const isSleep = (it) => isAsleepActivity(it);
 
 function timeLabel(precision, minute) {
   if (precision === 'minute') return clock(minute);

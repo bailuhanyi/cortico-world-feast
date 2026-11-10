@@ -146,6 +146,49 @@ test('到点请她写明天：只推一次，落一个占位；重启也不会�
   await w2.stop();
 });
 
+test('她写好明天之后再点「请她写明天」：不覆盖、只推一次重写邀请', async () => {
+  const clock = { t: NOON };
+  const { world, dataDir, lifeEvents, tools } = await makeWorld({ now: () => clock.t });
+  const tomorrow = addDays(DAY, 1);
+
+  // 先让她真写好明天。
+  const out = await tools.feast_life_plan({
+    date: 'tomorrow',
+    title: '写好的明天',
+    items: [
+      { start: '00:00', end: '08:00', activity: '睡觉' },
+      { start: '08:00', end: '24:00', activity: '她认真写的' },
+    ],
+  });
+  assert.ok(!out.failed, out.text);
+  const before = await readDay(dataDir, tomorrow);
+  assert.equal(before.source, 'coo');
+  // 0.7.1 的那个 bug：这里会把她的明天清成 pending/0 段。
+  const r = await world.webUi('zh').invoke('today', 'plan', []);
+  assert.ok(r.ok, r.message);
+  assert.match(r.message, /重新想想/, `回执该说是「重新想想」：${r.message}`);
+
+  const after = await readDay(dataDir, tomorrow);
+  assert.equal(after.source, 'coo', '她写的那一版不该被降级成占位');
+  assert.equal(after.items.length, 2, '段数也不该变');
+  assert.ok(after.items.some((it) => it.activity === '她认真写的'), '内容一个字都不该动');
+
+  // 推给她的事件要说得跟夜里第一次不一样，且带上 rewrite。
+  const evs = lifeEvents(EVENT_LIFE_PLAN);
+  const last = evs[evs.length - 1];
+  assert.equal(last.meta.rewrite, true);
+  assert.match(last.text, /重新想想/, '正文该说这是重写，别让她以为自己没写过');
+
+  // 连着再点两下：冷却窗口内不该连推（她还没回，催第二遍没意义）。
+  const n = evs.length;
+  await world.webUi('zh').invoke('today', 'plan', []);
+  await world.webUi('zh').invoke('today', 'plan', []);
+  assert.equal(lifeEvents(EVENT_LIFE_PLAN).length, n, '冷却窗口内不该重复推');
+  const still = await readDay(dataDir, tomorrow);
+  assert.equal(still.items.length, 2, '连点也不该动她的明天');
+  await world.stop();
+});
+
 test('还没到点就不叫：lifeGenerateAt 之前不推事件、不落占位', async () => {
   const clock = { t: Date.parse(`${DAY}T21:00:00+08:00`) };
   const { world, dataDir, runTick, lifeEvents } = await makeWorld({ now: () => clock.t });

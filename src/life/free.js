@@ -47,7 +47,7 @@ export function parseSlots(raw) {
 
 /** 空的一天：还没叫过、还没记过。 */
 export function newPlay(date) {
-  return { date, done: [], fired: {}, pending: null, skipped: false };
+  return { date, done: [], fired: {}, pending: null, skipped: false, skippedSlots: {} };
 }
 
 /** 不信任盘上的内容。 */
@@ -63,6 +63,13 @@ export function cleanPlay(raw, date) {
   if (src.fired && typeof src.fired === 'object') {
     for (const [k, v] of Object.entries(src.fired)) {
       if (/^\d{2}:\d{2}$/.test(k) || k === '补') play.fired[k] = Number(v) || 0;
+    }
+  }
+  // 到点了但日程说她被占着、所以没叫的那几档。留着是为了在面板上解释「为什么没叫我」。
+  if (src.skippedSlots && typeof src.skippedSlots === 'object') {
+    for (const [k, v] of Object.entries(src.skippedSlots)) {
+      if (!/^\d{2}:\d{2}$/.test(k) || !v || typeof v !== 'object') continue;
+      play.skippedSlots[k] = { at: Number(v.at) || 0, doing: text(v.doing, 40) };
     }
   }
   if (src.pending && typeof src.pending === 'object' && text(src.pending.slot, 8)) {
@@ -194,18 +201,37 @@ export function freeStatusLine(play, cfg, nowMin) {
 }
 
 /**
+ * 这一段是不是在睡觉。
+ *
+ * 0.7.2 补：原来各处的判据都是 `/睡/`，于是「回笼觉」「打盹」「小憩」「补觉」都不算睡——
+ * 到她自己的时间那一档会把她从回笼觉里叫起来。这里收成一处，叫醒判断和自由判断都用它。
+ */
+const ASLEEP_HINTS = /睡|回笼觉|打盹|小憩|眯一会儿|眯一会|补觉|午觉|赖床/;
+
+export function isAsleepActivity(item) {
+  const act = typeof item === 'string' ? item : String(item?.activity ?? '');
+  return ASLEEP_HINTS.test(act);
+}
+
+/**
  * 日程里这一段算不算「她自己的时间」。
  *
- * 只看活动名：带「自己的时间 / 在家玩 / 休息 / 玩 / 摸鱼」这类就不算被占着。
- * 写死一张白名单是刻意的——判反了会让她在上班时被告知「现在是你自己的时间」，
- * 两个来源互相否定，比不叫更糟。
+ * 0.7.2 改成**排除法**。原来是白名单（自己的时间/自由/在家玩/休息/摸鱼/发呆/躺着/追剧/
+ * 玩游戏/看剧），实测在她真实的宅家日上：13 段里只命中 2 段，默认三档里两档被静默跳过——
+ * 面板上只剩「今天没有了 / 已记 0 件」，功能像坏的。
+ *
+ * 白名单判反了会互相打脸（上班时说「这是你的时间」），所以不能整段翻成黑名单；
+ * 但把「她分明闲着」的情形漏掉一样是错。折中是：**只排除明确被占用的**。
+ * 睡觉、上班、通勤、开会、加班这些一望即知不该叫；其余（刷手机、打游戏、
+ * 窗边发呆、收拾屋子、追剧）都算她自己的空档。
  */
-const FREE_HINTS = /自己的时间|自由|在家玩|休息|摸鱼|发呆|躺着|追剧|玩游戏|看剧/;
+const BUSY_HINTS = /睡|回笼觉|打盹|小憩|眯一会儿|眯一会|补觉|午觉|赖床|上班|通勤|开会|加班|赶工|赶稿|赶进度|工作|办公|搬砖|值班|出差|面试|上课|考试|会议|训练|排练/i;
 
 export function isFreeActivity(item) {
   if (!item) return false;
-  if (/睡/.test(item.activity)) return false;
-  return FREE_HINTS.test(String(item.activity ?? ''));
+  const act = String(item.activity ?? '');
+  if (!act.trim()) return false;
+  return !BUSY_HINTS.test(act);
 }
 
 /**
@@ -216,7 +242,7 @@ export function isFreeActivity(item) {
  */
 export function notFreeReason(item) {
   if (!item) return '';
-  if (/睡/.test(item.activity)) return '';
+  if (isAsleepActivity(item)) return '';
   return `这会儿你在${item.activity}，不硬塞给你`;
 }
 

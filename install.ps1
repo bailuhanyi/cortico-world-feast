@@ -162,6 +162,7 @@ $defaults = [ordered]@{
   lifeVoiceOn       = $true
   lifeMaxItems      = 24
   lifeAdjustPast    = $false
+  lifeFreeEnabled   = $true
   lifeFreeSlots     = '10:00,14:00,21:00'
   lifeFreeGoal      = 3
   lifeFreeGraceMin  = 20

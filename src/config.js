@@ -79,6 +79,8 @@ export const DEFAULTS = Object.freeze({
   /** 允许她自己改「今天已经过完」的时段（默认不允许：那是事实，不是计划）。 */
   lifeAdjustPast: false,
   // ---- 自由时间（0.7.0 从 playtime World 并进来）----
+  /** 自由时间总开关。0.7.2 补：之前代码里认这个键但配置表没声明，等于只能手改 config.json。 */
+  lifeFreeEnabled: true,
   /** 她自己的时间：几点叫醒她。留空 = 不叫（但工具和面板还在）。 */
   lifeFreeSlots: '10:00,14:00,21:00',
   /** 到几条就不再**按点叫**（不是任务额度：到了照样能记、能继续做）。0 = 只叫不计数。 */
@@ -103,7 +105,7 @@ export const DEFAULTS = Object.freeze({
   lifeWardrobeOn: true,
   /** 素材库目录；留空 = 用默认路径 <数据目录>/imggen-library（和生图工作室默认一致）。 */
   lifeWardrobeDir: '',
-  /** 自动补 outfit：模型没填时按「延续上一段 > 情境穿搭 > 场景默认 > 默认服饰」补。关掉只列库不补。 */
+  /** 自动补 outfit：模型没填时按「情境穿搭 > 情境默认 > 延续上一段 > 场景默认 > 默认服饰」补。关掉只列库不补。 */
   lifeWardrobeAutoOutfit: true,
 });
 
@@ -114,6 +116,14 @@ const ZH = {
   badgeToday: '今天',
   badgeNext: '下一顿',
   prompt: '一桌菜 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
+  /** 配置卡片标题：0.7.2 把原来一张 35 项的巨卡拆成 5 张。 */
+  groups: {
+    meal: '饭点',
+    together: '一起吃饭',
+    life: '她的一天',
+    free: '她自己的时间',
+    wardrobe: '生图联动',
+  },
   config: {
     title: '一桌菜',
     mealReminder: '饭点提醒',
@@ -166,7 +176,9 @@ const ZH = {
     lifeMaxItemsDesc: '她自己写明天时的段数上限；写多了按时间顺序裁掉后面的，再补齐 00:00–24:00。',
     lifeAdjustPast: '允许她改过去',
     lifeAdjustPastDesc: '默认关着：今天已经过完的时段她不能改——日程是计划，过去的应该是事实，回头篡改就等于编自己做过什么。打开后她也能改今天早上的安排（主人从面板改不受这个开关限制）。',
-    lifeFreeSlots: '她自己的时间',
+    lifeFreeEnabled: '她自己的时间',
+    lifeFreeEnabledDesc: '自由时间总开关。关掉后不再按点叫醒她，工具和面板照旧可用（想自己开始随时能开始）。',
+    lifeFreeSlots: '几点的档',
     lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点叫醒她一次「现在是你自己的时间，做点自己想做的」；日程说这会儿在睡觉就不叫。留空 = 不叫（工具和面板照样能用）。',
     lifeFreeGoal: '记到几件就不再叫',
     lifeFreeGoalDesc: '注意这是**叫醒的上限，不是任务额度**：记到这个数只表示「今天不再按点叫你了」，不表示不许再动——她想做什么随时能做，记多少都算数。0 = 只叫不计数（会一直叫到晚上，不推荐）。',
@@ -185,7 +197,7 @@ const ZH = {
     lifeWardrobeDir: '素材库目录',
     lifeWardrobeDirDesc: '生图工作室的素材库根目录；留空时自动读 imggen 的 libraryRoot（用户在 imggen 那边改了库目录，这边自动跟上），读不到再降级到 <数据目录>/imggen-library。手动填这里只用于 imggen 没配 libraryRoot 又想指定路径的情况。',
     lifeWardrobeAutoOutfit: '自动补穿着',
-    lifeWardrobeAutoOutfitDesc: '模型没写 outfit 时，按「延续上一段 > 情境穿搭（睡前→睡衣这种）> 场景默认 > 她的默认服饰」补上。关掉=只列库不补，写成什么就是什么。',
+    lifeWardrobeAutoOutfitDesc: '模型没写 outfit 时按这个顺序补：情境穿搭（睡前→睡衣这种她自己配的）> 情境默认（内置常识表，库里找得到才用）> 延续上一段（睡觉那段不延续、不硬猜）> 场景默认 > 她的默认服饰。关掉=只列库不补，写成什么就是什么。',
   },
   storage: {
     label: '吃过的记录',
@@ -204,6 +216,13 @@ const EN = {
   badgeToday: 'Today',
   badgeNext: 'Next meal',
   prompt: 'The Table world: a table that serves food, and a day of her own. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
+  groups: {
+    meal: 'Meals',
+    together: 'Eating together',
+    life: 'Her day',
+    free: 'Her own time',
+    wardrobe: 'Image-gen link',
+  },
   config: {
     title: 'Table',
     mealReminder: 'Meal reminders',
@@ -256,7 +275,9 @@ const EN = {
     lifeMaxItemsDesc: 'Upper bound when she writes a day; extra items are dropped and 00:00–24:00 is filled in.',
     lifeAdjustPast: 'Let her edit the past',
     lifeAdjustPastDesc: 'Off by default: hours of today that are already over cannot be changed by her. The schedule is a plan; the past should be what happened. Turning this on lets her edit this morning too (edits you make from the panel are never restricted).',
-    lifeFreeSlots: 'Her own time',
+    lifeFreeEnabled: 'Her own time',
+    lifeFreeEnabledDesc: 'Master switch for her own time. Off: no scheduled wake-ups; the tools and the panel still work (she can always start something herself).',
+    lifeFreeSlots: 'Wake-up slots',
     lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. She is woken once per slot and told this is her own time; skipped while the schedule says she is asleep. Blank = never wake her (tools and panel still work).',
     lifeFreeGoal: 'Stop calling after',
     lifeFreeGoalDesc: 'This is a cap on wake-ups, **not a quota**: reaching it only means she is not woken on schedule any more — she may still do things whenever she likes, and anything she logs still counts. 0 = wake but never count (not recommended).',
@@ -275,7 +296,7 @@ const EN = {
     lifeWardrobeDir: 'Library root',
     lifeWardrobeDirDesc: 'Root of the image-gen studio library; blank = auto-follow imggen libraryRoot (if the user changed it in imggen, this follows), then fall back to <dataDir>/imggen-library. Set this manually only when imggen has no libraryRoot and you need a specific path.',
     lifeWardrobeAutoOutfit: 'Auto-fill outfit',
-    lifeWardrobeAutoOutfitDesc: 'When the model omits outfit, fill it by: carry the previous slot > context habit (bedtime→pyjamas) > scene default > her default outfit. Off = list the library but do not fill; whatever she wrote stays.',
+    lifeWardrobeAutoOutfitDesc: 'When the model omits outfit, fill it in this order: context habit (bedtime→pyjamas, the habits she wrote) > situation default (built-in common sense, only when the wardrobe has that outfit) > carry the previous slot (never carried into sleep, never guessed there) > scene default > her default outfit. Off = list the library but do not fill; whatever she wrote stays.',
   },
   storage: {
     label: 'Eating history',
@@ -291,17 +312,11 @@ export function text(language = 'zh') {
   return language === 'en' ? EN : ZH;
 }
 
-/** WebUI 的配置组；路径必须落在 `worlds.feast.` 段内。 */
-export function configGroup(language = 'zh') {
+/** 全部配置项；路径必须落在 `worlds.feast.` 段内。怎么分卡片见 CONFIG_GROUPS。 */
+function configProperties(language = 'zh') {
   const t = text(language).config;
   const K = `worlds.${ID}`;
   return {
-    id: `world:${ID}`,
-    owner: `world:${ID}`,
-    schema: {
-      type: 'object',
-      title: t.title,
-      properties: {
         [`${K}.mealReminder`]: {
           type: 'boolean',
           title: t.mealReminder,
@@ -489,6 +504,12 @@ export function configGroup(language = 'zh') {
           description: t.lifeAdjustPastDesc,
           'x-hot': true,
         },
+        [`${K}.lifeFreeEnabled`]: {
+          type: 'boolean',
+          title: t.lifeFreeEnabled,
+          description: t.lifeFreeEnabledDesc,
+          'x-hot': true,
+        },
         [`${K}.lifeFreeSlots`]: {
           type: 'string',
           title: t.lifeFreeSlots,
@@ -553,6 +574,8 @@ export function configGroup(language = 'zh') {
           type: 'string',
           title: t.lifeWardrobeDir,
           description: t.lifeWardrobeDirDesc,
+          // 手打 Windows 路径太容易错；宿主认 x-path，给个原生选目录。
+          'x-path': { kind: 'directory' },
           'x-hot': true,
         },
         [`${K}.lifeWardrobeAutoOutfit`]: {
@@ -561,9 +584,88 @@ export function configGroup(language = 'zh') {
           description: t.lifeWardrobeAutoOutfitDesc,
           'x-hot': true,
         },
-      },
-    },
   };
+}
+
+/**
+ * 配置怎么分成几张卡。
+ *
+ * 0.7.1 及以前是一张 35 项、说明合计 1700 多字的巨卡，找「穿什么」要滚很久。
+ * 宿主支持一个 World 交多组（`cortico-world-desktop-pet` 就交了三组），
+ * 这里按**主人脑子里的事**切：吃饭 / 一起吃饭 / 她的一天 / 她自己的时间 / 生图联动。
+ * 组 id 后缀固定、不随语言变，配置键不变——拆卡不动任何一项的存储位置。
+ */
+export const CONFIG_GROUPS = Object.freeze([
+  {
+    key: 'meal',
+    pick: (k) => k === 'mealReminder' || k === 'mealSlots' || k === 'mealGraceMin'
+      || k === 'mealRetryMin' || k === 'mealMaxRetries' || k === 'tickSec'
+      || k === 'askReaction' || k === 'dislikeChance' || k === 'avoidRepeat'
+      || k === 'ownerFeedTTL' || k === 'menuSize',
+  },
+  {
+    key: 'together',
+    pick: (k) => k === 'togetherInviteMin' || k === 'togetherMaxInvites'
+      || k === 'togetherTTLMin' || k === 'comboSize',
+  },
+  {
+    key: 'life',
+    pick: (k) => k.startsWith('life') && !k.startsWith('lifeFree') && !k.startsWith('lifeWardrobe'),
+  },
+  {
+    key: 'free',
+    pick: (k) => k.startsWith('lifeFree'),
+  },
+  {
+    key: 'wardrobe',
+    pick: (k) => k.startsWith('lifeWardrobe'),
+  },
+]);
+
+/**
+ * WebUI 的配置组。返回**数组**：一份 5 张卡。
+ *
+ * 每一项仍然只声明一次（键就是 `worlds.feast.<key>`），拆的是卡片不是配置——
+ * 所以老 config.json 不用迁移，配置表里变红的风险只在于「某一项被漏进任何一张卡」，
+ * 那由 test/world.test.mjs 的「每项都得在某张卡里」钉住。
+ */
+export function configGroups(language = 'zh') {
+  const t = text(language);
+  const props = configProperties(language);
+  const K = `worlds.${ID}`;
+  const out = [];
+  const used = new Set();
+  for (const g of CONFIG_GROUPS) {
+    const properties = {};
+    for (const [path, prop] of Object.entries(props)) {
+      const key = path.slice(K.length + 1);
+      if (!g.pick(key)) continue;
+      properties[path] = prop;
+      used.add(path);
+    }
+    if (!Object.keys(properties).length) continue;
+    out.push({
+      // 第一张沿用老 id（`world:feast`），别的加后缀：宿主按 id 认领，改第一张的 id 会让老书签失效。
+      id: out.length === 0 ? `world:${ID}` : `world:${ID}:${g.key}`,
+      owner: `world:${ID}`,
+      schema: { type: 'object', title: t.groups[g.key], properties },
+    });
+  }
+  // 保险：万一哪天加了新键却忘了归类，宁可多一张「其他」也不让配置项凭空消失。
+  const rest = Object.fromEntries(Object.entries(props).filter(([p]) => !used.has(p)));
+  if (Object.keys(rest).length) {
+    out.push({
+      id: `world:${ID}:more`,
+      owner: `world:${ID}`,
+      schema: { type: 'object', title: t.groups.more ?? '其他', properties: rest },
+    });
+  }
+  return out;
+}
+
+/** 兼容老调用方：只要第一组。新代码用 configGroups()。 */
+export function configGroup(language = 'zh') {
+  return configGroups(language)[0];
 }
 
 /** 面板文案。客户端产物不 import 服务端模块，所以面板自己的文案在 dist/webui.js 里另有一份。 */

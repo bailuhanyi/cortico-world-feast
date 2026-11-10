@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { addDays, isDateKey } from './time.js';
 import { DEFAULT_DAY_TYPES, normalizeDayTypes, normalizeItems, pickDayType, templateItems } from './schedule.js';
-import { cleanPlay } from './free.js';
+import { cleanPlay, isAsleepActivity } from './free.js';
 
 /** 面板的「往期」最多翻多少天。 */
 export const LIFE_KEEP_DAYS = 30;
@@ -136,7 +136,7 @@ export async function recentSummary(dataDir, date, n = 3) {
   for (let i = n; i >= 1; i -= 1) {
     const day = await readDay(dataDir, addDays(date, -i));
     if (!day || !day.items.length) continue;
-    const main = day.items.filter((it) => !/睡/.test(it.activity)).slice(0, 8).map((it) => it.activity).join('、');
+    const main = day.items.filter((it) => !isAsleepActivity(it)).slice(0, 8).map((it) => it.activity).join('、');
     lines.push(`- ${day.date}（${day.dayType.name}）：${day.title ? `${day.title}。` : ''}${main ? `做了 ${main}` : ''}`);
   }
   return lines.join('\n');

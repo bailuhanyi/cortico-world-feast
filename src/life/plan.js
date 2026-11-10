@@ -11,16 +11,24 @@ import { dateLabel } from './time.js';
 /**
  * 事件正文：给她的写作要求（她看得到），也是工具参数的格式说明。
  *
- * `wardrobe` 是 wardrobeText(lib) 的结果：库非空时在这里列出衣柜/场景/道具/穿搭习惯，
+ * `wardrobe` 是 wardrobeText(lib) 的结果：库非空时在这里列出衣柜/场景/道具和穿搭习惯，
  * 让她写日程时 outfit / scene / props 用库里的正名，生图工作室那边解析才稳。
  * 库读不到就是空串，这段就省掉（不强指不存在的东西）。
+ *
+ * `rewrite` 是主人从面板点「重写明天」时给的：那一天她已经写好了，这次是**重写**，
+ * 措辞和夜里第一次请她写不一样，免得她以为自己从没写过。
  */
-export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '' } = {}) {
+export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', rewrite = false } = {}) {
   const name = who.name || '她';
   const lines = [
-    `【一桌菜 · 她的一天】该想想 ${dateLabel(date)}（${date}）怎么过了。不是主人找你，也不是待办，是你自己的日子。`,
+    rewrite
+      ? `【一桌菜 · 她的一天】主人想请你重新想想 ${dateLabel(date)}（${date}）。不是主人找你，也不是待办，是你自己的日子。`
+      : `【一桌菜 · 她的一天】该想想 ${dateLabel(date)}（${date}）怎么过了。不是主人找你，也不是待办，是你自己的日子。`,
     `这一天按「${type?.name || '普通的一天'}」来：${type?.guide || '照你平常的样子过一天。'}`,
   ];
+  if (rewrite) {
+    lines.push('（之前那一版已经收了；不想改就用 feast_life_view 看一眼再照着交回一遍，改主意也完全可以。）');
+  }
   if (recent) lines.push(`最近几天：\n${recent}`);
   if (wardrobe) lines.push(wardrobe);
   lines.push(`饭点照旧是 ${mealSlots}，别把这两段排成别的事；吃饭那几段可以写去哪儿吃、和谁一起。`);

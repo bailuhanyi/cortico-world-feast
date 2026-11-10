@@ -1,5 +1,5 @@
 /**
- * 「她的一天」：日程的形状、校验、日型挑选、兜底模板与临时调整。
+ * 日程的形状、校验、日型挑选、兜底模板与临时调整。
  *
  * 一天的形状：
  *   { date, dayType: { id, name }, title, mood,
@@ -7,7 +7,8 @@
  *     source: 'coo'|'template'|'pending'|'manual', by, generatedAt, changes: [{ at, by, note }] }
  * items 从 00:00 连续排到 24:00，不重叠、没有空档（normalizeItems 负责修补）。
  *
- * scene / outfit 等只是纯文本：融合版不接生图素材库，不做库内校验。
+ * 0.7.1 起 scene / outfit / props 会跟生图素材库联动（见 wardrobe.js）：
+ * 库里有正名就归一，模型没填 outfit 时按习惯补。
  */
 import { clock, parseClock, weekdayOf } from './time.js';
 
@@ -33,6 +34,11 @@ function cleanItem(raw) {
   if (scene) item.scene = scene;
   const outfit = text(raw.outfit, 40);
   if (outfit) item.outfit = outfit;
+  // 这件衣服是哪儿来的：模型自己写的 / 情境穿搭 / 情境默认 / 延续上一段 / 场景默认 / 她的默认。
+  // 0.7.2 补：以前 cleanItem 不认这个字段，enrichItems 标完一落盘就没了，
+  // 面板和排错时都分不清「她写的」和「自动补的」。
+  const src = text(raw.outfitSource, 20);
+  if (src) item.outfitSource = src;
   const note = text(raw.outfitNote ?? raw.outfit_note, 60);
   if (note) item.outfitNote = note;
   const list = (v) => (Array.isArray(v) ? v : typeof v === 'string' && v.trim() ? [v] : [])
