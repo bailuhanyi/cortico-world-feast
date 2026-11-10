@@ -210,12 +210,14 @@ const ZH = {
 };
 
 const EN = {
-  label: 'Table',
-  lamp: 'Table',
+  // 显示名跟着 package.json 的 en displayName 走（0.7.2 改名：一桌菜 → 食时 / Mealtime）。
+  // 只改中文会把英文面板标题留在旧名字上，和市场里那一页对不上。
+  label: 'Mealtime',
+  lamp: 'Mealtime',
   stopped: 'not running',
   badgeToday: 'Today',
   badgeNext: 'Next meal',
-  prompt: 'The Table world: a table that serves food, and a day of her own. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
+  prompt: 'The Mealtime world: a day of her own, and a table that serves food. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
   groups: {
     meal: 'Meals',
     together: 'Eating together',
@@ -224,7 +226,7 @@ const EN = {
     wardrobe: 'Image-gen link',
   },
   config: {
-    title: 'Table',
+    title: 'Mealtime',
     mealReminder: 'Meal reminders',
     mealReminderDesc: 'Turn this off and she is never called to a meal; only owner-served dishes and her own appetite remain.',
     mealSlots: 'Meal slots',
