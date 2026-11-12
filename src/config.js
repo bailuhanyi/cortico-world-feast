@@ -107,6 +107,14 @@ export const DEFAULTS = Object.freeze({
   lifeWardrobeDir: '',
   /** 自动补 outfit：模型没填时按「情境穿搭 > 情境默认 > 延续上一段 > 场景默认 > 默认服饰」补。关掉只列库不补。 */
   lifeWardrobeAutoOutfit: true,
+  // ---- 天气（0.7.3）----
+  /** 总开关。默认关：不填城市就不提天气，也就不向任何第三方发请求。 */
+  weatherEnabled: false,
+  /** 每个安装者各自填的城市名（中文即可，如「上海」「贵阳」），经 geocoding 转经纬度。
+   *  留空 = 不提天气。绝不自动探测 IP、不内置城市表——这是发给所有人的包，写死哪个城市都错。 */
+  weatherCity: '',
+  /** 多久刷一次真实天气（分钟）。一天变一两次就够，别把 open-meteo 当心跳打。 */
+  weatherRefreshMin: 30,
 });
 
 const ZH = {
@@ -123,6 +131,7 @@ const ZH = {
     life: '她的一天',
     free: '她自己的时间',
     wardrobe: '生图联动',
+    weather: '天气',
   },
   config: {
     title: '食时',
@@ -198,6 +207,12 @@ const ZH = {
     lifeWardrobeDirDesc: '生图工作室的素材库根目录；留空时自动读 imggen 的 libraryRoot（用户在 imggen 那边改了库目录，这边自动跟上），读不到再降级到 <数据目录>/imggen-library。手动填这里只用于 imggen 没配 libraryRoot 又想指定路径的情况。',
     lifeWardrobeAutoOutfit: '自动补穿着',
     lifeWardrobeAutoOutfitDesc: '模型没写 outfit 时按这个顺序补：情境穿搭（睡前→睡衣这种她自己配的）> 情境默认（内置常识表，库里找得到才用）> 延续上一段（睡觉那段不延续、不硬猜）> 场景默认 > 她的默认服饰。关掉=只列库不补，写成什么就是什么。',
+    weatherEnabled: '让她知道外面的天气',
+    weatherEnabledDesc: '开之前先填下面的城市。开启后按点取真实天气，写进她的背景、饭点候选和「自己的时间」那句提醒里；大太阳偏清爽口、下雨偏热乎的。没填城市、联网失败、接口没数据时一律「不提天气」——宁可不说，也绝不按季节编一个，免得外面大太阳她却说下雨。关掉=完全不联网、不提天气。',
+    weatherCity: '你所在的城市',
+    weatherCityDesc: '填你自己的城市名，中文就行（如「上海」「贵阳」「成都」），食时会去查经纬度再取当地天气。这是每个人各自的配置，不影响别人。留空 = 不提天气；填错查不到也静默跳过。不会自动探测你的 IP，也不会向外发你的位置以外的东西。',
+    weatherRefreshMin: '多久看一次天气',
+    weatherRefreshMinDesc: '隔多少分钟重取一次真实天气。30 分钟足够，改小没有意义还费接口。取不到就沿用上一次的；一次都没取到就一直不提天气。',
   },
   storage: {
     label: '吃过的记录',
@@ -224,6 +239,7 @@ const EN = {
     life: 'Her day',
     free: 'Her own time',
     wardrobe: 'Image-gen link',
+    weather: 'Weather',
   },
   config: {
     title: 'Mealtime',
@@ -299,6 +315,12 @@ const EN = {
     lifeWardrobeDirDesc: 'Root of the image-gen studio library; blank = auto-follow imggen libraryRoot (if the user changed it in imggen, this follows), then fall back to <dataDir>/imggen-library. Set this manually only when imggen has no libraryRoot and you need a specific path.',
     lifeWardrobeAutoOutfit: 'Auto-fill outfit',
     lifeWardrobeAutoOutfitDesc: 'When the model omits outfit, fill it in this order: context habit (bedtime→pyjamas, the habits she wrote) > situation default (built-in common sense, only when the wardrobe has that outfit) > carry the previous slot (never carried into sleep, never guessed there) > scene default > her default outfit. Off = list the library but do not fill; whatever she wrote stays.',
+    weatherEnabled: 'Let her know the weather',
+    weatherEnabledDesc: 'Fill in your city below before turning this on. When on, real weather goes into her background note, meal candidates and the own-time nudge: hot/sunny leans towards cool dishes, rainy/cold towards warm ones. No city, no network, or no data means she simply never mentions the weather — better silent than invented, so she never says it is raining under a clear sky. Off = no network calls at all, no weather.',
+    weatherCity: 'Your city',
+    weatherCityDesc: 'Your own city name, Chinese works fine (e.g. 上海, 贵阳, 成都); Mealtime resolves it to coordinates and fetches local weather. This is per-install config and does not affect other users. Blank = no weather; an unknown city is skipped silently. Your IP is never probed and nothing else about your location is sent.',
+    weatherRefreshMin: 'Weather refresh interval',
+    weatherRefreshMinDesc: 'How often to re-fetch real weather, in minutes. 30 is plenty; lower only wastes the API. A failure keeps the last snapshot; if none ever succeeded, weather stays unmentioned.',
   },
   storage: {
     label: 'Eating history',
@@ -586,6 +608,27 @@ function configProperties(language = 'zh') {
           description: t.lifeWardrobeAutoOutfitDesc,
           'x-hot': true,
         },
+        [`${K}.weatherEnabled`]: {
+          type: 'boolean',
+          title: t.weatherEnabled,
+          description: t.weatherEnabledDesc,
+          'x-hot': true,
+        },
+        [`${K}.weatherCity`]: {
+          type: 'string',
+          title: t.weatherCity,
+          description: t.weatherCityDesc,
+          'x-hot': true,
+        },
+        [`${K}.weatherRefreshMin`]: {
+          type: 'integer',
+          title: t.weatherRefreshMin,
+          description: t.weatherRefreshMinDesc,
+          minimum: 5,
+          maximum: 360,
+          'x-suffix': ' 分钟',
+          'x-hot': true,
+        },
   };
 }
 
@@ -621,6 +664,10 @@ export const CONFIG_GROUPS = Object.freeze([
   {
     key: 'wardrobe',
     pick: (k) => k.startsWith('lifeWardrobe'),
+  },
+  {
+    key: 'weather',
+    pick: (k) => k.startsWith('weather'),
   },
 ]);
 

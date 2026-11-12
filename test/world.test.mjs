@@ -812,6 +812,15 @@ test('面板与配置声明齐全', async () => {
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealReminder'], '缺饭点开关');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealSlots']);
   assert.ok(zh.promptDocs[0].role === 'envPrompt');
+  // 每个 DEFAULTS 键（enabled 除外，它归宿主管）都必须出现在某一张配置卡里，
+  // 且卡里不许冒出 DEFAULTS 没有的键。config.js 的注释一直声称有这条守门，
+  // 其实没写——0.7.3 补上，免得以后加配置项漏归类还以为会被拦。
+  const K = 'worlds.feast.';
+  const cardPaths = new Set();
+  for (const g of zh.config) for (const p of Object.keys(g.schema.properties)) cardPaths.add(p);
+  const defaultPaths = Object.keys(DEFAULTS).filter((k) => k !== 'enabled').map((k) => `${K}${k}`);
+  for (const p of defaultPaths) assert.ok(cardPaths.has(p), `${p} 没进任何一张配置卡`);
+  for (const p of cardPaths) assert.ok(defaultPaths.includes(p), `${p} 在卡里但 DEFAULTS 没有`);
   const desc = await import('../src/definition.js');
   assert.equal(desc.feastDefinition.id, 'feast');
   // 工具数从声明算：加工具时这里不该再红一次。

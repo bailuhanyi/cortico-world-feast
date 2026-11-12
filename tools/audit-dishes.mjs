@@ -37,9 +37,11 @@ const names = new Map();
 for (const d of all) {
   if (ids.has(d.id)) { console.log(`✗ id 重复：${d.id}（${ids.get(d.id)} / ${d._file}）`); problems += 1; }
   else ids.set(d.id, d._file);
-  const k = `${d.cuisine}|${d.name}`;
-  if (names.has(k)) { console.log(`✗ 同名：${d.name}（${d.cuisine}）出现两次`); problems += 1; }
-  names.set(k, 1);
+  // 全库按 name 查重，不按 cuisine|name：跨菜系的同名（杏仁豆腐 / 龟苓膏这类）
+  // 以前漏掉了，但模型点名「来一份杏仁豆腐」时并不区分菜系，一样会撞车。
+  const k = d.name;
+  if (names.has(k)) { console.log(`✗ 同名：${d.name} 出现两次（${names.get(k)} / ${d._file}）`); problems += 1; }
+  names.set(k, d._file);
 }
 
 // ── 2. prose 起手句同组撞车 ──
@@ -70,8 +72,9 @@ console.log('\n=== 分值可疑 ===');
 // 阈值故意松：马赛鱼汤带蒜香蛋黄酱（油 72）、夫妻肺片是红油凉菜（油 78）、
 // 拔丝地瓜就是纯糖（甜 90）——都是对的，不该判红。这里只抓明显写反的。
 const V = { 甜品甜下限: 45, 汤羹油上限: 80, 凉菜油上限: 88, 甜上限: 95, 油上限: 92 };
-/** 苦味压甜的甜品：苦是它的本体，不是把甜写漏了。龟苓膏、苦咖啡冻这一类。 */
-const bitterSweets = new Set(['wuzhou-guilingao']);
+/** 苦味压甜的甜品：苦是它的本体，不是把甜写漏了。龟苓膏、苦咖啡冻这一类。
+ *  梧州龟苓膏和广东龟苓膏是两道不同的菜，但都是「单吃是苦的、靠蜂蜜/炼乳带甜」，同属例外。 */
+const bitterSweets = new Set(['wuzhou-guilingao', 'gui-ling-gao']);
 const suspicious = [];
 for (const d of all) {
   const t = d.taste ?? {};

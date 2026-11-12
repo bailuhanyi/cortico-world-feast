@@ -255,7 +255,7 @@ export function notFreeReason(item) {
  */
 export function freeEventText({
   slot, retry = false, play, cfg = {}, where = '', menu = '', nowHm = '', tz = 'Asia/Shanghai',
-  freeNow = true,
+  freeNow = true, weatherShort = '', weatherHint = '',
 } = {}) {
   const goal = clampInt(cfg?.lifeFreeGoal, 0, 12, 3);
   const p = playProgress(play, goal);
@@ -283,9 +283,12 @@ export function freeEventText({
     }
   }
   lines.push(`今天已经玩过：${freeDoneText(play, tz)}。`);
+  // 天气：出门那句提醒跟着真实天气走，别在下雨天说「日头足」。取不到就整段不出现。
+  if (weatherShort && !retry) lines.push(`外面这会儿：${weatherShort}。`);
   if (menu && !retry) {
     lines.push('想做的话，下面这些只是个例子，不照着也行；想到什么就做什么，什么都不做也可以：');
     lines.push(menu);
+    if (weatherHint) lines.push(weatherHint);
   }
   const tail = [];
   tail.push('做完随手用 feast_life_play 记一笔（activity 写做了什么，note 一句细节）。不记也没关系，记只是给你自己攒。');

@@ -3,7 +3,7 @@
  *
  * 做的是"让她真的吃到东西"这件事：
  *
- *   · 库里 700 道地域菜 + 白米饭 1 道（28 个菜系组），每道带九维口味分值 + 香气/口感/余韵 + 实吃描写；
+ *   · 库里 800 道菜（28 个菜系组，含白米饭 1 道），每道带九维口味分值 + 香气/口感/余韵 + 实吃描写；
  *     cuisine 只说地域/传统，形态一律看 category；
  *     唯一允许的非地域组是 `staples`（白饭），里面只有白米饭一碗，有守门测试钉死上限；
  *   · feast_eat 不是把档案贴出来，而是叠一层"这一口"（温度、状态、配的那口），
@@ -40,6 +40,10 @@ import {
   normalizeCombo, resolveCombo, tableLine, tableTaste,
 } from './combos.js';
 import { renderBite, renderProfile } from './eat.js';
+import {
+  EMPTY_WEATHER, fetchWeather, weatherDishFilter, weatherFreeHint, weatherLine,
+  weatherPickHint, weatherShort,
+} from './weather.js';
 import {
   dayIn, eatenMarkOf, eatenSince, eatenTodayText, eatCount, hmIn, lastEaten, markNudged, newState,
   nextMealText, normalizeState, planTick, recentEaten, recordEat, recordReaction, rollover,
@@ -323,10 +327,17 @@ export class FeastWorld {
   #play = null;
   /** 生图素材库快照：envPromptVars() 是同步的，不能 await，读这里。tick 里刷新（见 #lifeEnsure）。 */
   #wardrobe = emptyWardrobe();
+  /** 真实天气快照：同样同步读、tick 里异步刷新。envPromptVars() 绝不能联网。
+   *  取不到就一直是 EMPTY_WEATHER —— 「宁可不说天气，也绝不编一个」。 */
+  #weather = EMPTY_WEATHER;
+  /** 上次真正去取天气的时刻（ms）：按 weatherRefreshMin 节流，别把接口当心跳打。 */
+  #weatherAt = 0;
   /** 上次「重新想想」推给她的时间（按 date）：连点不该连推，免得刷屏。 */
   #lifeRewriteAt = {};
   /** 宿主的 persist：深合并进 worlds.feast 并落盘（dry-mount 时没有）。 */
   #persist = null;
+  /** 天气联网实现注入（仅测试用；生产走 weather.js 的全局 fetch）。 */
+  #weatherFetch = null;
   /** 构造时拿到的原始配置段（未合并 DEFAULTS）：用来判断哪些键是「盘上没有的」。 */
   #rawCfg = null;
 
@@ -346,6 +357,8 @@ export class FeastWorld {
     this.#clearInterval = opts.timers?.clearInterval ?? ((t) => clearInterval(t));
     this.#setTimeout = opts.timers?.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
     this.#persist = typeof opts.persist === 'function' ? opts.persist : null;
+    // 测试注入：让天气联网可替换（生产不传，用全局 fetch）。和 random/timers 同构。
+    this.#weatherFetch = typeof opts.weatherFetch === 'function' ? opts.weatherFetch : null;
   }
 
   /**
@@ -485,6 +498,59 @@ export class FeastWorld {
     }
   }
 
+  /** 天气总开关：默认关；没填城市也等于关（不联网、不提天气）。 */
+  #weatherOn() {
+    return this.cfg?.weatherEnabled === true
+      && typeof this.cfg?.weatherCity === 'string'
+      && this.cfg.weatherCity.trim().length > 0;
+  }
+
+  /**
+   * 刷新真实天气（tick 里调，按 weatherRefreshMin 节流）。
+   * fetchWeather 自己绝不抛错，这里也不额外抛：失败只是让快照停在「不提天气」。
+   * 成功才覆盖旧快照；一次都没成功过就一直不提天气，不拿季节糊弄。
+   */
+  async #refreshWeather(now = this.#now()) {
+    if (!this.#weatherOn()) { this.#weather = EMPTY_WEATHER; return; }
+    const everyMs = Math.max(5, Math.min(360, Number(this.cfg?.weatherRefreshMin) || 30)) * 60_000;
+    if (this.#weatherAt && now - this.#weatherAt < everyMs) return; // 没到点，沿用上次
+    this.#weatherAt = now;
+    try {
+      const snap = await fetchWeather({
+        city: this.cfg.weatherCity,
+        timezone: this.timezone,
+        ...(this.#weatherFetch ? { fetchImpl: this.#weatherFetch } : {}),
+      });
+      // 只在成功时覆盖；失败保留上一次的有效快照，免得网络一抖天气就没了。
+      if (snap && snap.ok) this.#weather = snap;
+      else if (!this.#weather?.ok) this.#weather = EMPTY_WEATHER;
+    } catch {
+      // fetchWeather 契约上不抛，这层只是保险：绝不让天气把 tick 带崩。
+    }
+  }
+
+  /** envPromptVars / 事件里都用它：当前天气那一行，取不到返回 ''。 */
+  #weatherLine() {
+    return weatherLine(this.#weather);
+  }
+
+  /**
+   * 天气联动的候选池：用现有 category/keywords 粗筛，只影响「随手给的几道」，
+   * 不影响点名要某道菜、也不影响筛选结果。取不到天气 / 筛出来太少 → 返回 null（退回全库）。
+   * @returns {Array|null}
+   */
+  #weatherPool() {
+    const kind = this.#weather?.ok ? this.#weather.kind : null;
+    const filter = weatherDishFilter(kind);
+    if (!filter) return null;
+    const narrowed = this.#lib.dishes.filter(filter);
+    return narrowed.length >= 3 ? narrowed : null;
+  }
+
+  #weatherKindForHint() {
+    return this.#weatherPool() ? this.#weather.kind : null;
+  }
+
   // -------------------------------------------------------------------------
   // 提示词
   // -------------------------------------------------------------------------
@@ -497,8 +563,10 @@ export class FeastWorld {
    * 这个方法绝不能抛错：契约里抛错会把整个 World 卸载掉。
    */
   envPromptVars() {
+    // 天气是独立的：哪怕「她的一天」整个关着，也该让鱼知道外面什么天气。
+    const weather = this.#weatherLine();
     try {
-      if (!this.#lifeOn()) return { feast_life_block: '' };
+      if (!this.#lifeOn()) return { feast_life_block: '', feast_weather_block: weather };
       const now = this.#now();
       const z = zonedNow(this.timezone, now);
       const today = this.#lifeToday?.date === z.date ? this.#lifeToday : null;
@@ -506,10 +574,11 @@ export class FeastWorld {
       const wardrobe = this.#wardrobeOn() ? wardrobeHintLine(this.#wardrobe) : '';
       return {
         feast_life_block: envBlock({ today, tomorrow, cfg: this.cfg, tz: this.timezone, nowMs: now, wardrobe }),
+        feast_weather_block: weather,
       };
     } catch (err) {
       this.#host?.log?.warn?.('食时：她的一天环境提示词算不出来', { err: msg(err) });
-      return { feast_life_block: '' };
+      return { feast_life_block: '', feast_weather_block: weather };
     }
   }
 
@@ -576,9 +645,13 @@ export class FeastWorld {
       lines.push(`按条件找到 ${pool.length} 道${pool.length > 12 ? '，先列 12 道' : ''}：`);
       for (const d of pool.slice(0, 12)) lines.push(`- ${briefLine(d)}`);
     } else {
-      const picks = pickFew(lib, this.#menuSize(), { rng: this.#random });
+      // 不带筛选时也让天气带一带：外面热偏清爽、下雨偏热乎。池子太小就退回全库。
+      const wpool = this.#weatherPool();
+      const picks = pickFew(lib, this.#menuSize(), { rng: this.#random, ...(wpool ? { pool: wpool } : {}) });
       lines.push('今天这几道可以考虑（随机给的，不喜欢就换个筛选）：');
       for (const d of picks) lines.push(`- ${briefLine(d)}`);
+      const whint = weatherPickHint(this.#weatherKindForHint());
+      if (whint) lines.push(whint);
     }
     lines.push('', index);
     lines.push('吃哪道就用 feast_eat，dish 填菜名或 id；想先闻闻味儿不动筷子就用 feast_taste。');
@@ -775,6 +848,13 @@ export class FeastWorld {
     const now = this.#now();
     // 主人端来的菜过期就撤掉，免得半天后突然回一句。
     servedStillFresh(this.#state, now, this.#cfgNumber('ownerFeedTTL', 1, 240));
+    // 天气在每拍最前面刷（内部按 weatherRefreshMin 节流，不会真的一拍一次请求）。
+    // 单独兜住，天气出问题不该连饭点也不叫了。
+    try {
+      await this.#refreshWeather(now);
+    } catch (err) {
+      this.#host?.log?.warn?.('食时：天气这一拍没刷成', { err: msg(err) });
+    }
     // 「她的一天」必须在饭点判定之前跑：非饭点那一拍会 return，不能把它跳过去。
     // 单独兜住异常，日程出问题不该连饭点也不叫了。
     try {
@@ -824,16 +904,25 @@ export class FeastWorld {
       : `【食时 · ${plan.slot}】到饭点了。不是主人找你，也不是待办，是你自己该吃了。`;
 
     const lines = [head, `今天已经吃过：${eatenTodayText(state, this.timezone, now)}。`];
+    // 天气就在这一口旁边：外面大太阳就别端出一碗「下雨天」的话来。
+    const wshort = weatherShort(this.#weather);
+    if (wshort) lines.push(`外面这会儿：${wshort}。`);
     // 融合点：饭点本来就在她的一天里，顺带说清她这会儿原本在做什么。
     const life = this.#lifeNowBrief(now);
     if (life) lines.push(life);
     lines.push('挑一道现在想吃的：');
 
+    // 天气联动：大太阳/热 → 偏清爽，下雨/冷 → 偏热乎。只用现成的 category/keywords
+    // 粗筛，不改菜品契约；筛不到东西或天气没取到就退回全库，不硬凑。
+    const pool = this.#weatherPool();
     const picks = pickFew(this.#lib, Math.min(3, this.#menuSize()), {
       rng: this.#random,
       avoidId: this.#avoidRepeat() ? lastEaten(state)?.id : undefined,
+      ...(pool ? { pool } : {}),
     });
     for (const d of picks) lines.push(`- ${briefLine(d)}`);
+    const whint = weatherPickHint(this.#weatherKindForHint());
+    if (whint) lines.push(whint);
     lines.push(`以上是随手给的几道；想换就用 feast_menu（能按 ${this.#lib.cuisines.slice(0, 6).join('/')} 这类菜系筛）。`);
 
     const tail = ['直接 feast_eat 吃一道（dish 填菜名或 id；不带参数也是随机）。'];
@@ -1938,6 +2027,9 @@ export class FeastWorld {
         nowHm: z.hm,
         tz: this.timezone,
         freeNow,
+        // 天气：出门那句提醒跟着真实天气走，取不到就整段不出现。
+        weatherShort: weatherShort(this.#weather),
+        weatherHint: weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null),
       }),
       meta: { slot: plan.slot, retry: plan.action === 'retry', done: play.done.length },
     }, { deliver: true, trigger: 'flush' });
@@ -1989,11 +2081,15 @@ export class FeastWorld {
       : String(DEFAULTS.lifeFreeMenu);
     const done = play.done.length;
     const mood = typeof args?.mood === 'string' && args.mood.trim() ? `（${args.mood.trim().slice(0, 60)}）` : '';
+    const wshort = weatherShort(this.#weather);
+    const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
     const lines = [
       `行，现在就是你自己的时间${mood}——不用等下一档，也不管今天叫过几次。`,
       `今天已经记了 ${done} 件。`,
+      ...(wshort ? [`外面这会儿：${wshort}。`] : []),
       '下面只是个例子，不照着也行；想到什么就做什么，什么都不做也可以：',
       menu,
+      ...(whint ? [whint] : []),
       '做完随手用 feast_life_play 记一笔。不记也没关系，记只是给你自己攒。',
     ];
     if (goal > 0 && done >= goal) {
@@ -2440,6 +2536,8 @@ export class FeastWorld {
           const menu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
             ? this.cfg.lifeFreeMenu.trim()
             : String(DEFAULTS.lifeFreeMenu);
+          const wshort = weatherShort(this.#weather);
+          const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
           await this.#host?.pushEvent?.({
             type: EVENT_LIFE_FREE,
             source: this.id,
@@ -2449,8 +2547,10 @@ export class FeastWorld {
             text: [
               '【食时 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
               `今天已经记了 ${play.done.length} 件${goal > 0 ? `（到 ${goal} 件只是不再按点叫你，不是上限）` : ''}。`,
+              ...(wshort ? [`外面这会儿：${wshort}。`] : []),
               '想做什么都行，下面只是个例子，不照着也行：',
               menu,
+              ...(whint ? [whint] : []),
               '做完随手用 feast_life_play 记一笔。',
             ].join('\n'),
             meta: { reason: 'owner-start' },
@@ -2515,6 +2615,13 @@ export class FeastWorld {
       await this.#freePlay(this.#now());
     } catch (err) {
       host?.log?.warn?.('食时：她的一天没读进来', { err: msg(err) });
+    }
+    // 启动就先取一次真实天气：envPromptVars() 是同步的，前缀重建时得有内存快照可读。
+    // 取不到就保持「不提天气」，下一拍 tick 再试。
+    try {
+      await this.#refreshWeather(this.#now());
+    } catch (err) {
+      host?.log?.warn?.('食时：启动时天气没取到', { err: msg(err) });
     }
     host?.log?.info?.('食时已启动', {
       dishes: this.#lib.dishes.length,

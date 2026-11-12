@@ -173,6 +173,9 @@ $defaults = [ordered]@{
   lifeWardrobeOn    = $true
   lifeWardrobeDir   = ""
   lifeWardrobeAutoOutfit = $true
+  weatherEnabled     = $false
+  weatherCity         = ''
+  weatherRefreshMin  = 30
 }
 if (-not (Test-Path $companionCfg)) {
   Say "WARN 没找到 $companionCfg（Coo 还没初始化过？先启动一次 Coo 再装）"
@@ -213,7 +216,7 @@ if (-not $WhatIf) {
 Say ""
 Say "下一步："
 Say "  1) 重启 Coo（完全退出再打开）"
-Say "  2) 面板 → 世界 →「食时」，确认状态 active；配置里能看到 36 项（分 5 张卡），第一项是「饭点提醒」开关"
+Say "  2) 面板 → 世界 →「食时」，确认状态 active；配置里能看到 39 项（分 6 张卡），第一项是「饭点提醒」开关"
 Say "  3) 面板里四个页签：菜单点一道菜看味道档案、右边「端给她」就会端过去；套餐整桌端；吃过什么看口味画像；今天看她的一天"
 Say "  4) 不想按点被叫：把「饭点提醒」关掉即可（面板上的菜和工具都还在）"
 Say ""

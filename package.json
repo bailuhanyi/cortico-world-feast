@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-feast",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "食时 · 先给她一天，再给她一桌饭：她自己的日程（每晚自己写明天、到点过自己的时间、做完记一笔）+ 800 道菜的桌子，能端一道、端一桌，也能和她一起吃一顿。",
   "license": "MIT",
   "author": "青",
@@ -45,13 +45,13 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
+    "test": "node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/weather.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
     "dishes": "node tools/validate-dishes.mjs",
     "selfcheck": "node tools/selfcheck.mjs",
     "check:install": "node tools/check-install.mjs",
     "check:publish": "node tools/publish-check.mjs --online",
     "describe": "node tools/make-describe.mjs",
-    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
+    "prepublishOnly": "node tools/validate-dishes.mjs && node tools/selfcheck.mjs && node tools/publish-check.mjs --online && node test/dishes.test.mjs && node test/eat.test.mjs && node test/state.test.mjs && node test/combos.test.mjs && node test/together.test.mjs && node test/life.test.mjs && node test/wardrobe.test.mjs && node test/life-world.test.mjs && node test/weather.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/make-describe.mjs --check"
   },
   "cortico": {
     "kind": "world",

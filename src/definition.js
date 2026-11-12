@@ -102,6 +102,8 @@ export const feastDefinition = {
     // 段里缺键时界面上会显示成 false / 空 / 0，和实际生效值对不上。
     // 详见 FeastWorld#ensureConfigSection。
     persist: typeof ctx.persist === 'function' ? (patch) => ctx.persist(patch) : null,
+    // 天气联网可注入（dry-mount / 测试用）；宿主正常挂载时不传，走全局 fetch。
+    weatherFetch: typeof ctx.weatherFetch === 'function' ? ctx.weatherFetch : null,
   }),
   /** 自描述：可能出现的全部工具与事件，不进提示词。 */
   describe: {

@@ -281,7 +281,9 @@ test('envPromptVars：同一天里低频（不同时刻完全一致），且永�
 test('envPromptVars：关掉就是一整段空字符串，而不是 null / 抛错', async () => {
   const { world } = await makeWorld({ cfg: { lifeEnabled: false } });
   const vars = world.envPromptVars();
-  assert.deepEqual(vars, { feast_life_block: '' },
+  // 0.7.3 加了天气块：默认关（没填城市）时它也是空串，和 feast_life_block 同构。
+  // 模板里有两个 {{...}} 占位符，两个变量都得给（空串即可），缺一个宿主会留下字面量。
+  assert.deepEqual(vars, { feast_life_block: '', feast_weather_block: '' },
     '关掉时该给空字符串（返回 null 会把整份 ENV_PROMPT 一起省略）');
   await world.stop();
 });
