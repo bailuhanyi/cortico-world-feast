@@ -59,6 +59,15 @@ export function classifyWeather({ code, tempC, isDay = 1 } = {}) {
   return 'mild';
 }
 
+/**
+ * 城市名是从 geocoding 回来的外部文本，最终要进系统前缀。
+ * 宿主对前缀做 {{...}} 模板替换（见 life/inject.js 的 safe()），
+ * 所以这里把花括号拆开，免得一个手滑填了「{{x}}」的城市被当成模板变量。
+ */
+function safeCity(s) {
+  return String(s ?? '').replace(/\{\{/g, '{').replace(/\}\}/g, '}').slice(0, 40);
+}
+
 /** WMO 码 → 中文词。未知码返回空串（调用方据此不提天气）。纯函数。 */
 export function weatherWord(code) {
   if (code === undefined || code === null) return '';
@@ -76,7 +85,7 @@ export function weatherLine(snap, { who = '你' } = {}) {
   const word = weatherWord(snap.code);
   if (!word) return '';
   const bits = [];
-  if (snap.city) bits.push(`${snap.city}这边`);
+  if (snap.city) bits.push(`${safeCity(snap.city)}这边`);
   bits.push(word);
   if (Number.isFinite(snap.tempC)) bits.push(`${Math.round(snap.tempC)}°C`);
   if (snap.isDay === 0) bits.push('这会儿是夜里');
@@ -137,7 +146,7 @@ export function weatherShort(snap) {
   const word = weatherWord(snap.code);
   if (!word) return '';
   const t = Number.isFinite(snap.tempC) ? ` ${Math.round(snap.tempC)}°C` : '';
-  const city = snap.city ? `${snap.city} ` : '';
+  const city = snap.city ? `${safeCity(snap.city)} ` : '';
   return `${city}${word}${t}`;
 }
 
@@ -195,7 +204,7 @@ export async function fetchWeather({
     if (!Number.isFinite(code)) return { ok: false };
     return {
       ok: true,
-      city: String(hit.name || name),
+      city: safeCity(hit.name || name),
       code,
       tempC: Number.isFinite(tempC) ? tempC : undefined,
       isDay: Number.isFinite(isDay) ? isDay : 1,
