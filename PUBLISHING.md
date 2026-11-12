@@ -17,13 +17,13 @@ cd 'E:\deep seek\feed-world'
 node tools/validate-dishes.mjs      # 菜品库：字段、九维、类别、套话、菜系与文件名一致
 node tools/selfcheck.mjs            # 复刻 Coo 的干装载检查
 node tools/publish-check.mjs --online  # 市场收录口径 + npm 包名占用
-npm test                            # 9 个文件，275 项
+npm test                            # 11 个文件，323 项
 node tools/make-describe.mjs --check
 ```
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态（0.7.2）：**18 项通过、0 失败、2 条警告**（没截 `screenshots`；工具数 / 工具 token 在卡片上会标 yellow——0.7.0 之后工具涨到 16 个）；**312 项测试全绿**（10 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 36 · wardrobe 20 · life-world 47 · world 40 · panels 47）。
+当前状态（0.7.3）：**18 项通过、0 失败、3 条警告**（没截 `screenshots`；工具数 / 工具 token 在卡片上会标 yellow——0.7.0 之后工具涨到 16 个；解包 2.0MB）；**323 项测试全绿**（11 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 36 · wardrobe 20 · life-world 47 · weather 10 · world 41 · panels 47）。
 
 ---
 
@@ -118,7 +118,7 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-0.7.2 应该是 **56 个文件**，压缩约 713KB、解包约 2.0MB：
+0.7.3 应该是 **57 个文件**，解包约 2.0MB（压缩后大小以 `npm pack --dry-run` 的输出为准）：
 `package.json`、`src/`（含 28 个菜品 json + `src/life/` 9 个 js）、`dist/webui.js`、`describe.json`、
 `assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`、`GUIDE.md`。
 
@@ -133,17 +133,17 @@ npm pack --dry-run
 npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granular token，就不用带 --otp
 ```
 
-这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
+这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 / 0.7.2 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
 
-`latest` 会从 **0.7.1** 走到 **0.7.2**。版本序列是 0.6.0 → 0.6.1 → 0.6.2 → 0.6.3 → 0.7.0 → 0.7.1 → 0.7.2。
+`latest` 会从 **0.7.2** 走到 **0.7.3**。版本序列是 0.6.0 → 0.6.1 → 0.6.2 → 0.6.3 → 0.7.0 → 0.7.1 → 0.7.2 → 0.7.3。
 （0.6.0 那会儿「0.7.0」这个号本来打算给套餐用、后来并进了 0.6.0；真正的 0.7.0 是后来「她的一天」才发的。）
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.7.2
+npm view cortico-world-feast version          # 应回 0.7.3
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
-npm view cortico-world-feast dist-tags        # latest 应是 0.7.2
+npm view cortico-world-feast dist-tags        # latest 应是 0.7.3
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -186,8 +186,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 "screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png", "assets/screenshot-3.png"],
 ```
 
-7. 截图塞进**当前这一版**：现在的版本号是 `0.7.2`（还没发），加完直接 `npm publish` 就行；
-   要是 0.7.2 已经发出去了，就再升一位重发
+7. 截图塞进**当前这一版**：现在的版本号是 `0.7.3`（还没发），加完直接 `npm publish` 就行；
+   要是 0.7.3 已经发出去了，就再升一位重发
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 
@@ -209,7 +209,7 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 
 之前写过 `food` 和 `local`，两个都不对：`food` 不在词表里（市场不认，写了等于没写）；`local` 的意思是「在本机跑模型、要算力和显存」，我们一行推理都不跑。已删掉。
 
-**没声明的**：`injection-risk` 不该有——我们推的七条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么、日程里的活动名），没有一句是别人写的文字。`high-cost` 也不该有——15 个工具合计约 2.5k token，饭点一天最多 3 次，日程一天一次、时段事件换一件事才一句、自由时间一天三档。
+**没声明的**：`injection-risk` 不该有——我们推的七条 internal 事件，正文全是固定模板加扩展自己的数值（菜名、菜系、日期、她自己吃过什么、日程里的活动名），没有一句是别人写的文字。`high-cost` 也不该有——16 个工具合计约 2.6k token，饭点一天最多 3 次，日程一天一次、时段事件换一件事才一句、自由时间一天三档。
 
 > 0.7.0 起 `internal-state` 这条更该照实声明了：这个 World 现在还在 Memory 之外记着**她自己写的日程**和**她自己的时间做了什么的记账**（`feast/life/*.json`）。
 
@@ -226,8 +226,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 3. World 扩展不直接依赖其他 World 扩展
 4. **至少有过一次后续更新**
 
-第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 都发过，
-早就满足了；想把截图一并带上再申请也行，那就等 0.7.2 发出去。
+第 4 条意味着至少要发两个版本才能申请。0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 / 0.7.2 都发过，
+早就满足了；想把截图一并带上再申请也行，那就等 0.7.3 发出去。
 
 申请方式是开一个 `[认证]` issue：
 

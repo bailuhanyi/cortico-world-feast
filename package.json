@@ -1,7 +1,7 @@
 {
   "name": "cortico-world-feast",
   "version": "0.7.3",
-  "description": "食时 · 先给她一天，再给她一桌饭：她自己的日程（每晚自己写明天、到点过自己的时间、做完记一笔）+ 800 道菜的桌子，能端一道、端一桌，也能和她一起吃一顿。",
+  "description": "食时 · 先给她一天，再给她一桌饭：她自己的日程（每晚自己写明天、到点过自己的时间、做完记一笔）+ 824 道菜的桌子，能端一道、端一桌，也能和她一起吃一顿。",
   "license": "MIT",
   "author": "青",
   "repository": {
@@ -63,11 +63,11 @@
     "locales": {
       "zh": {
         "displayName": "食时",
-        "description": "先给她一天，再给她一桌饭。每天晚上到点请她自己写明天怎么过（零 API Key，用已配的模型），第二天按它过；到点还有「她自己的时间」，让她挑件事做并记一笔。主人能在「今天」面板看今天和明天的时间线、此刻她在做什么、她做过什么、往前翻往期，也能临时改掉某一段。桌上是 800 道菜（28 个菜系组），每道都有九维口味、香气、口感、余韵和一段实吃描写；她能自己按菜系挑，主人也能从面板端一道或整桌端过去（8 套内置套餐，也能自己勾几道攒成一桌存下来）；还能和她一起吃一顿：邀请她、互相喂一口，你吃了什么她也知道。同一道菜每次吃到的都不一样，吃过什么、对什么反应、口味画像跨天攒着。饭点提醒、「她的一天」和自由时间都能在配置里单独关掉。"
+        "description": "先给她一天，再给她一桌饭。每天晚上到点请她自己写明天怎么过（零 API Key，用已配的模型），第二天按它过；到点还有「她自己的时间」，让她挑件事做并记一笔。主人能在「今天」面板看今天和明天的时间线、此刻她在做什么、她做过什么、往前翻往期，也能临时改掉某一段。桌上是 824 道菜（28 个菜系组），每道都有九维口味、香气、口感、余韵和一段实吃描写；她能自己按菜系挑，主人也能从面板端一道或整桌端过去（8 套内置套餐，也能自己勾几道攒成一桌存下来）；还能和她一起吃一顿：邀请她、互相喂一口，你吃了什么她也知道。同一道菜每次吃到的都不一样，吃过什么、对什么反应、口味画像跨天攒着。饭点提醒、「她的一天」和自由时间都能在配置里单独关掉。"
       },
       "en": {
         "displayName": "Mealtime",
-        "description": "First a day of her own, then a table of food. Every evening she is asked to write tomorrow herself (no API key — it uses the model you already have), and the next day she lives it; on her own-time slots she picks something to do and logs it. The Today panel shows today's and tomorrow's timeline, what she is doing right now, what she has been up to, past days, and lets you change a stretch of it. The table holds 800 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders, her day, and her own time can each be switched off in config."
+        "description": "First a day of her own, then a table of food. Every evening she is asked to write tomorrow herself (no API key — it uses the model you already have), and the next day she lives it; on her own-time slots she picks something to do and logs it. The Today panel shows today's and tomorrow's timeline, what she is doing right now, what she has been up to, past days, and lets you change a stretch of it. The table holds 824 dishes across 28 cuisines, each with a nine-axis flavour profile, aroma, texture, aftertaste and a full paragraph of how it actually eats. She can pick by cuisine, or you can put a dish down in front of her from the panel — or serve a whole table at once (8 built-in set meals, plus your own saved tables). You can also share a meal with her: invite her, feed each other a bite, and tell her what you are eating. The same dish never lands the same way twice, and what she ate, how it landed and her taste profile accumulate across days. Meal reminders, her day, and her own time can each be switched off in config."
       }
     },
     "tags": [

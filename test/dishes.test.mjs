@@ -8,13 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
 import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine, CATEGORIES } from '../src/dishes.js';
+import { GROUP_CAPS } from '../tools/validate-dishes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const lib = await loadDishes();
 
-test('库里正好 799 道地域菜 + 白米饭 1 道 = 800 道 / 28 个菜系组', () => {
-  // 800 是地域菜的总量（0.6.2 补到 700，再补 99 道饮品甜品到 799），白米饭是唯一的非地域例外，单独算一道。
-  assert.equal(lib.dishes.length, 800, `有 ${lib.dishes.length} 道`);
+test('库里正好 799 道地域菜 + 特别餐食 25 道 = 824 道 / 28 个菜系组', () => {
+  // 799 是地域菜的总量（0.6.2 补到 700，再补 99 道饮品甜品到 799）。特别餐食是唯一的非地域组：
+  // 白米饭 1 道 + 0.7.3 后加的肯德基/麦当劳/汉堡王/海底捞各 6 道 = 25 道，单独算。
+  assert.equal(lib.dishes.length, 824, `有 ${lib.dishes.length} 道`);
   assert.equal(lib.cuisines.length, 28, `有 ${lib.cuisines.length} 个菜系`);
 });
 
@@ -22,8 +24,11 @@ test('中餐占六成左右（0.5.0 起有意往中餐偏）', () => {
   const cn = ['川菜', '粤菜', '江浙沪菜', '北方菜', '湘菜', '西南菜', '东北菜', '西北菜',
     '闽台菜', '鲁菜', '鄂菜', '徽菜', '赣菜'];
   const cnCount = lib.dishes.filter((d) => cn.includes(d.cuisine)).length;
-  const ratio = cnCount / lib.dishes.length;
-  assert.ok(ratio >= 0.57 && ratio <= 0.65, `中餐占比 ${ratio.toFixed(2)}，偏离六成太远`);
+  // 分母只算地域菜：特别餐食（白米饭 + 四家连锁）不是地域组，算进分母会把中餐比例稀释掉，
+  // 那测的就不是「地域菜里中餐占多少」了。
+  const regional = lib.dishes.filter((d) => d.cuisine !== '特别餐食').length;
+  const ratio = cnCount / regional;
+  assert.ok(ratio >= 0.57 && ratio <= 0.65, `地域菜里中餐占比 ${ratio.toFixed(2)}，偏离六成太远`);
 });
 
 test('每组都不薄：没有哪一组少于 10 道', () => {
@@ -31,27 +36,42 @@ test('每组都不薄：没有哪一组少于 10 道', () => {
   const n = {};
   for (const d of lib.dishes) n[d.cuisine] = (n[d.cuisine] ?? 0) + 1;
   for (const [c, v] of Object.entries(n)) {
-    if (c === '白饭') continue; // 白饭是唯一的例外组，见下面那条守门测试
+    if (c === '特别餐食') continue; // 特别餐食是唯一的例外组，见下面那条守门测试
     assert.ok(v >= 10, `「${c}」只有 ${v} 道`);
   }
   assert.equal(Object.keys(n).length, 28, '有菜系没有菜');
 });
 
-test('守门：白饭组只能有白米饭这一道', () => {
-  // 0.6.0 破例开了 staples（cuisine = 白饭，0.6.2 之前叫「主食」），理由是白米饭不属于任何一片地方、
+test('守门：特别餐食组 = 白米饭 1 道 + 四家连锁各 6 道 = 25 道', () => {
+  // 0.6.0 破例开了 staples（当时 cuisine = 主食，0.6.2 改名白饭），理由是白米饭不属于任何一片地方、
   // 写哪个省都是编的。0.4.0 拆掉「家常菜」「甜品」正是因为例外组会越收越多，
-  // 变成下一个垃圾场——所以这里把上限钉死，加第二道就直接红。
-  // 注意：上限写在 validate-dishes.mjs 的 GROUP_CAPS 里，这里是它的镜像。
-  const staple = lib.dishes.filter((d) => d.cuisine === '白饭');
-  assert.equal(staple.length, 1, `白饭组有 ${staple.length} 道，只能是白米饭这一道`);
-  assert.equal(staple[0].name, '白米饭');
-  assert.equal(staple[0].category, '主食');
-  // 反向确认：别的菜系里不许再冒出一个「白饭」之外的非地域组名。
+  // 变成下一个垃圾场——所以这里把上限钉死，加一道就越线。
+  // 2026-11 用户明确要求：这一组改名「特别餐食」，收肯德基/麦当劳/汉堡王/海底捞各 6 道，
+  // 它不再只是「一碗饭」，但仍然是**唯一**允许的非地域组。
+  // 上限写在 validate-dishes.mjs 的 GROUP_CAPS 里，这里直接 import 当镜像，不抄数字。
+  const list = lib.dishes.filter((d) => d.cuisine === '特别餐食');
+  assert.equal(list.length, GROUP_CAPS.staples,
+    `特别餐食组有 ${list.length} 道，上限是 ${GROUP_CAPS.staples} 道`);
+  // 上限的构成：白米饭 1 + 四家各 6。
+  assert.equal(GROUP_CAPS.staples, 1 + 4 * 6, '上限应该是白米饭 + 四家连锁各 6 道');
+  // 白米饭还在，id 和 category 都没动（只改了 cuisine）。
+  const rice = lib.byId.get('white-rice');
+  assert.ok(rice, '白米饭那一碗被弄丢了');
+  assert.equal(rice.name, '白米饭');
+  assert.equal(rice.cuisine, '特别餐食');
+  assert.equal(rice.category, '主食');
+  // 四家各 6 道，按 id 前缀数：名字会改，前缀是这份数据自己的契约。
+  const brands = { 'kfc-': '肯德基', 'mcd-': '麦当劳', 'bk-': '汉堡王', 'hdl-': '海底捞' };
+  for (const [prefix, brand] of Object.entries(brands)) {
+    const n = list.filter((d) => d.id.startsWith(prefix)).length;
+    assert.equal(n, 6, `${brand}应该是 6 道，现在 ${n} 道`);
+  }
+  // 反向确认：别的菜系里不许再冒出一个「特别餐食」之外的非地域组名。
   const cnRegions = ['川菜', '粤菜', '江浙沪菜', '北方菜', '湘菜', '西南菜', '东北菜', '西北菜',
     '闽台菜', '鲁菜', '鄂菜', '徽菜', '赣菜'];
   const foreign = ['日料', '韩式', '东南亚', '南亚菜', '墨西哥菜', '意菜', '法餐', '南欧菜',
     '中欧菜', '英美菜', '中东菜', '拉美菜', '东欧菜', '非洲菜'];
-  const known = new Set([...cnRegions, ...foreign, '白饭']);
+  const known = new Set([...cnRegions, ...foreign, '特别餐食']);
   for (const c of lib.cuisines) {
     assert.ok(known.has(c), `出现了没登记在组表里的菜系「${c}」——非地域组不许再开`);
   }
@@ -60,7 +80,8 @@ test('守门：白饭组只能有白米饭这一道', () => {
 test('守门：菜系名不许和 category 的形态名撞名', () => {
   // 0.6.0 的 staples 曾叫「主食」，于是面板卡片印出「主食·主食」，菜系下拉和类别下拉
   // 各有一项叫「主食」——同一根轴出现两次。0.4.0 拆「甜品」组就是这个理由。
-  // 0.6.2 改成「白饭」，并在这里钉住：任何一个菜系名都不许等于某个 category。
+  // 0.6.2 改成「白饭」，2026-11 又改成「特别餐食」（那一组装进了四家连锁，「白饭」名不副实）。
+  // 不论叫什么，都钉住：任何一个菜系名都不许等于某个 category。
   for (const c of lib.cuisines) {
     assert.ok(!CATEGORIES.includes(c),
       `菜系「${c}」和 category 的形态名撞名——菜系只说地域/身份，形态只走 category`);
@@ -76,7 +97,7 @@ test('形态组已经解散：cuisine 里不该再出现「汤羹/面点主食/�
   }
 });
 
-test('库里一个非地域组都不剩：没有甜品、也没有家常菜', () => {
+test('除了特别餐食，不许再冒非地域组：没有甜品、也没有家常菜', () => {
   // 「甜品」在 category 里已经有一个同名值，菜系里再放一个就是同一根轴出现两次；
   // 「家常菜」是风格不是地域。两个都拆了，菜按 region 各归各家。
   // 「印度菜」0.5.0 改名「南亚菜」（要收巴基斯坦、斯里兰卡、孟加拉）。
@@ -88,10 +109,10 @@ test('库里一个非地域组都不剩：没有甜品、也没有家常菜', ()
   assert.ok(fromDesserts.length >= 10, '甜品这个类别本身还在，只是不再占一个菜系');
   assert.ok(new Set(fromDesserts.map((d) => d.cuisine)).size >= 5,
     '甜品类别的菜应该散在至少 5 个菜系里，而不是挤回一个组');
-  // 同理「白饭」这个非地域组只许有白米饭一道，不许长成第二个甜品组。
+  // 同理「特别餐食」这个非地域组只装白米饭和四家连锁的菜，不许长成第二个甜品组。
   const staple = lib.dishes.filter((d) => d.category === '主食');
   assert.ok(new Set(staple.map((d) => d.cuisine)).size >= 8,
-    '主食这个类别应该散在很多菜系里，只有白米饭归在「白饭」组');
+    '主食这个类别应该散在很多菜系里，只有白米饭和连锁的堡/卷归在「特别餐食」组');
 });
 
 test('0.5.0 新开的三个外餐组都在，而且各自有菜', () => {
