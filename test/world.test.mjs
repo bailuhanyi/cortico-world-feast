@@ -740,6 +740,71 @@ test('一起吃饭：没开席时，喂/自己吃/摊牌这几件事都不该静
   await world.stop();
 });
 
+test('启动时把配置段缺的键补上（否则配置页显示的值和实际不一致）', async () => {
+  // 真机踩过：那台机器从 11-05 起 worlds.feast 只有 12→24 个键，
+  // 宿主的 /api/config 是拿落盘的段直接渲染（不合并 defaults），
+  // 于是 boolean 缺 → 显示 false、string 缺 → 空、integer 缺 → 0。
+  // 结果 lifeEnabled 显示「关闭」但她天天在过日子、lifeWardrobeOn 显示
+  // 「关闭」但联动在跑——用户想关一个「看着已关」的开关，第一步反而是去打开它。
+  const { FeastWorld } = await import('../src/world.js');
+  const dir = `.tmp/cfgfill/${Date.now().toString(36)}`;
+  // 只给两个键，模拟一份「历来没补齐」的老配置。
+  const cfg = { enabled: true, mealSlots: '9:00' };
+  const persisted = [];
+  const world = new FeastWorld({
+    cfg,
+    dataDir: dir,
+    timezone: 'Asia/Shanghai',
+    now: () => Date.parse('2026-11-05T12:05:00+08:00'),
+    random: () => 0.5,
+    timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
+    persist: (patch) => { persisted.push(patch); Object.assign(cfg, patch); },
+  });
+  await world.start({ log: { info() {}, warn() {} }, async pushEvent(e) { return e; } });
+
+  assert.equal(persisted.length, 1, '该 persist 一次（只补不缺的时候不该调）');
+  const patch = persisted[0];
+  const missing = Object.keys(DEFAULTS).filter((k) => k !== 'enabled' && !(k in { enabled: true, mealSlots: '9:00' }));
+  assert.deepEqual(Object.keys(patch).sort(), missing.sort(),
+    `该只补缺的那 ${missing.length} 个键`);
+  // 用户已有的值不能被覆盖
+  assert.ok(!('mealSlots' in patch), '用户填过的 mealSlots 不该被写回去');
+  assert.ok(!('enabled' in patch), 'enabled 归部署管，不在这里写');
+  // 补进去的值就是默认值
+  assert.equal(patch.lifeEnabled, DEFAULTS.lifeEnabled);
+  assert.equal(patch.lifeWardrobeOn, DEFAULTS.lifeWardrobeOn);
+  await world.stop();
+
+  // 已经齐了的情况：再起一个 World，不该再 persist。
+  const full = { ...DEFAULTS, enabled: true };
+  const more = [];
+  const w2 = new FeastWorld({
+    cfg: full,
+    dataDir: dir,
+    timezone: 'Asia/Shanghai',
+    now: () => Date.parse('2026-11-05T12:05:00+08:00'),
+    random: () => 0.5,
+    timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
+    persist: (p) => { more.push(p); },
+  });
+  await w2.start({ log: { info() {}, warn() {} }, async pushEvent(e) { return e; } });
+  assert.equal(more.length, 0, '配置已经齐全时不该写盘');
+  await w2.stop();
+
+  // 没有 persist（dry-mount / describe 生成）也不能炸。
+  const w3 = new FeastWorld({
+    cfg: { enabled: true },
+    dataDir: dir,
+    timezone: 'Asia/Shanghai',
+    now: () => Date.now(),
+    random: () => 0.5,
+    timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
+  });
+  await w3.start({ log: { info() {}, warn() {} }, async pushEvent(e) { return e; } });
+  assert.equal(w3.cfg.lifeEnabled, DEFAULTS.lifeEnabled, '没有 persist 时照样按默认值跑');
+  await w3.stop();
+});
+
 test('面板与配置声明齐全', async () => {
   const { world } = await makeWorld();
   const zh = world.webUi('zh');

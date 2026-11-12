@@ -325,12 +325,18 @@ export class FeastWorld {
   #wardrobe = emptyWardrobe();
   /** 上次「重新想想」推给她的时间（按 date）：连点不该连推，免得刷屏。 */
   #lifeRewriteAt = {};
+  /** 宿主的 persist：深合并进 worlds.feast 并落盘（dry-mount 时没有）。 */
+  #persist = null;
+  /** 构造时拿到的原始配置段（未合并 DEFAULTS）：用来判断哪些键是「盘上没有的」。 */
+  #rawCfg = null;
 
   constructor(opts = {}) {
     this.id = ID;
     // 配置段可能是手写的、只补了半截：和默认值合并一层，缺的键按默认值走，
     // 不让一个漏写的 mealReminder 悄悄把饭点关掉。
-    this.cfg = { ...DEFAULTS, ...(opts.cfg ?? {}) };
+    // 原始那份也留着（#rawCfg）：启动补配置时要判断「盘上到底有没有这个键」。
+    this.#rawCfg = opts.cfg ?? {};
+    this.cfg = { ...DEFAULTS, ...this.#rawCfg };
     this.dataDir = opts.dataDir ?? process.cwd();
     this.language = 'zh';
     this.timezone = opts.timezone || 'Asia/Shanghai';
@@ -339,6 +345,52 @@ export class FeastWorld {
     this.#setInterval = opts.timers?.setInterval ?? ((fn, ms) => setInterval(fn, ms));
     this.#clearInterval = opts.timers?.clearInterval ?? ((t) => clearInterval(t));
     this.#setTimeout = opts.timers?.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
+    this.#persist = typeof opts.persist === 'function' ? opts.persist : null;
+  }
+
+  /**
+   * 把 `worlds.feast` 段里缺的键补成默认值（启动时做一次）。
+   *
+   * 为什么必须补：宿主的 `/api/config` 拿落盘的段**直接**渲染
+   * （`readGroupValues` 不合并 defaults）——
+   *   boolean 缺 → 界面显示 `false`
+   *   string  缺 → 显示空
+   *   integer 缺 → 显示 `0`
+   * 而 World 自己构造时是 `{ ...DEFAULTS, ...cfg }`，缺键按默认值走。
+   * 两边一凑，就成了「界面写着关闭、其实开着」。
+   *
+   * 真机实测：那台机器从 11-05 起 `worlds.feast` 只有 12→24 个键，
+   * 配置页 10 项显示错——`lifeEnabled` 显示 false 但她天天在过日子、
+   * `lifeWardrobeOn` 显示 false 但联动在跑。用户想关一个「看着已关」的
+   * 开关，第一步反而是去把它打开，行为完全反了。
+   *
+   * 只补**缺的**键，不覆盖用户已有的值；没有 persist（dry-mount、
+   * describe 生成）就跳过。绝不抛错：补不上也要能正常起。
+   */
+  #ensureConfigSection() {
+    if (!this.#persist) return;
+    try {
+      // 判据用构造时拿到的**原始段**（this.#rawCfg），不能用 this.cfg：
+      // this.cfg 已经和 DEFAULTS 合并过，每个键都在，永远判不出「缺」。
+      const raw = this.#rawCfg ?? {};
+      const patch = {};
+      for (const [key, value] of Object.entries(DEFAULTS)) {
+        // enabled 归宿主管（部署决定），不在这里写。
+        if (key === 'enabled') continue;
+        if (key in raw) continue;
+        patch[key] = value;
+      }
+      const keys = Object.keys(patch);
+      if (!keys.length) return;
+      this.#persist(patch);
+      // 活对象同步一次：persist 会深合并进同一份 cfg，这里只是保险。
+      Object.assign(this.cfg, patch);
+      Object.assign(raw, patch);
+      this.#host?.log?.info?.('食时：配置段补齐了缺失的键', { keys });
+    } catch (err) {
+      // 补不上就照默认值跑，功能不受影响，只是界面会继续显示错——记一条警告。
+      this.#host?.log?.warn?.('食时：配置段没补齐（界面可能显示和实际不一致）', { err: msg(err) });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -2450,6 +2502,8 @@ export class FeastWorld {
   async start(host) {
     if (this.#started) return;
     this.#host = host;
+    // 先补配置段：宿主的配置页读的是落盘的段，缺键会显示和实际不一致。
+    this.#ensureConfigSection();
     this.#lib = await loadDishes(host?.log);
     this.#state = await this.#load();
     this.#started = true;

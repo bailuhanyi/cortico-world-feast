@@ -98,6 +98,10 @@ export const feastDefinition = {
     cfg: ctx.cfg,
     dataDir: ctx.dataDir,
     timezone: ctx.timezone,
+    // 补齐配置段用：宿主的 /api/config 读的是落盘的 worlds.feast（不做默认值合并），
+    // 段里缺键时界面上会显示成 false / 空 / 0，和实际生效值对不上。
+    // 详见 FeastWorld#ensureConfigSection。
+    persist: typeof ctx.persist === 'function' ? (patch) => ctx.persist(patch) : null,
   }),
   /** 自描述：可能出现的全部工具与事件，不进提示词。 */
   describe: {
