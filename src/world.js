@@ -25,10 +25,10 @@ import {
 } from './config.js';
 import {
   DEFAULT_DAY_TYPES, addDays, applyChange, cleanDay, clearDays, clearPlays, dateLabel, dayText, envBlock,
-  findItem, freeEventText, funMenuLine, isAsleepActivity, isDateKey, isFreeActivity, LIFE_KEEP_DAYS, lifeDir, listDays, markFreeNudged,
+  findItem, freeEventText, funMenuLine, isAsleepActivity, isDateKey, isFreeActivity, LIFE_KEEP_DAYS, lifeDir, listDays, mapMenuLine, markFreeNudged,
   momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseSlots, pendingDay,
-  pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readPlay, recentSummary, recordPlay,
-  segmentKey, skipFreeToday, templateDay, withFunLine, writeDay, writePlay, zonedNow,
+  pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readMapEnabled, readPlay, recentSummary, recordPlay,
+  segmentKey, skipFreeToday, templateDay, withFunLine, withMapLine, writeDay, writePlay, zonedNow,
 } from './life/index.js';
 import {
   autoOutfit, clearWardrobeCache, emptyWardrobe, enrichItems, loadWardrobe,
@@ -333,6 +333,9 @@ export class FeastWorld {
   /** 娱乐时间（cortico-world-fun）装没装并启用：叫醒事件拼例子时同步读，
    *  所以和素材库、天气一样在 tick 里刷新成快照。没装/读不到一律 false。 */
   #funInstalled = false;
+  /** 小地图（cortico-world-map）装没装并启用：同样在 tick 里刷新成快照。
+   *  和 #funInstalled 各存各的——两行例子互不牵连，一个没装不影响另一个。 */
+  #mapInstalled = false;
   /** 上次真正去取天气的时刻（ms）：按 weatherRefreshMin 节流，别把接口当心跳打。 */
   #weatherAt = 0;
   /** 上次「重新想想」推给她的时间（按 date）：连点不该连推，免得刷屏。 */
@@ -513,6 +516,11 @@ export class FeastWorld {
     return this.#freeOn() && this.cfg?.lifeFreeFunOn !== false;
   }
 
+  /** 小地图联动总开关。关掉=不管装没装都不往「例子」里加那一行。 */
+  #mapLinkOn() {
+    return this.#freeOn() && this.cfg?.lifeFreeMapOn !== false;
+  }
+
   /**
    * 刷新「娱乐时间装没装并启用」的快照（tick 里调）。
    *
@@ -528,6 +536,21 @@ export class FeastWorld {
       this.#funInstalled = await readFunEnabled(this.dataDir);
     } catch {
       this.#funInstalled = false;
+    }
+  }
+
+  /**
+   * 刷新「小地图装没装并启用」的快照（tick 里调）。
+   *
+   * 和 `#refreshFunInstalled` 同构，各刷各的：两个插件装没装互不牵连，
+   * 一个读失败不该把另一个也变成「没装」。
+   */
+  async #refreshMapInstalled() {
+    if (!this.#mapLinkOn()) { this.#mapInstalled = false; return; }
+    try {
+      this.#mapInstalled = await readMapEnabled(this.dataDir);
+    } catch {
+      this.#mapInstalled = false;
     }
   }
 
@@ -1653,6 +1676,8 @@ export class FeastWorld {
     await this.#refreshWardrobe();
     // 娱乐时间装没装：叫醒事件拼例子要用，顺手刷新（读不到就是没装）。
     await this.#refreshFunInstalled();
+    // 小地图同理，各刷各的。
+    await this.#refreshMapInstalled();
     const z = zonedNow(this.timezone, now);
     const today = await readDay(this.dataDir, z.date);
     if (!today || today.source === 'pending' || !today.items.length) {
@@ -2041,7 +2066,8 @@ export class FeastWorld {
       : String(DEFAULTS.lifeFreeMenu);
     // 娱乐时间装了才把「出门去逛逛」那一行接上去；关了开关、没装、或她自己抄过 fun_*
     // 都原样返回——绝不让她看到指向不存在工具的例子。
-    const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
+    // 小地图接在后面，两行互不打架（各按自己的前缀去重）。
+    const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
     await host.pushEvent({
       type: EVENT_LIFE_FREE,
       source: this.id,
@@ -2113,7 +2139,8 @@ export class FeastWorld {
     // 和叫醒事件同一条路径：装了娱乐时间才加那一行。这里是工具调用（异步），
     // 现读一次比等 tick 更稳——刚装完娱乐时间她就能看到它。
     await this.#refreshFunInstalled();
-    const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
+    await this.#refreshMapInstalled();
+    const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
     const done = play.done.length;
     const mood = typeof args?.mood === 'string' && args.mood.trim() ? `（${args.mood.trim().slice(0, 60)}）` : '';
     const wshort = weatherShort(this.#weather);
@@ -2573,7 +2600,8 @@ export class FeastWorld {
             : String(DEFAULTS.lifeFreeMenu);
           // 面板这条通道也不等 tick：现读一次再拼，免得刚装完娱乐时间这里还没刷新。
           await this.#refreshFunInstalled();
-          const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
+          await this.#refreshMapInstalled();
+          const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
           const wshort = weatherShort(this.#weather);
           const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
           await this.#host?.pushEvent?.({
@@ -2658,8 +2686,9 @@ export class FeastWorld {
     // 「她的一天」关着时 #lifeEnsure 会提前 return，所以这里单独补一次。
     try {
       await this.#refreshFunInstalled();
+      await this.#refreshMapInstalled();
     } catch (err) {
-      host?.log?.warn?.('鱼的每一天：娱乐时间联动没读到', { err: msg(err) });
+      host?.log?.warn?.('鱼的每一天：娱乐时间/小地图联动没读到', { err: msg(err) });
     }
     // 启动就先取一次真实天气：envPromptVars() 是同步的，前缀重建时得有内存快照可读。
     // 取不到就保持「不提天气」，下一拍 tick 再试。

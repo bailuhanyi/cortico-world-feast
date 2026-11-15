@@ -103,6 +103,9 @@ export const DEFAULTS = Object.freeze({
   // ---- 娱乐时间联动（0.7.4）----
   /** 「出门逛逛」那一行要不要加。娱乐时间没装/没启用时，这一项写了也不会加。 */
   lifeFreeFunOn: true,
+  // ---- 小地图联动（0.7.4）----
+  /** 「看看周围」那一行要不要加。小地图没装/没启用时，这一项写了也不会加。 */
+  lifeFreeMapOn: true,
   // ---- 生图工作室联动（0.7.1）----
   /** 联动总开关：扫素材库、列给 Coo、自动补 outfit、注入指向句。关掉=纯文本日程，不碰库。 */
   lifeWardrobeOn: true,
@@ -206,6 +209,8 @@ const ZH = {
     lifeFreeAskReportDesc: '开启时，叫醒和记账回执都会提醒她「跟主人说一句你刚才玩了什么」。',
     lifeFreeFunOn: '出门逛逛那一行',
     lifeFreeFunOnDesc: '开启时，如果装了「娱乐时间」（cortico-world-fun）并且启用着，叫醒事件的例子末尾会自动多一行「fun_places 看今天能去哪 → fun_go 进门 → fun_wander 逛一处 → fun_home 收摊」，她就能真的出门逛游乐场、海洋馆、庙会这些地方。**娱乐时间没装或没启用时这一行不会出现**，她也不会看到指向不存在工具的例子；你自己在「叫醒时给的例子」里抄过 fun_* 的话，这一项也不重复加。关掉=不管装没装都不加这一行。',
+    lifeFreeMapOn: '看看周围那一行',
+    lifeFreeMapOnDesc: '开启时，如果装了「小地图」（cortico-world-map）并且启用着，叫醒事件的例子末尾会自动多一行「map_places 看有哪些地方 → map_look 看这一处长什么样」，她就能想起来去看看自己周围那些地方（家、常去的、附近）。**小地图没装或没启用时这一行不会出现**，她也不会看到指向不存在工具的例子；你自己在「叫醒时给的例子」里抄过 map_* 的话，这一项也不重复加。关掉=不管装没装都不加这一行。',
     lifeWardrobeOn: '生图联动',
     lifeWardrobeOnDesc: '扫生图工作室的素材库（<数据目录>/imggen-library），写日程时列出衣柜/场景/道具和穿搭习惯，模型没填 outfit 时按习惯自动补，并在提示词里加一句指向生图工作室。关掉=纯文本日程，不碰库、不联动。库读不到时自动静默降级，不影响她的一天。',
     lifeWardrobeDir: '素材库目录',
@@ -316,6 +321,8 @@ const EN = {
     lifeFreeAskReportDesc: 'When on, both the wake-up and the logging receipt remind her to say one sentence about what she just did.',
     lifeFreeFunOn: 'Add the going-out line',
     lifeFreeFunOnDesc: 'When on, and the Fun Time world (cortico-world-fun) is installed and enabled, one extra line is appended to the wake-up examples: "fun_places to see where you can go → fun_go to walk in → fun_wander to look around → fun_home to head home", so she can really go out to an amusement park, an aquarium, a temple fair and so on. **If Fun Time is not installed or not enabled the line never appears**, so she never sees an example pointing at tools that do not exist; and if you already pasted fun_* into the examples yourself, this will not add it twice. Off = never add it, installed or not.',
+    lifeFreeMapOn: 'Add the look-around line',
+    lifeFreeMapOnDesc: 'When on, and the Map world (cortico-world-map) is installed and enabled, one extra line is appended to the wake-up examples: "map_places to see what places there are → map_look to look at one", so she remembers to visit the places around her (home, favourites, nearby). **If Map is not installed or not enabled the line never appears**, so she never sees an example pointing at tools that do not exist; and if you already pasted map_* into the examples yourself, this will not add it twice. Off = never add it, installed or not.',
     lifeWardrobeOn: 'Image-gen link',
     lifeWardrobeOnDesc: 'Scans the image-gen studio library (<dataDir>/imggen-library), lists wardrobe/scene/props and outfit habits when she writes her day, auto-fills outfit from habits when the model leaves it blank, and adds one line in the prompt pointing at the studio. Off = plain-text schedule, no library, no link. Degrades silently when the library is missing; her day is never affected.',
     lifeWardrobeDir: 'Library root',
@@ -599,6 +606,12 @@ function configProperties(language = 'zh') {
           type: 'boolean',
           title: t.lifeFreeFunOn,
           description: t.lifeFreeFunOnDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeMapOn`]: {
+          type: 'boolean',
+          title: t.lifeFreeMapOn,
+          description: t.lifeFreeMapOnDesc,
           'x-hot': true,
         },
         [`${K}.lifeWardrobeOn`]: {

@@ -8,3 +8,4 @@ export * from './plan.js';
 export * from './free.js';
 export * from './wardrobe.js';
 export * from './funlink.js';
+export * from './maplink.js';
