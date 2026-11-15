@@ -808,7 +808,7 @@ test('启动时把配置段缺的键补上（否则配置页显示的值和实�
 test('面板与配置声明齐全', async () => {
   const { world } = await makeWorld();
   const zh = world.webUi('zh');
-  assert.equal(zh.label, '食时');
+  assert.equal(zh.label, '鱼的每一天');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealReminder'], '缺饭点开关');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealSlots']);
   assert.ok(zh.promptDocs[0].role === 'envPrompt');

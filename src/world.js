@@ -1,5 +1,5 @@
 /**
- * 食时 World。
+ * 鱼的每一天 World。
  *
  * 做的是"让她真的吃到东西"这件事：
  *
@@ -25,10 +25,10 @@ import {
 } from './config.js';
 import {
   DEFAULT_DAY_TYPES, addDays, applyChange, cleanDay, clearDays, clearPlays, dateLabel, dayText, envBlock,
-  findItem, freeEventText, isAsleepActivity, isDateKey, isFreeActivity, LIFE_KEEP_DAYS, lifeDir, listDays, markFreeNudged,
+  findItem, freeEventText, funMenuLine, isAsleepActivity, isDateKey, isFreeActivity, LIFE_KEEP_DAYS, lifeDir, listDays, markFreeNudged,
   momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseSlots, pendingDay,
-  pickDayType, planEventText, planFreeTick, playDoneText, readDay, readPlay, recentSummary, recordPlay,
-  segmentKey, skipFreeToday, templateDay, writeDay, writePlay, zonedNow,
+  pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readPlay, recentSummary, recordPlay,
+  segmentKey, skipFreeToday, templateDay, withFunLine, writeDay, writePlay, zonedNow,
 } from './life/index.js';
 import {
   autoOutfit, clearWardrobeCache, emptyWardrobe, enrichItems, loadWardrobe,
@@ -330,6 +330,9 @@ export class FeastWorld {
   /** 真实天气快照：同样同步读、tick 里异步刷新。envPromptVars() 绝不能联网。
    *  取不到就一直是 EMPTY_WEATHER —— 「宁可不说天气，也绝不编一个」。 */
   #weather = EMPTY_WEATHER;
+  /** 娱乐时间（cortico-world-fun）装没装并启用：叫醒事件拼例子时同步读，
+   *  所以和素材库、天气一样在 tick 里刷新成快照。没装/读不到一律 false。 */
+  #funInstalled = false;
   /** 上次真正去取天气的时刻（ms）：按 weatherRefreshMin 节流，别把接口当心跳打。 */
   #weatherAt = 0;
   /** 上次「重新想想」推给她的时间（按 date）：连点不该连推，免得刷屏。 */
@@ -399,10 +402,10 @@ export class FeastWorld {
       // 活对象同步一次：persist 会深合并进同一份 cfg，这里只是保险。
       Object.assign(this.cfg, patch);
       Object.assign(raw, patch);
-      this.#host?.log?.info?.('食时：配置段补齐了缺失的键', { keys });
+      this.#host?.log?.info?.('鱼的每一天：配置段补齐了缺失的键', { keys });
     } catch (err) {
       // 补不上就照默认值跑，功能不受影响，只是界面会继续显示错——记一条警告。
-      this.#host?.log?.warn?.('食时：配置段没补齐（界面可能显示和实际不一致）', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：配置段没补齐（界面可能显示和实际不一致）', { err: msg(err) });
     }
   }
 
@@ -505,6 +508,29 @@ export class FeastWorld {
       && this.cfg.weatherCity.trim().length > 0;
   }
 
+  /** 娱乐时间联动总开关。关掉=不管装没装都不往「例子」里加那一行。 */
+  #funLinkOn() {
+    return this.#freeOn() && this.cfg?.lifeFreeFunOn !== false;
+  }
+
+  /**
+   * 刷新「娱乐时间装没装并启用」的快照（tick 里调）。
+   *
+   * 为什么要快照：`freeEventText()` 是**同步**拼的（和 envPromptVars 同理），
+   * 没法在里面 await 读 config；而叫醒那一拍本来是异步的，顺手刷一次就够了。
+   *
+   * 读不到、没这个段、`enabled` 不是 true——一律 false，那一行整段不出现。
+   * 绝不抛错：联动没了不影响她的一天。
+   */
+  async #refreshFunInstalled() {
+    if (!this.#funLinkOn()) { this.#funInstalled = false; return; }
+    try {
+      this.#funInstalled = await readFunEnabled(this.dataDir);
+    } catch {
+      this.#funInstalled = false;
+    }
+  }
+
   /**
    * 刷新真实天气（tick 里调，按 weatherRefreshMin 节流）。
    * fetchWeather 自己绝不抛错，这里也不额外抛：失败只是让快照停在「不提天气」。
@@ -577,7 +603,7 @@ export class FeastWorld {
         feast_weather_block: weather,
       };
     } catch (err) {
-      this.#host?.log?.warn?.('食时：她的一天环境提示词算不出来', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：她的一天环境提示词算不出来', { err: msg(err) });
       return { feast_life_block: '', feast_weather_block: weather };
     }
   }
@@ -621,7 +647,7 @@ export class FeastWorld {
       case 'feast_life_adjust': return await this.#lifeAdjustTool(args);
       case 'feast_life_play': return await this.#lifePlayTool(args);
       case 'feast_life_skip': return await this.#lifeFreeSkipTool(args);
-      case 'feast_life_start': return this.#lifeFreeStartTool(args);
+      case 'feast_life_start': return await this.#lifeFreeStartTool(args);
       default: return { text: `[${name} 失败] 不认识这个工具。`, failed: true };
     }
   }
@@ -745,7 +771,7 @@ export class FeastWorld {
       tail.push(`（${hmIn(this.timezone, entry.at)} 吃掉的；端来时${shelfLifeText(left)}。）`);
     }
 
-    this.#host?.log?.info?.('食时：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
+    this.#host?.log?.info?.('鱼的每一天：吃了一顿', { dish: dish.id, nth: nth + 1, by, miss });
     return { text: [body, '', tail.join('')].join('\n') };
   }
 
@@ -823,7 +849,7 @@ export class FeastWorld {
     await this.#save();
 
     const word = action === 'like' ? '合口味' : action === 'dislike' ? '不太对付' : '一般';
-    this.#host?.log?.info?.('食时：记了一句反应', { dish: id, action });
+    this.#host?.log?.info?.('鱼的每一天：记了一句反应', { dish: id, action });
     return { text: `记下了：${entry.name || entry.id}——${word}${entry.note ? `，${entry.note}` : ''}。` };
   }
 
@@ -834,7 +860,7 @@ export class FeastWorld {
     skipToday(this.#state, day);
     await this.#save();
     const reason = typeof args.reason === 'string' && args.reason.trim() ? `（${args.reason.trim().slice(0, 80)}）` : '';
-    this.#host?.log?.info?.('食时：今天不吃', { reason });
+    this.#host?.log?.info?.('鱼的每一天：今天不吃', { reason });
     return { text: `好，今天剩下的饭点不叫你了${reason}。主人端菜过来还是会告诉你；想吃随时自己来。` };
   }
 
@@ -853,7 +879,7 @@ export class FeastWorld {
     try {
       await this.#refreshWeather(now);
     } catch (err) {
-      this.#host?.log?.warn?.('食时：天气这一拍没刷成', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：天气这一拍没刷成', { err: msg(err) });
     }
     // 「她的一天」必须在饭点判定之前跑：非饭点那一拍会 return，不能把它跳过去。
     // 单独兜住异常，日程出问题不该连饭点也不叫了。
@@ -862,7 +888,7 @@ export class FeastWorld {
       await this.#lifeMoment(now);
       await this.#freeTick(now);
     } catch (err) {
-      this.#host?.log?.warn?.('食时：她的一天这一拍没跑完', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：她的一天这一拍没跑完', { err: msg(err) });
     }
     // 一起吃饭这一顿到点也自己散（面板没开着也得散）。
     await this.#togetherSettle();
@@ -873,7 +899,7 @@ export class FeastWorld {
     if (plan.action === 'drop') {
       this.#state.pending = null;
       await this.#save();
-      this.#host?.log?.info?.('食时：放掉这一顿', { reason: plan.reason });
+      this.#host?.log?.info?.('鱼的每一天：放掉这一顿', { reason: plan.reason });
       return;
     }
 
@@ -881,12 +907,12 @@ export class FeastWorld {
       await this.#pushMeal(plan);
     } catch (err) {
       // 发不出去就不记账，下一拍再试。
-      this.#host?.log?.warn?.('食时：叫饭失败', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：叫饭失败', { err: msg(err) });
       return;
     }
     markNudged(this.#state, now, plan.slot, plan.action === 'retry');
     await this.#save();
-    this.#host?.log?.info?.('食时：叫饭', {
+    this.#host?.log?.info?.('鱼的每一天：叫饭', {
       slot: plan.slot,
       retry: plan.action === 'retry',
       ...(plan.dropped ? { dropped: plan.dropped } : {}),
@@ -900,8 +926,8 @@ export class FeastWorld {
     const state = this.#state;
 
     const head = plan.action === 'retry'
-      ? `【食时 · 再问一句】${plan.slot} 那顿你还没吃。`
-      : `【食时 · ${plan.slot}】到饭点了。不是主人找你，也不是待办，是你自己该吃了。`;
+      ? `【鱼的每一天 · 再问一句】${plan.slot} 那顿你还没吃。`
+      : `【鱼的每一天 · ${plan.slot}】到饭点了。不是主人找你，也不是待办，是你自己该吃了。`;
 
     const lines = [head, `今天已经吃过：${eatenTodayText(state, this.timezone, now)}。`];
     // 天气就在这一口旁边：外面大太阳就别端出一碗「下雨天」的话来。
@@ -986,7 +1012,7 @@ export class FeastWorld {
       throw new Error('宿主没有 pushEvent，端不过去');
     }
 
-    this.#host?.log?.info?.('食时：主人端了一道菜', { dish: dish.id });
+    this.#host?.log?.info?.('鱼的每一天：主人端了一道菜', { dish: dish.id });
     return { ok: true, message: `端过去了：${dish.name}`, dish: this.#panelDish(dish), pending: this.#servedView() };
   }
 
@@ -1038,7 +1064,7 @@ export class FeastWorld {
       throw new Error('宿主没有 pushEvent，端不过去');
     }
 
-    this.#host?.log?.info?.('食时：主人端了一桌', { combo: combo?.id, n: dishes.length });
+    this.#host?.log?.info?.('鱼的每一天：主人端了一桌', { combo: combo?.id, n: dishes.length });
     return {
       ok: true,
       message: `端过去了：${name}（${dishes.length} 道）`,
@@ -1131,7 +1157,7 @@ export class FeastWorld {
     const ended = finishTogether(this.#state.together, { nowMs: this.#now(), why });
     if (!ended) return null;
     await this.#save();
-    this.#host?.log?.info?.('食时：这一顿散了', { why, bites: ended.bites });
+    this.#host?.log?.info?.('鱼的每一天：这一顿散了', { why, bites: ended.bites });
     if (push) await this.#pushTogether(this.#endLines(ended), { kind: 'end', why });
     return ended;
   }
@@ -1178,7 +1204,7 @@ export class FeastWorld {
       '他喂你一口、或者他自己吃了什么，都会告诉你。不想吃就直说——feast_skip 管的是饭点提醒，不管这个。',
     ], { kind: 'invite' });
 
-    this.#host?.log?.info?.('食时：邀请她一起吃');
+    this.#host?.log?.info?.('鱼的每一天：邀请她一起吃');
     return { ok: true, message: '问她了：一起吃点？', together: this.#togetherView() };
   }
 
@@ -1209,7 +1235,7 @@ export class FeastWorld {
       this.#askReaction() ? '说一句这一口什么味儿——一句话就够。' : '',
     ], { kind: 'bite', dish: dish.id, name: dish.name });
 
-    this.#host?.log?.info?.('食时：喂了她一口', { dish: dish.id, nth });
+    this.#host?.log?.info?.('鱼的每一天：喂了她一口', { dish: dish.id, nth });
     return { ok: true, message: `喂了一口：${dish.name}`, together: this.#togetherView() };
   }
 
@@ -1256,7 +1282,7 @@ export class FeastWorld {
       ];
     await this.#pushTogether(lines, { kind: 'owner-ate', ...(dish ? { dish: dish.id, name: dish.name } : {}) });
 
-    this.#host?.log?.info?.('食时：主人也吃了点什么', { kind: entry.kind, matched });
+    this.#host?.log?.info?.('鱼的每一天：主人也吃了点什么', { kind: entry.kind, matched });
     const said = entry.kind === 'dish'
       ? (matched
         ? `记下了：你在吃${dish.name}——这句正好是库里那道，按它记了。`
@@ -1280,7 +1306,7 @@ export class FeastWorld {
       '那就 feast_eat 吃起来（dish 留空就吃桌上还没吃的那道）；也可以 feast_together（action 填 feed）分他一口。',
     ], { kind: 'invite', accepted: true });
 
-    this.#host?.log?.info?.('食时：接住了一起吃的邀请');
+    this.#host?.log?.info?.('鱼的每一天：接住了一起吃的邀请');
     return { ok: true, message: '应了：这顿一起吃。', together: this.#togetherView() };
   }
 
@@ -1313,7 +1339,7 @@ export class FeastWorld {
         '（大概是客气或者吃不下，不是不喜欢。别追问，也别往心里去。）',
       ], { kind: 'back', dish: g.id, name: g.name, accepted: ok === true });
 
-    this.#host?.log?.info?.('食时：回喂的回应', { dish: g.id, accepted: ok === true });
+    this.#host?.log?.info?.('鱼的每一天：回喂的回应', { dish: g.id, accepted: ok === true });
     return {
       ok: true,
       message: ok === true ? `记下了：他吃了${g.name || g.id}。` : '记下了：这次没要。',
@@ -1625,6 +1651,8 @@ export class FeastWorld {
     if (!this.#lifeOn()) return;
     // 先刷新素材库快照：envBlock / planEventText / enrichItems 都读它。缓存命中时只 stat。
     await this.#refreshWardrobe();
+    // 娱乐时间装没装：叫醒事件拼例子要用，顺手刷新（读不到就是没装）。
+    await this.#refreshFunInstalled();
     const z = zonedNow(this.timezone, now);
     const today = await readDay(this.dataDir, z.date);
     if (!today || today.source === 'pending' || !today.items.length) {
@@ -1892,7 +1920,7 @@ export class FeastWorld {
         meta: { date: today.date, reason: 'adjust' },
       }, { deliver: true, trigger: 'debounce' });
     } catch (err) {
-      this.#host?.log?.warn?.('食时：改完日程后补的时段事件没发出去', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：改完日程后补的时段事件没发出去', { err: msg(err) });
     }
   }
 
@@ -1969,7 +1997,7 @@ export class FeastWorld {
     if (plan.action === 'drop') {
       play.pending = null;
       await writePlay(this.dataDir, play);
-      this.#host?.log?.info?.('食时：放掉这一档自己的时间', { reason: plan.reason });
+      this.#host?.log?.info?.('鱼的每一天：放掉这一档自己的时间', { reason: plan.reason });
       return;
     }
 
@@ -1984,7 +2012,7 @@ export class FeastWorld {
         [plan.slot]: { at: now, doing: String(item.activity ?? '').slice(0, 40) },
       };
       await writePlay(this.dataDir, play);
-      this.#host?.log?.info?.('食时：这一档不算她的自由时间', {
+      this.#host?.log?.info?.('鱼的每一天：这一档不算她的自由时间', {
         slot: plan.slot, doing: item.activity,
       });
       return;
@@ -1994,12 +2022,12 @@ export class FeastWorld {
       await this.#pushFree(plan, play, now, Boolean(item && isFreeActivity(item)));
     } catch (err) {
       // 发不出去就不记账，下一拍再试。
-      this.#host?.log?.warn?.('食时：叫醒她过自己的时间失败', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：叫醒她过自己的时间失败', { err: msg(err) });
       return;
     }
     markFreeNudged(play, now, plan.slot, plan.action === 'retry');
     await writePlay(this.dataDir, play);
-    this.#host?.log?.info?.('食时：她自己的时间', {
+    this.#host?.log?.info?.('鱼的每一天：她自己的时间', {
       slot: plan.slot, retry: plan.action === 'retry', done: play.done.length,
     });
   }
@@ -2008,9 +2036,12 @@ export class FeastWorld {
     const host = this.#host;
     if (!host?.pushEvent) throw new Error('宿主没有 pushEvent');
     const z = zonedNow(this.timezone, now);
-    const menu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
+    const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
       ? this.cfg.lifeFreeMenu.trim()
       : String(DEFAULTS.lifeFreeMenu);
+    // 娱乐时间装了才把「出门去逛逛」那一行接上去；关了开关、没装、或她自己抄过 fun_*
+    // 都原样返回——绝不让她看到指向不存在工具的例子。
+    const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
     await host.pushEvent({
       type: EVENT_LIFE_FREE,
       source: this.id,
@@ -2060,7 +2091,7 @@ export class FeastWorld {
     await writePlay(this.dataDir, play);
     const reason = typeof args?.reason === 'string' && args.reason.trim()
       ? `（${args.reason.trim().slice(0, 80)}）` : '';
-    this.#host?.log?.info?.('食时：今天不玩了', { reason });
+    this.#host?.log?.info?.('鱼的每一天：今天不玩了', { reason });
     return { text: `好，今天剩下的档不叫了${reason}。想玩随时可以自己来。` };
   }
 
@@ -2070,15 +2101,19 @@ export class FeastWorld {
    * 这是「想开始随时能开始」那个入口：跳过了今天也能用，做够数了也能用，
    * 没到档也能用。只给例子和记账办法，不派任务。
    */
-  #lifeFreeStartTool(args) {
+  async #lifeFreeStartTool(args) {
     if (!this.#freeOn()) return { text: '「她的一天」现在关着。', failed: true };
     const now = this.#now();
     const z = zonedNow(this.timezone, now);
     const play = this.#play ?? newPlay(z.date);
     const goal = Math.max(0, Math.min(12, Math.round(Number(this.cfg?.lifeFreeGoal ?? DEFAULTS.lifeFreeGoal) || 0)));
-    const menu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
+    const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
       ? this.cfg.lifeFreeMenu.trim()
       : String(DEFAULTS.lifeFreeMenu);
+    // 和叫醒事件同一条路径：装了娱乐时间才加那一行。这里是工具调用（异步），
+    // 现读一次比等 tick 更稳——刚装完娱乐时间她就能看到它。
+    await this.#refreshFunInstalled();
+    const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
     const done = play.done.length;
     const mood = typeof args?.mood === 'string' && args.mood.trim() ? `（${args.mood.trim().slice(0, 60)}）` : '';
     const wshort = weatherShort(this.#weather);
@@ -2106,7 +2141,7 @@ export class FeastWorld {
   }
 
   #ensureStarted() {
-    if (!this.#started || !this.#state) throw new Error('食时还没启动；等它启用后再试。');
+    if (!this.#started || !this.#state) throw new Error('鱼的每一天还没启动；等它启用后再试。');
   }
 
   // -------------------------------------------------------------------------
@@ -2197,13 +2232,13 @@ export class FeastWorld {
     this.#lifeTomorrow = null;
     this.#lifeSegment = null;
     this.#play = null;
-    this.#host?.log?.info?.('食时：她的一天已清空', { days: n, plays: p });
+    this.#host?.log?.info?.('鱼的每一天：她的一天已清空', { days: n, plays: p });
     return `她的 ${n} 天日程${p ? `和 ${p} 天的自由时间记录` : ''}清了；吃过的记录、口味画像和主人攒的套餐都没动。`;
   }
 
   async #clearCombos() {
     await this.#saveCombos([]);
-    this.#host?.log?.info?.('食时：自定义套餐已清空');
+    this.#host?.log?.info?.('鱼的每一天：自定义套餐已清空');
     return '主人攒的桌清了；内置的套餐和她吃过的记录都没动。';
   }
 
@@ -2216,7 +2251,7 @@ export class FeastWorld {
     fresh.skippedDay = this.#state?.skippedDay ?? '';
     this.#state = fresh;
     await this.#save();
-    this.#host?.log?.info?.('食时：吃过的记录已清空');
+    this.#host?.log?.info?.('鱼的每一天：吃过的记录已清空');
     return '吃过的记录清了；菜单、菜品库和主人攒的套餐都没动。';
   }
 
@@ -2393,7 +2428,7 @@ export class FeastWorld {
           const names = s.ids.map((id) => this.#lib.byId.get(id)?.name ?? id);
           this.#state.served = null;
           await this.#save();
-          this.#host?.log?.info?.('食时：主人把端过去的菜收回去了', { ids: s.ids });
+          this.#host?.log?.info?.('鱼的每一天：主人把端过去的菜收回去了', { ids: s.ids });
           return {
             ok: true,
             message: `收回来了：${names.join('、')}`,
@@ -2524,7 +2559,7 @@ export class FeastWorld {
           const play = await this.#freePlay(this.#now());
           skipFreeToday(play);
           await writePlay(this.dataDir, play);
-          this.#host?.log?.info?.('食时：主人替她把今天剩下的档停了');
+          this.#host?.log?.info?.('鱼的每一天：主人替她把今天剩下的档停了');
           return { ok: true, message: '好了，今天剩下的档不叫了。她随时能自己动。' };
         }
         case 'freeStart': {
@@ -2533,9 +2568,12 @@ export class FeastWorld {
           const now = this.#now();
           const play = await this.#freePlay(now);
           const goal = Math.max(0, Math.min(12, Math.round(Number(this.cfg?.lifeFreeGoal ?? DEFAULTS.lifeFreeGoal) || 0)));
-          const menu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
+          const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
             ? this.cfg.lifeFreeMenu.trim()
             : String(DEFAULTS.lifeFreeMenu);
+          // 面板这条通道也不等 tick：现读一次再拼，免得刚装完娱乐时间这里还没刷新。
+          await this.#refreshFunInstalled();
+          const menu = withFunLine(rawMenu, this.#funInstalled, this.cfg);
           const wshort = weatherShort(this.#weather);
           const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
           await this.#host?.pushEvent?.({
@@ -2545,7 +2583,7 @@ export class FeastWorld {
             origin: 'internal',
             ts: new Date(now).toISOString(),
             text: [
-              '【食时 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
+              '【鱼的每一天 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
               `今天已经记了 ${play.done.length} 件${goal > 0 ? `（到 ${goal} 件只是不再按点叫你，不是上限）` : ''}。`,
               ...(wshort ? [`外面这会儿：${wshort}。`] : []),
               '想做什么都行，下面只是个例子，不照着也行：',
@@ -2592,7 +2630,7 @@ export class FeastWorld {
       }
     }
 
-    throw new Error(`食时没有这个面板：${panel}`);
+    throw new Error(`鱼的每一天没有这个面板：${panel}`);
   }
 
   // -------------------------------------------------------------------------
@@ -2614,22 +2652,29 @@ export class FeastWorld {
       // 自由时间的记录也先读进来：状态行和面板要用，别等到第一拍 tick 才读。
       await this.#freePlay(this.#now());
     } catch (err) {
-      host?.log?.warn?.('食时：她的一天没读进来', { err: msg(err) });
+      host?.log?.warn?.('鱼的每一天：她的一天没读进来', { err: msg(err) });
+    }
+    // 娱乐时间装没装也先看一次：feast_life_start 是同步工具，等不到 tick 那一拍。
+    // 「她的一天」关着时 #lifeEnsure 会提前 return，所以这里单独补一次。
+    try {
+      await this.#refreshFunInstalled();
+    } catch (err) {
+      host?.log?.warn?.('鱼的每一天：娱乐时间联动没读到', { err: msg(err) });
     }
     // 启动就先取一次真实天气：envPromptVars() 是同步的，前缀重建时得有内存快照可读。
     // 取不到就保持「不提天气」，下一拍 tick 再试。
     try {
       await this.#refreshWeather(this.#now());
     } catch (err) {
-      host?.log?.warn?.('食时：启动时天气没取到', { err: msg(err) });
+      host?.log?.warn?.('鱼的每一天：启动时天气没取到', { err: msg(err) });
     }
-    host?.log?.info?.('食时已启动', {
+    host?.log?.info?.('鱼的每一天已启动', {
       dishes: this.#lib.dishes.length,
       cuisines: this.#lib.cuisines.length,
       bad: this.#lib.bad,
       eaten: this.#state.eaten.length,
     });
-    if (this.#lib.bad) host?.log?.warn?.(`食时：跳过了 ${this.#lib.bad} 条坏数据`);
+    if (this.#lib.bad) host?.log?.warn?.(`鱼的每一天：跳过了 ${this.#lib.bad} 条坏数据`);
 
     // 启动后先看一拍（应用可能刚过饭点），之后按 tickSec 看表。
     this.#timer = this.#setInterval(() => { void this.#serial(() => this.#tick()); }, this.#tickMs());

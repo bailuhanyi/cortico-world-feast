@@ -1,12 +1,12 @@
 /**
- * 食时的配置段与文案。
+ * 鱼的每一天的配置段与文案。
  *
  * 段名是 `config.json` 的 `worlds.feast`。WebUI 热改就地写这个对象，
  * World 每次用时现读，所以这里只有默认值与 schema，不持有副本。
  */
 
 export const ID = 'feast';
-export const LABEL = '食时';
+export const LABEL = '鱼的每一天';
 
 /** 饭点提醒用的事件类型；也是 describe 里对外的名字。 */
 export const EVENT_MEAL = 'feast.meal';
@@ -58,7 +58,7 @@ export const DEFAULTS = Object.freeze({
   togetherTTLMin: 60,
 
   // ---- 「她的一天」（0.7.0 融合自 dsh-daily-schedule）----
-  /** 总开关。关掉后不生成、不注入、不推时段事件；食时的饭点照旧。 */
+  /** 总开关。关掉后不生成、不注入、不推时段事件；鱼的每一天的饭点照旧。 */
   lifeEnabled: true,
   /** 每晚几点请她自己写明天（24 小时制 HH:MM）。 */
   lifeGenerateAt: '22:00',
@@ -100,6 +100,9 @@ export const DEFAULTS = Object.freeze({
   ].join('\n'),
   /** 做完要不要提醒她跟主人说一句。 */
   lifeFreeAskReport: true,
+  // ---- 娱乐时间联动（0.7.4）----
+  /** 「出门逛逛」那一行要不要加。娱乐时间没装/没启用时，这一项写了也不会加。 */
+  lifeFreeFunOn: true,
   // ---- 生图工作室联动（0.7.1）----
   /** 联动总开关：扫素材库、列给 Coo、自动补 outfit、注入指向句。关掉=纯文本日程，不碰库。 */
   lifeWardrobeOn: true,
@@ -118,12 +121,12 @@ export const DEFAULTS = Object.freeze({
 });
 
 const ZH = {
-  label: '食时',
-  lamp: '食时',
+  label: '鱼的每一天',
+  lamp: '鱼的每一天',
   stopped: '未启动',
   badgeToday: '今天',
   badgeNext: '下一顿',
-  prompt: '食时 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
+  prompt: '鱼的每一天 World 的环境说明：这里有一张会端菜的桌子，也有她自己过的一天。主人可以端一道菜过来，她也能自己挑；每道菜都有味道档案，吃完可以记一句自己的反应。她的一天由她自己写，写在饭点之外的那些时段里。',
   /** 配置卡片标题：0.7.2 把原来一张 35 项的巨卡拆成 5 张。 */
   groups: {
     meal: '饭点',
@@ -134,7 +137,7 @@ const ZH = {
     weather: '天气',
   },
   config: {
-    title: '食时',
+    title: '鱼的每一天',
     mealReminder: '饭点提醒',
     mealReminderDesc: '关掉之后不再按点叫她吃饭，只剩「主人端菜过来」和「她自己想吃」。想自己挑时间就开着这里、改下面的档位。',
     mealSlots: '饭点档位',
@@ -166,7 +169,7 @@ const ZH = {
     togetherTTLMin: '一起吃饭最多挂多久',
     togetherTTLMinDesc: '一顿「一起吃饭」最多挂多久，到点自动散桌，免得面板上一直写着"正一起吃"。',
     lifeEnabled: '她的一天',
-    lifeEnabledDesc: '总开关。关掉后不再生成日程、不再往系统提示里放她的日子，也不推时段事件；食时的饭点照旧。',
+    lifeEnabledDesc: '总开关。关掉后不再生成日程、不再往系统提示里放她的日子，也不推时段事件；鱼的每一天的饭点照旧。',
     lifeGenerateAt: '请她写明天的时间',
     lifeGenerateAtDesc: '每晚几点推一条事件，请她自己写明天怎么过。她交回之前先放一个占位，不会重复叫；她没写就第二天用模板兜底。',
     lifePrecision: '时间精度',
@@ -198,9 +201,11 @@ const ZH = {
     lifeFreeMaxRetries: '最多催几次',
     lifeFreeMaxRetriesDesc: '一档催完还没记就放掉，等下一档；0 = 不催。',
     lifeFreeMenu: '叫醒时给的例子',
-    lifeFreeMenuDesc: '原样贴进叫醒事件里，措辞上明确写着「这些只是例子，不照着也行」。默认只写通用说法（不点名别的扩展的工具——World 不该依赖别的扩展）。想让她真用上某个工具，在这里写明，例如「去花语乡转转（bloom_inbox peek）」。改完下一档生效。',
+    lifeFreeMenuDesc: '原样贴进叫醒事件里，措辞上明确写着「这些只是例子，不照着也行」。默认只写通用说法（不点名别的扩展的工具——World 不该依赖别的扩展）。想让她真用上某个工具，在这里写明，例如「去客厅坐坐（parlor_query {op:"rooms"} → parlor_room {op:"visit"}）」。改完下一档生效。',
     lifeFreeAskReport: '做完说一声',
     lifeFreeAskReportDesc: '开启时，叫醒和记账回执都会提醒她「跟主人说一句你刚才玩了什么」。',
+    lifeFreeFunOn: '出门逛逛那一行',
+    lifeFreeFunOnDesc: '开启时，如果装了「娱乐时间」（cortico-world-fun）并且启用着，叫醒事件的例子末尾会自动多一行「fun_places 看今天能去哪 → fun_go 进门 → fun_wander 逛一处 → fun_home 收摊」，她就能真的出门逛游乐场、海洋馆、庙会这些地方。**娱乐时间没装或没启用时这一行不会出现**，她也不会看到指向不存在工具的例子；你自己在「叫醒时给的例子」里抄过 fun_* 的话，这一项也不重复加。关掉=不管装没装都不加这一行。',
     lifeWardrobeOn: '生图联动',
     lifeWardrobeOnDesc: '扫生图工作室的素材库（<数据目录>/imggen-library），写日程时列出衣柜/场景/道具和穿搭习惯，模型没填 outfit 时按习惯自动补，并在提示词里加一句指向生图工作室。关掉=纯文本日程，不碰库、不联动。库读不到时自动静默降级，不影响她的一天。',
     lifeWardrobeDir: '素材库目录',
@@ -210,7 +215,7 @@ const ZH = {
     weatherEnabled: '让她知道外面的天气',
     weatherEnabledDesc: '开之前先填下面的城市。开启后按点取真实天气，写进她的背景、饭点候选和「自己的时间」那句提醒里；大太阳偏清爽口、下雨偏热乎的。没填城市、联网失败、接口没数据时一律「不提天气」——宁可不说，也绝不按季节编一个，免得外面大太阳她却说下雨。关掉=完全不联网、不提天气。',
     weatherCity: '你所在的城市',
-    weatherCityDesc: '填你自己的城市名，中文就行（如「上海」「贵阳」「成都」），食时会去查经纬度再取当地天气。这是每个人各自的配置，不影响别人。留空 = 不提天气；填错查不到也静默跳过。不会自动探测你的 IP，也不会向外发你的位置以外的东西。',
+    weatherCityDesc: '填你自己的城市名，中文就行（如「上海」「贵阳」「成都」），鱼的每一天会去查经纬度再取当地天气。这是每个人各自的配置，不影响别人。留空 = 不提天气；填错查不到也静默跳过。不会自动探测你的 IP，也不会向外发你的位置以外的东西。',
     weatherRefreshMin: '多久看一次天气',
     weatherRefreshMinDesc: '隔多少分钟重取一次真实天气。30 分钟足够，改小没有意义还费接口。取不到就沿用上一次的；一次都没取到就一直不提天气。',
   },
@@ -227,12 +232,12 @@ const ZH = {
 const EN = {
   // 显示名跟着 package.json 的 en displayName 走（0.7.2 改名：一桌菜 → 食时 / Mealtime）。
   // 只改中文会把英文面板标题留在旧名字上，和市场里那一页对不上。
-  label: 'Mealtime',
-  lamp: 'Mealtime',
+  label: 'Fish Every Day',
+  lamp: 'Fish Every Day',
   stopped: 'not running',
   badgeToday: 'Today',
   badgeNext: 'Next meal',
-  prompt: 'The Mealtime world: a day of her own, and a table that serves food. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
+  prompt: 'The Fish Every Day world: a day of her own, and a table that serves food. The owner can put a dish down, she can also pick one herself; every dish carries a full flavour profile, and she can log how it landed. She writes her own day, in the hours between meals.',
   groups: {
     meal: 'Meals',
     together: 'Eating together',
@@ -242,7 +247,7 @@ const EN = {
     weather: 'Weather',
   },
   config: {
-    title: 'Mealtime',
+    title: 'Fish Every Day',
     mealReminder: 'Meal reminders',
     mealReminderDesc: 'Turn this off and she is never called to a meal; only owner-served dishes and her own appetite remain.',
     mealSlots: 'Meal slots',
@@ -306,9 +311,11 @@ const EN = {
     lifeFreeMaxRetries: 'Max retries',
     lifeFreeMaxRetriesDesc: 'Give up on a slot after this many nudges; 0 = never retry.',
     lifeFreeMenu: 'Example ideas',
-    lifeFreeMenuDesc: 'Pasted verbatim into the wake-up event, worded so it is clear these are only examples. Defaults stay generic on purpose — a World must not depend on another extension. To point her at a specific tool, name it here, e.g. "go for a walk (bloom_inbox peek)".',
+    lifeFreeMenuDesc: 'Pasted verbatim into the wake-up event, worded so it is clear these are only examples. Defaults stay generic on purpose — a World must not depend on another extension. To point her at a specific tool, name it here, e.g. "sit in the parlor (parlor_query {op:\"rooms\"} → parlor_room {op:\"visit\"})".',
     lifeFreeAskReport: 'Tell the owner',
     lifeFreeAskReportDesc: 'When on, both the wake-up and the logging receipt remind her to say one sentence about what she just did.',
+    lifeFreeFunOn: 'Add the going-out line',
+    lifeFreeFunOnDesc: 'When on, and the Fun Time world (cortico-world-fun) is installed and enabled, one extra line is appended to the wake-up examples: "fun_places to see where you can go → fun_go to walk in → fun_wander to look around → fun_home to head home", so she can really go out to an amusement park, an aquarium, a temple fair and so on. **If Fun Time is not installed or not enabled the line never appears**, so she never sees an example pointing at tools that do not exist; and if you already pasted fun_* into the examples yourself, this will not add it twice. Off = never add it, installed or not.',
     lifeWardrobeOn: 'Image-gen link',
     lifeWardrobeOnDesc: 'Scans the image-gen studio library (<dataDir>/imggen-library), lists wardrobe/scene/props and outfit habits when she writes her day, auto-fills outfit from habits when the model leaves it blank, and adds one line in the prompt pointing at the studio. Off = plain-text schedule, no library, no link. Degrades silently when the library is missing; her day is never affected.',
     lifeWardrobeDir: 'Library root',
@@ -318,7 +325,7 @@ const EN = {
     weatherEnabled: 'Let her know the weather',
     weatherEnabledDesc: 'Fill in your city below before turning this on. When on, real weather goes into her background note, meal candidates and the own-time nudge: hot/sunny leans towards cool dishes, rainy/cold towards warm ones. No city, no network, or no data means she simply never mentions the weather — better silent than invented, so she never says it is raining under a clear sky. Off = no network calls at all, no weather.',
     weatherCity: 'Your city',
-    weatherCityDesc: 'Your own city name, Chinese works fine (e.g. 上海, 贵阳, 成都); Mealtime resolves it to coordinates and fetches local weather. This is per-install config and does not affect other users. Blank = no weather; an unknown city is skipped silently. Your IP is never probed and nothing else about your location is sent.',
+    weatherCityDesc: 'Your own city name, Chinese works fine (e.g. 上海, 贵阳, 成都); Fish Every Day resolves it to coordinates and fetches local weather. This is per-install config and does not affect other users. Blank = no weather; an unknown city is skipped silently. Your IP is never probed and nothing else about your location is sent.',
     weatherRefreshMin: 'Weather refresh interval',
     weatherRefreshMinDesc: 'How often to re-fetch real weather, in minutes. 30 is plenty; lower only wastes the API. A failure keeps the last snapshot; if none ever succeeded, weather stays unmentioned.',
   },
@@ -586,6 +593,12 @@ function configProperties(language = 'zh') {
           type: 'boolean',
           title: t.lifeFreeAskReport,
           description: t.lifeFreeAskReportDesc,
+          'x-hot': true,
+        },
+        [`${K}.lifeFreeFunOn`]: {
+          type: 'boolean',
+          title: t.lifeFreeFunOn,
+          description: t.lifeFreeFunOnDesc,
           'x-hot': true,
         },
         [`${K}.lifeWardrobeOn`]: {
