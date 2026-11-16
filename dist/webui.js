@@ -273,16 +273,14 @@ const TABLE = {
     /* --- 自由时间 --- */
     freeTitle: '她自己的时间',
     freeOff: '自由时间关着。',
-    freeGoal: (n, g) => `今天记了 ${n} 件 · 到 ${g} 件就不再按点叫`,
     freeDone: (n) => `今天记了 ${n} 件`,
-    freeEnough: '已到数 · 不再按点叫',
-    freePending: (slot) => `在等她记「${slot}」这一档`,
     freeNext: (hm) => `下一档 ${hm}`,
     freeNone: '还没有排档',
     freeSkipped: '今天不按点叫了（她随时能自己动）',
     freeNotYet: '今天还没记过什么（不记也不影响她做事）。',
-    freeHint: '到点会叫醒她「现在是你自己的时间」。下面这些只是例子：单子外的事、临时起意的都算，做不做、做几件都由她，想开始随时能开始、不用等叫醒。到她睡觉或上班的时段不会叫。',
+    freeHint: '到点会叫醒她「现在是你自己的时间」。下面这些只是例子：单子外的事、临时起意的都算，做不做、做几件都由她，想开始随时能开始、不用等叫醒。到她睡觉的时段不会叫；上班时段看她自己有没有开「忙着的时候也叫」。',
     freeSkippedSlot: (doing) => `没叫：她那会儿在${doing}`,
+    freeSkippedHint: '（想让她上班时也叫：配置 →「她自己的时间」→「忙着的时候也叫」）',
     freeSkipToday: '今天先别叫了',
     freeSkipDone: '好了，今天剩下的档不叫了。',
     freeStart: '现在就想动',
@@ -420,16 +418,14 @@ const TABLE = {
     /* --- free time --- */
     freeTitle: 'Her own time',
     freeOff: 'Free time is off.',
-    freeGoal: (n, g) => `${n} logged · stops calling at ${g}`,
     freeDone: (n) => `${n} logged today`,
-    freeEnough: 'at the number · no more scheduled wake-ups',
-    freePending: (slot) => `waiting on her to log the ${slot} slot`,
     freeNext: (hm) => `next ${hm}`,
     freeNone: 'no slots',
     freeSkipped: 'no scheduled wake-ups today (she can still do anything)',
     freeNotYet: 'Nothing logged yet (not logging does not stop her doing things).',
-    freeHint: 'She is woken at these slots. The list is only examples — anything at all counts, and she may do as much or as little as she likes, starting whenever she wants without waiting for a wake-up. Never while the schedule says she is asleep or at work.',
+    freeHint: 'She is woken at these slots. The list is only examples — anything at all counts, and she may do as much or as little as she likes, starting whenever she wants without waiting for a wake-up. Never while the schedule says she is asleep; while she is at work it depends on the "Call her while she is busy" switch.',
     freeSkippedSlot: (doing) => `skipped: she was ${doing}`,
+    freeSkippedHint: 'To reach her while she is busy too: config → "Her own time" → "Call her while she is busy".',
     freeSkipToday: 'No wake-ups today',
     freeSkipDone: 'Done — no more scheduled wake-ups today.',
     freeStart: 'Start something now',
@@ -1394,9 +1390,7 @@ const todayPanel = {
       } else if (f.skipped) {
         head.appendChild(el('span', 'feast-dim', t.freeSkipped));
       } else {
-        head.appendChild(el('b', null, f.goal > 0 ? t.freeGoal(f.done.length, f.goal) : t.freeDone(f.done.length)));
-        if (f.left === 0) head.appendChild(el('span', 'feast-flag is-owner', t.freeEnough));
-        if (f.pendingSlot) head.appendChild(el('span', 'feast-flag', t.freePending(f.pendingSlot)));
+        head.appendChild(el('b', null, t.freeDone(f.done.length)));
         if (f.next) head.appendChild(el('span', 'feast-left', f.next === '没排档' || !f.slots.length ? t.freeNone : t.freeNext(f.next)));
       }
       box.appendChild(head);
@@ -1420,6 +1414,7 @@ const todayPanel = {
 
       // 到点了、但日程说她被占着所以没叫的那几档。不写出来，面板上就只剩「今天没有了」，
       // 用户以为功能坏了（0.7.1 就是这样，实测她一天 13 段里 11 段都被判成"不算"）。
+      // 0.8.0：忙时叫不叫由「忙着的时候也叫」决定，所以这栏现在是唯一会出现的沉默。
       if (f.skippedSlots?.length) {
         const list = el('div', 'feast-list');
         for (const s of f.skippedSlots) {
@@ -1429,6 +1424,7 @@ const todayPanel = {
           list.appendChild(row);
         }
         box.appendChild(list);
+        if (!f.busyCall) box.appendChild(el('div', 'feast-note', t.freeSkippedHint));
       }
       // 面板上替她开口：0.7.1 只有一个「今天不叫了」是工具，主人点不到。
       if (f.enabled && !f.skipped) {

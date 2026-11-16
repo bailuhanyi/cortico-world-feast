@@ -765,10 +765,10 @@ test('自由时间：叫醒事件带上日程里那一段、菜单和记账指�
   await world.stop();
 });
 
-test('自由时间：记账落盘、进度累加、做满就不再叫', async () => {
+test('自由时间：记账落盘、回执不把清单当任务，记了几件不挡下一档', async () => {
   const clock = { t: Date.parse(`${DAY}T21:02:00+08:00`) };
   const { world, tools, dataDir, runTick, lifeEvents } = await makeWorld({
-    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 2, lifeFreeAskReport: true },
+    now: () => clock.t, cfg: { lifeFreeSlots: '21:00,22:00', lifeFreeAskReport: true },
   });
   await runTick();
   assert.equal(lifeEvents(EVENT_LIFE_FREE).length, 1);
@@ -776,33 +776,86 @@ test('自由时间：记账落盘、进度累加、做满就不再叫', async ()
   const r1 = await tools.feast_life_play({ activity: '出去走走', note: '看见一只三花猫' });
   assert.ok(!r1.failed, r1.text);
   assert.ok(r1.text.includes('出去走走'));
-  // 措辞不能像「额度还没完成」：说清那只是个上限，随时能继续。
-  assert.ok(r1.text.includes('不按点叫'), `没说清那是叫醒的上限：${r1.text}`);
+  assert.ok(r1.text.includes('今天记了 1 件'), `没报件数：${r1.text}`);
+  // 措辞不能像「额度还没完成」，也不能拿「做够就不叫」当奖励。
   assert.ok(!/还差 \d+ 件/.test(r1.text), `写成「还差 N 件」像在派任务：${r1.text}`);
+  assert.ok(!/不再按点叫|到 \d+ 件/.test(r1.text), `还在提「做够就不叫」：${r1.text}`);
   assert.ok(r1.text.includes('随时'), `没说明随时能做：${r1.text}`);
   assert.ok(r1.text.includes('跟主人说一句'), 'askReport 开着却没提醒');
 
   const saved = await readPlay(dataDir, DAY);
   assert.equal(saved.done.length, 1);
   assert.equal(saved.done[0].note, '看见一只三花猫');
-  assert.equal(saved.pending, null, '记完该收掉 pending');
+  assert.equal(saved.pending, undefined, '0.8.0 起没有 pending');
 
-  // 到数了：回执要说「过了这个数就不再按点叫」，而不是「够了好收手」。
-  const r2 = await tools.feast_life_play({ activity: '看了会儿视频' });
-  assert.ok(/不再按点叫/.test(r2.text), `到数了没说不按点叫：${r2.text}`);
-  assert.ok(!/够了，接下来不叫你了，自己玩/.test(r2.text), '旧措辞：像在打发她收手');
-
-  // 到数之后照样能记、照样算数——goal 是叫醒上限，不是额度。
-  const r3 = await tools.feast_life_play({ activity: '临时起意下楼买了根冰棍' });
-  assert.ok(!r3.failed, `到数之后不让记了：${r3.text}`);
-  const saved3 = await readPlay(dataDir, DAY);
-  assert.equal(saved3.done.length, 3, '到数之后的记录没算数');
-
-  // 做满之后不该再**按点叫**，但这只是不再叫，不是不许动。
-  const before = lifeEvents(EVENT_LIFE_FREE).length;
-  clock.t += 3 * 3600_000;
+  // 记了三件，到下一档照样叫：档位是上限，不是「记够了就闭嘴」。
+  await tools.feast_life_play({ activity: '看了会儿视频' });
+  await tools.feast_life_play({ activity: '临时起意下楼买了根冰棍' });
+  clock.t = Date.parse(`${DAY}T22:02:00+08:00`);
   await runTick();
-  assert.equal(lifeEvents(EVENT_LIFE_FREE).length, before, '做满了还在按点叫');
+  assert.equal(lifeEvents(EVENT_LIFE_FREE).length, 2, '记了几件不该挡掉下一档');
+  await world.stop();
+});
+
+test('自由时间：她主动开始时照实说——上班说上班，不说「现在就是你自己的时间」', async () => {
+  const clock = { t: Date.parse(`${DAY}T10:00:00+08:00`) };
+  const { world, tools, runTick, lifeEvents } = await makeWorld({
+    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeMenu: '- 出去走走\n- 看个视频' },
+  });
+  // 工具那条路（10:00 是模板里的上班时段）
+  const r = await tools.feast_life_start({ mood: '想透口气' });
+  assert.ok(!r.failed, r.text);
+  assert.ok(r.text.includes('上班'), `没照实说这会儿在上班：${r.text}`);
+  assert.ok(!r.text.includes('现在就是你自己的时间'), `上班时说「现在就是你自己的时间」：${r.text}`);
+  assert.ok(r.text.includes('出去走走'), '她主动问的该给例子（给全才对）');
+
+  // 面板那条路也一样，而且面板会真推一条事件出去
+  const pr = await world.webUi('zh').invoke('today', 'freeStart', []);
+  assert.ok(pr.ok, JSON.stringify(pr));
+  const ev = lifeEvents(EVENT_LIFE_FREE).at(-1);
+  assert.ok(ev, '面板该推一条');
+  assert.ok(ev.text.includes('上班'), `面板那条没照实说：${ev.text.slice(0, 80)}`);
+  assert.ok(!ev.text.includes('现在是你自己的时间'), '面板那条还在撒谎');
+
+  // 空档时段还是原来那句话
+  clock.t = Date.parse(`${DAY}T21:02:00+08:00`);
+  await runTick();
+  const ok = await tools.feast_life_start({});
+  assert.ok(ok.text.includes('现在就是你自己的时间'), ok.text);
+  await world.stop();
+});
+
+test('自由时间：忙着时默认不叫（面板留痕），开了 lifeFreeBusyCall 才叫且换成报备措辞', async () => {
+  // 10:02 落在模板「上班」那一段
+  const clock = { t: Date.parse(`${DAY}T10:02:00+08:00`) };
+  const off = await makeWorld({
+    now: () => clock.t, cfg: { lifeFreeSlots: '10:00', lifeFreeMenu: '- 出去转转' },
+  });
+  await off.runTick();
+  assert.equal(off.lifeEvents(EVENT_LIFE_FREE).length, 0, '默认为什么在上班时段叫她');
+  const play = await readPlay(off.dataDir, DAY);
+  assert.equal(play.skippedSlots['10:00'].doing.includes('上班'), true, '跳过了却没留痕，面板没法解释');
+  await off.world.stop();
+
+  const on = await makeWorld({
+    now: () => clock.t, cfg: { lifeFreeSlots: '10:00', lifeFreeMenu: '- 出去转转', lifeFreeBusyCall: true },
+  });
+  await on.runTick();
+  const ev = on.lifeEvents(EVENT_LIFE_FREE)[0];
+  assert.ok(ev, '开了「忙着的时候也叫」却没叫');
+  assert.ok(ev.text.includes('这会儿你在上班'), ev.text.slice(0, 60));
+  assert.ok(!ev.text.includes('你自己的时间'), '忙时报备不能说「这是你的时间」');
+  assert.ok(!ev.text.includes('出去转转'), '忙时不该贴出门的例子');
+  await on.world.stop();
+});
+
+test('自由时间：睡觉永远不叫，开了 lifeFreeBusyCall 也一样', async () => {
+  const clock = { t: Date.parse(`${DAY}T03:05:00+08:00`) };
+  const { world, runTick, lifeEvents } = await makeWorld({
+    now: () => clock.t, cfg: { lifeFreeSlots: '03:00', lifeFreeBusyCall: true },
+  });
+  await runTick();
+  assert.equal(lifeEvents(EVENT_LIFE_FREE).length, 0, '凌晨三点把人叫起来报备');
   await world.stop();
 });
 
@@ -810,7 +863,7 @@ test('自由时间：不用等叫醒，随时能自己开始（跳过今天之�
   // 09:00 一档都还没到，且先跳过今天：这个入口照样得能用。
   const clock = { t: Date.parse(`${DAY}T09:00:00+08:00`) };
   const { world, tools } = await makeWorld({
-    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 2, lifeFreeMenu: '- 出去走走' },
+    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeMenu: '- 出去走走' },
   });
   await tools.feast_life_skip({ reason: '今天不想被叫' });
 
@@ -830,22 +883,23 @@ test('自由时间：不用等叫醒，随时能自己开始（跳过今天之�
   await world.stop();
 });
 
-test('自由时间：做满之后还能自己开始，且明说那不是上限', async () => {
+test('自由时间：记过几件之后照样能自己开始，回执不拿「做够」当门槛', async () => {
   const clock = { t: Date.parse(`${DAY}T21:02:00+08:00`) };
   const { world, tools } = await makeWorld({
-    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 1 },
+    now: () => clock.t, cfg: { lifeFreeSlots: '21:00' },
   });
   await tools.feast_life_play({ activity: '出去走了走' });
   const r = await tools.feast_life_start({});
   assert.ok(!r.failed, r.text);
-  assert.ok(/不是上限|想动随时动/.test(r.text), `做满后没说明那不是上限：${r.text}`);
+  assert.ok(r.text.includes('现在就是你自己的时间'), r.text);
+  assert.ok(!/不是上限|到 \d+ 件/.test(r.text), `还在解释「那不是上限」，等于承认有上限：${r.text}`);
   await world.stop();
 });
 
 test('自由时间：单子外的事也算，回执不把清单当任务', async () => {
   const clock = { t: Date.parse(`${DAY}T21:02:00+08:00`) };
   const { world, tools, runTick, lifeEvents } = await makeWorld({
-    now: () => clock.t, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 3 },
+    now: () => clock.t, cfg: { lifeFreeSlots: '21:00' },
   });
   await runTick();
   const ev = lifeEvents(EVENT_LIFE_FREE)[0];
@@ -883,8 +937,8 @@ test('自由时间：跳过之后今天不再叫', async () => {
 });
 
 test('自由时间：日程改过之后，叫醒事件跟着新安排走（不是各说各的）', async () => {
-  // 15:00 本来在上班（不该叫）。先把她改成自由段，再让那一档到点——
-  // 顺序很重要：一档判过一次（不管是叫了还是没叫）就不再重判，这是防每一拍重算的设计。
+  // 15:00 本来在上班（默认不该叫）。先改成自由段，再让那一档到点：
+  // 判据在「到档那一拍」才取，所以改完就按新安排判。
   const clock = { t: Date.parse(`${DAY}T14:50:00+08:00`) };
   const { world, tools, runTick, lifeEvents } = await makeWorld({
     now: () => clock.t, cfg: { lifeFreeSlots: '15:00' },

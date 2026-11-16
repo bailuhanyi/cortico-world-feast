@@ -162,14 +162,15 @@ $defaults = [ordered]@{
   lifeVoiceOn       = $true
   lifeMaxItems      = 24
   lifeAdjustPast    = $false
+  lifeDoings        = ""
   lifeFreeEnabled   = $true
   lifeFreeSlots     = '10:00,14:00,21:00'
-  lifeFreeGoal      = 3
   lifeFreeGraceMin  = 20
-  lifeFreeRetryMin  = 40
-  lifeFreeMaxRetries = 1
+  lifeFreeBusyCall  = $false
   lifeFreeMenu      = "- 出去转转，走一小段路，看看外面现在什么样`n- 找点想看的东西看一会儿（视频、番、随便什么都行）`n- 发一条自己的动态，写一两句今天的心情`n- 就在家待着，听点东西、发会儿呆"
   lifeFreeAskReport = $true
+  lifeFreeFunOn     = $true
+  lifeFreeMapOn     = $true
   lifeWardrobeOn    = $true
   lifeWardrobeDir   = ""
   lifeWardrobeAutoOutfit = $true
@@ -216,7 +217,7 @@ if (-not $WhatIf) {
 Say ""
 Say "下一步："
 Say "  1) 重启 Coo（完全退出再打开）"
-Say "  2) 面板 → 世界 →「鱼的每一天」，确认状态 active；配置里能看到 39 项（分 6 张卡），第一项是「饭点提醒」开关"
+Say "  2) 面板 → 世界 →「鱼的每一天」，确认状态 active；配置里能看到 40 项（分 6 张卡），第一项是「饭点提醒」开关"
 Say "  3) 面板里四个页签：菜单点一道菜看味道档案、右边「端给她」就会端过去；套餐整桌端；吃过什么看口味画像；今天看她的一天"
 Say "  4) 不想按点被叫：把「饭点提醒」关掉即可（面板上的菜和工具都还在）"
 Say ""

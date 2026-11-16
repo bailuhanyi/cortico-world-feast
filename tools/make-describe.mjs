@@ -111,7 +111,11 @@ if (run) {
     }
     const json = serialize(file);
     if (process.argv.includes('--check')) {
-      const current = existsSync(DESCRIBE_PATH) ? readFileSync(DESCRIBE_PATH, 'utf8') : '';
+      // 比对前把盘上那份归一成 LF：这台机器 core.autocrlf=true，检出的 describe.json
+      // 是 CRLF，而 serialize() 写的是 LF——不归一的话，同一个源码在换行上红一次、
+      // 发版时又红一次（和上面 prompts 的 content 同一个坑）。
+      const raw = existsSync(DESCRIBE_PATH) ? readFileSync(DESCRIBE_PATH, 'utf8') : '';
+      const current = raw.replace(/\r\n/g, '\n');
       if (current.trim() !== json.trim()) {
         console.error(`✗ ${relative(ROOT, DESCRIBE_PATH)} 与代码里的自描述不一致，重跑 node tools/make-describe.mjs`);
         process.exitCode = 1;

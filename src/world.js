@@ -24,9 +24,10 @@ import {
   EVENT_TOGETHER, ID, configGroups, panelText, text,
 } from './config.js';
 import {
-  DEFAULT_DAY_TYPES, addDays, applyChange, cleanDay, clearDays, clearPlays, dateLabel, dayText, envBlock,
-  findItem, freeEventText, funMenuLine, isAsleepActivity, isDateKey, isFreeActivity, LIFE_KEEP_DAYS, lifeDir, listDays, mapMenuLine, markFreeNudged,
-  momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseSlots, pendingDay,
+  DEFAULT_DAY_TYPES, addDays, applyChange, classifyItem, cleanDay, clearDays, clearPlays, dateLabel, dayText,
+  doingsFor, envBlock, findItem, freeEventText, funMenuLine, isAsleepActivity, isDateKey, LIFE_KEEP_DAYS, lifeDir,
+  listDays, mapMenuLine, markFreeNudged, markFreeSkipped,
+  momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseDoings, parseSlots, pendingDay,
   pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readMapEnabled, readPlay, recentSummary, recordPlay,
   segmentKey, skipFreeToday, templateDay, withFunLine, withMapLine, writeDay, writePlay, zonedNow,
 } from './life/index.js';
@@ -214,7 +215,7 @@ export const FEAST_TOOL_DECLS = [
   {
     name: 'feast_life_plan',
     tags: ['write'],
-    description: '把某一天（通常是明天）的打算交回来记下。收到「该想想明天怎么过」那条事件时用它：items 从 00:00 排到 24:00、不重叠不留空档，每段写清 start / end / activity，想加 location、detail、outfit 也行。写的是你自己想做的事，不是任务清单；交回来记好就行，不用跟主人复述。',
+    description: '把某一天（通常是明天）的打算交回来记下。收到「该想想明天怎么过」那条事件时用它：items 从 00:00 排到 24:00、不重叠不留空档，每段写清 start / end / activity，想加 location、detail、outfit 也行。**每段要写成一件真能做的事**（「在公司写方案」「追一集番」），别写成「在家玩」「自己的时间」这种空话；事件里给了「能做的事」清单就从里面挑，写清单外的也行。写的是你自己想做的事，不是任务清单；交回来记好就行，不用跟主人复述。',
     parameters: {
       type: 'object',
       properties: {
@@ -293,7 +294,7 @@ export const FEAST_TOOL_DECLS = [
   {
     name: 'feast_life_start',
     tags: ['write'],
-    description: '不用等叫醒：现在就想干点什么的时候用。回执把「例子 + 怎么记账」直接给你，不必等下一档。做过什么用 feast_life_play 记；跳过了今天（feast_life_skip）也照样能用这个重新开始。',
+    description: '不用等叫醒：现在就想干点什么的时候用。回执把「例子 + 怎么记账」直接给你，不必等下一档。做过什么用 feast_life_play 记；跳过了今天（feast_life_skip）也照样能用这个重新开始。如果这会儿你在上班或在睡觉，回执照实说一句——它不会把「现在是你自己的时间」硬塞给你，想动照样动。',
     parameters: {
       type: 'object',
       properties: {
@@ -1721,13 +1722,15 @@ export class FeastWorld {
     const recent = await recentSummary(this.dataDir, fromDate, 3);
     const slots = typeof this.cfg?.mealSlots === 'string' ? this.cfg.mealSlots : DEFAULTS.mealSlots;
     const wardrobe = this.#wardrobeOn() ? wardrobeText(this.#wardrobe) : '';
+    // 主人按日型备的「能做的事」：留空就是空数组，那段整段不出现。
+    const doings = doingsFor(parseDoings(this.cfg?.lifeDoings), type);
     await host.pushEvent({
       type: EVENT_LIFE_PLAN,
       source: this.id,
       senderKey: 'feast-life-plan',
       origin: 'internal',
       ts: new Date(now).toISOString(),
-      text: planEventText({ date, type, recent, mealSlots: slots, wardrobe, rewrite }),
+      text: planEventText({ date, type, recent, mealSlots: slots, wardrobe, doings, rewrite }),
       meta: { date, dayType: type.id, ...(rewrite ? { rewrite: true } : {}) },
     }, { deliver: true, trigger: 'flush' });
   }
@@ -1976,36 +1979,26 @@ export class FeastWorld {
     return this.#play;
   }
 
-  /** 日程说她这会儿在睡觉吗？（睡觉时「你的时间」不该把人叫起来） */
-  #lifeAsleepNow(now) {
+  /**
+   * 日程里此刻那一段 + 它算什么（一段、一次取，全扩展唯一一处判据）。
+   *
+   * 0.8.0 收拢：以前是 #lifeAsleepNow / #lifeWhereNow / #lifeItemNow 三个方法，
+   * 每拍把同一段查三遍、各自用不同的正则表，谁也不知道谁。
+   *
+   * @returns {{ item: object|null, kind: 'asleep'|'busy'|'free'|'none', where: string }}
+   */
+  #lifeNow(now) {
     const today = this.#lifeToday;
-    if (!today?.items?.length) return false;
+    if (!today?.items?.length) return { item: null, kind: 'none', where: '' };
     const z = zonedNow(this.timezone, now);
-    const i = findItem(today, z.minute);
-    const cur = today.items[i];
-    return Boolean(cur && isAsleepActivity(cur));
+    const item = today.items[findItem(today, z.minute)] ?? null;
+    const kind = classifyItem(item);
+    if (!item || kind === 'asleep') return { item, kind, where: '' };
+    const place = item.scene || item.location;
+    return { item, kind, where: `${item.activity}${place ? `（${place}）` : ''}` };
   }
 
-  /** 日程里此刻那一段（给叫醒事件拼「你这会儿本来在…」）。 */
-  #lifeWhereNow(now) {
-    const today = this.#lifeToday;
-    if (!today?.items?.length) return '';
-    const z = zonedNow(this.timezone, now);
-    const cur = today.items[findItem(today, z.minute)];
-    if (!cur || isAsleepActivity(cur)) return '';
-    const place = cur.scene || cur.location;
-    return `${cur.activity}${place ? `（${place}）` : ''}`;
-  }
-
-  /** 日程里此刻那一段（原样，给 isFreeActivity 判）。 */
-  #lifeItemNow(now) {
-    const today = this.#lifeToday;
-    if (!today?.items?.length) return null;
-    const z = zonedNow(this.timezone, now);
-    return today.items[findItem(today, z.minute)] ?? null;
-  }
-
-  /** 这一拍要不要叫醒她。 */
+  /** 这一拍要不要说话；说哪种话由日程决定（见 #lifeNow / freeEventText）。 */
   async #freeTick(now) {
     if (!this.#freeOn()) return;
     const slots = parseSlots(this.cfg?.lifeFreeSlots ?? DEFAULTS.lifeFreeSlots);
@@ -2013,61 +2006,56 @@ export class FeastWorld {
     const play = await this.#freePlay(now);
     if (play.skipped) return;
     const z = zonedNow(this.timezone, now);
-    const item = this.#lifeItemNow(now);
-    const plan = planFreeTick(play, this.cfg, {
-      nowMs: now, nowMin: z.minute, asleep: this.#lifeAsleepNow(now),
-    });
+    const { item, kind, where } = this.#lifeNow(now);
+    const plan = planFreeTick(play, this.cfg, { nowMin: z.minute, kind });
     if (plan.action === 'none') return;
 
-    if (plan.action === 'drop') {
-      play.pending = null;
-      await writePlay(this.dataDir, play);
-      this.#host?.log?.info?.('鱼的每一天：放掉这一档自己的时间', { reason: plan.reason });
-      return;
-    }
-
-    // 日程说这会儿在做别的事（上班、通勤、被占着）：不把「现在是你的时间」硬塞给她。
-    // 仍然记下这一档已看过，免得每一拍都重判；不挂 pending，也就不催。
-    // 但**要留痕**（play.skippedSlots）：0.7.1 这里是纯静默，面板上只看到「今天没有了」，
-    // 用户以为功能坏了。现在面板能把「这一档她在上班，没叫」写出来。
-    if (plan.action === 'fire' && item && !isFreeActivity(item)) {
-      play.fired[plan.slot] = now;
-      play.skippedSlots = {
-        ...(play.skippedSlots ?? {}),
-        [plan.slot]: { at: now, doing: String(item.activity ?? '').slice(0, 40) },
-      };
+    // 日程说这会儿她在上班/通勤/开会，而配置说忙时不叫：记下这一档、留痕、不推事件。
+    // 0.7.1 这里是纯静默，面板上只看到「今天没有了」，用户以为功能坏了——所以留痕。
+    // 打开 lifeFreeBusyCall 之后这里不会再走到，忙时改用「报备」的说法。
+    if (plan.action === 'skip') {
+      markFreeSkipped(play, now, plan.slot, String(item?.activity ?? ''));
       await writePlay(this.dataDir, play);
       this.#host?.log?.info?.('鱼的每一天：这一档不算她的自由时间', {
-        slot: plan.slot, doing: item.activity,
+        slot: plan.slot, doing: item?.activity, kind,
       });
       return;
     }
 
     try {
-      await this.#pushFree(plan, play, now, Boolean(item && isFreeActivity(item)));
+      await this.#pushFree(plan, play, now, { kind, where });
     } catch (err) {
       // 发不出去就不记账，下一拍再试。
       this.#host?.log?.warn?.('鱼的每一天：叫醒她过自己的时间失败', { err: msg(err) });
       return;
     }
-    markFreeNudged(play, now, plan.slot, plan.action === 'retry');
+    markFreeNudged(play, now, plan.slot);
     await writePlay(this.dataDir, play);
     this.#host?.log?.info?.('鱼的每一天：她自己的时间', {
-      slot: plan.slot, retry: plan.action === 'retry', done: play.done.length,
+      slot: plan.slot, kind, done: play.done.length,
     });
   }
 
-  async #pushFree(plan, play, now, freeNow = true) {
+  /**
+   * 推一条 EVENT_LIFE_FREE。
+   *
+   * `kind` 决定说什么、给不给例子：空着（或还没写日程）才贴菜单
+   * （`lifeFreeMenu` + fun/map 两行）；被占着时只报备，不贴「出去转转」这种例子。
+   */
+  async #pushFree(plan, play, now, { kind = 'free', where = '' } = {}) {
     const host = this.#host;
     if (!host?.pushEvent) throw new Error('宿主没有 pushEvent');
     const z = zonedNow(this.timezone, now);
-    const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
-      ? this.cfg.lifeFreeMenu.trim()
-      : String(DEFAULTS.lifeFreeMenu);
-    // 娱乐时间装了才把「出门去逛逛」那一行接上去；关了开关、没装、或她自己抄过 fun_*
-    // 都原样返回——绝不让她看到指向不存在工具的例子。
-    // 小地图接在后面，两行互不打架（各按自己的前缀去重）。
-    const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
+    let menu = '';
+    if (kind !== 'busy') {
+      const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
+        ? this.cfg.lifeFreeMenu.trim()
+        : String(DEFAULTS.lifeFreeMenu);
+      // 娱乐时间装了才把「出门去逛逛」那一行接上去；关了开关、没装、或她自己抄过 fun_*
+      // 都原样返回——绝不让她看到指向不存在工具的例子。
+      // 小地图接在后面，两行互不打架（各按自己的前缀去重）。
+      menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
+    }
     await host.pushEvent({
       type: EVENT_LIFE_FREE,
       source: this.id,
@@ -2076,19 +2064,18 @@ export class FeastWorld {
       ts: new Date(now).toISOString(),
       text: freeEventText({
         slot: plan.slot,
-        retry: plan.action === 'retry',
+        kind,
         play,
         cfg: this.cfg,
-        where: this.#lifeWhereNow(now),
+        where,
         menu,
         nowHm: z.hm,
         tz: this.timezone,
-        freeNow,
-        // 天气：出门那句提醒跟着真实天气走，取不到就整段不出现。
-        weatherShort: weatherShort(this.#weather),
-        weatherHint: weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null),
+        // 天气：出门那句提醒跟着真实天气走，取不到就整段不出现。忙着的时候不提出门。
+        weatherShort: kind === 'busy' ? '' : weatherShort(this.#weather),
+        weatherHint: kind === 'busy' ? '' : weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null),
       }),
-      meta: { slot: plan.slot, retry: plan.action === 'retry', done: play.done.length },
+      meta: { slot: plan.slot, kind, done: play.done.length },
     }, { deliver: true, trigger: 'flush' });
   }
 
@@ -2131,8 +2118,10 @@ export class FeastWorld {
     if (!this.#freeOn()) return { text: '「她的一天」现在关着。', failed: true };
     const now = this.#now();
     const z = zonedNow(this.timezone, now);
-    const play = this.#play ?? newPlay(z.date);
-    const goal = Math.max(0, Math.min(12, Math.round(Number(this.cfg?.lifeFreeGoal ?? DEFAULTS.lifeFreeGoal) || 0)));
+    // 走 #freePlay 而不是内存缓存：lifeFreeSlots 留空时 #freeTick 会提前 return，
+    // 这个缓存就永远不会加载，回执会一直说「今天已经记了 0 件」。
+    const play = await this.#freePlay(now);
+    const { item, kind, where } = this.#lifeNow(now);
     const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
       ? this.cfg.lifeFreeMenu.trim()
       : String(DEFAULTS.lifeFreeMenu);
@@ -2145,8 +2134,16 @@ export class FeastWorld {
     const mood = typeof args?.mood === 'string' && args.mood.trim() ? `（${args.mood.trim().slice(0, 60)}）` : '';
     const wshort = weatherShort(this.#weather);
     const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
+    // 她有主动入口，但**不能撒谎**：上班时说「现在是你自己的时间」和日程自相矛盾。
+    // 这里不拦她（想动随时能动是承诺），只是把此刻的事实说出来。
+    const at = where || (item?.activity ? item.activity : '');
+    const head = kind === 'free' || kind === 'none'
+      ? `行，现在就是你自己的时间${mood}——不用等下一档。`
+      : kind === 'asleep'
+        ? `行，这会儿你在${item?.activity ?? '睡觉'}${mood}——想记就记一句，不记也没关系，不用等下一档。`
+        : `行，这会儿你在${at || '忙'}${mood}——想动随时能动，不用等下一档。`;
     const lines = [
-      `行，现在就是你自己的时间${mood}——不用等下一档，也不管今天叫过几次。`,
+      head,
       `今天已经记了 ${done} 件。`,
       ...(wshort ? [`外面这会儿：${wshort}。`] : []),
       '下面只是个例子，不照着也行；想到什么就做什么，什么都不做也可以：',
@@ -2154,9 +2151,6 @@ export class FeastWorld {
       ...(whint ? [whint] : []),
       '做完随手用 feast_life_play 记一笔。不记也没关系，记只是给你自己攒。',
     ];
-    if (goal > 0 && done >= goal) {
-      lines.push(`（已经过了 ${goal} 件——那只是「不再按点叫你」的线，不是上限，想动随时动。）`);
-    }
     return { text: lines.join('\n') };
   }
 
@@ -2527,7 +2521,6 @@ export class FeastWorld {
           const today = await readDay(this.dataDir, z.date);
           const i = findItem(today, z.minute);
           const play = await this.#freePlay(now);
-          const goal = Math.max(0, Math.min(12, Math.round(Number(this.cfg?.lifeFreeGoal ?? DEFAULTS.lifeFreeGoal) || 0)));
           const slots = parseSlots(this.cfg?.lifeFreeSlots ?? DEFAULTS.lifeFreeSlots);
           return {
             enabled: this.#lifeOn(),
@@ -2552,12 +2545,12 @@ export class FeastWorld {
               enabled: this.#freeOn(),
               slots: slots.map((s) => s.hm),
               done: play.done.map((d) => ({ at: d.at, activity: d.activity, note: d.note })),
-              goal,
-              left: goal > 0 ? Math.max(0, goal - play.done.length) : null,
-              pendingSlot: play.pending?.slot ?? null,
               skipped: play.skipped,
               next: this.#freeOn() ? nextFreeSlotText(play, this.cfg, z.minute) : '',
-              // 到点了但日程说她被占着、所以没叫的那几档：不写出来，面板上就只剩「今天没有了」。
+              // 忙时也在叫（lifeFreeBusyCall）：面板据此把「没叫」那一栏的措辞说清。
+              busyCall: this.cfg?.lifeFreeBusyCall === true,
+              // 到点了但日程说她被占着、而配置说忙时不叫的那几档：
+              // 不写出来，面板上就只剩「今天没有了」。这是唯一会出现的沉默，所以要留痕。
               skippedSlots: Object.entries(play.skippedSlots ?? {})
                 .map(([slot, v]) => ({ slot, doing: v.doing }))
                 .sort((a, b) => a.slot.localeCompare(b.slot)),
@@ -2594,7 +2587,7 @@ export class FeastWorld {
           if (!this.#freeOn()) return { ok: false, message: '自由时间现在关着。' };
           const now = this.#now();
           const play = await this.#freePlay(now);
-          const goal = Math.max(0, Math.min(12, Math.round(Number(this.cfg?.lifeFreeGoal ?? DEFAULTS.lifeFreeGoal) || 0)));
+          const { item, kind, where } = this.#lifeNow(now);
           const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
             ? this.cfg.lifeFreeMenu.trim()
             : String(DEFAULTS.lifeFreeMenu);
@@ -2604,6 +2597,14 @@ export class FeastWorld {
           const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
           const wshort = weatherShort(this.#weather);
           const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
+          // 主人替她开口，也不能替她撒谎：周一下午三点说「现在是你自己的时间」，
+          // 和日程里写的「上班」自相矛盾。这里只把此刻的事实说出来，不拦她。
+          const at = where || (item?.activity ?? '');
+          const head = kind === 'free' || kind === 'none'
+            ? '【鱼的每一天 · 你自己的时间】主人说，这会儿你想干点什么就去吧。'
+            : kind === 'asleep'
+              ? `【鱼的每一天 · 你自己的时间】主人说，这会儿你想干点什么就去吧。（日程里这会儿你在${item?.activity ?? '睡觉'}）`
+              : `【鱼的每一天 · 有点儿空】主人说，这会儿你想干点什么就去吧。（日程里这会儿你在${at || '忙'}，手头的事不用撂下）`;
           await this.#host?.pushEvent?.({
             type: EVENT_LIFE_FREE,
             source: this.id,
@@ -2611,15 +2612,15 @@ export class FeastWorld {
             origin: 'internal',
             ts: new Date(now).toISOString(),
             text: [
-              '【鱼的每一天 · 你自己的时间】主人说，这会儿你想干点什么就去吧。',
-              `今天已经记了 ${play.done.length} 件${goal > 0 ? `（到 ${goal} 件只是不再按点叫你，不是上限）` : ''}。`,
+              head,
+              `今天已经记了 ${play.done.length} 件。`,
               ...(wshort ? [`外面这会儿：${wshort}。`] : []),
               '想做什么都行，下面只是个例子，不照着也行：',
               menu,
               ...(whint ? [whint] : []),
               '做完随手用 feast_life_play 记一笔。',
             ].join('\n'),
-            meta: { reason: 'owner-start' },
+            meta: { reason: 'owner-start', kind },
           }, { deliver: true, trigger: 'flush' });
           return { ok: true, message: '行，这会儿就由她自己安排。' };
         }

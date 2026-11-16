@@ -14,8 +14,8 @@ import {
   findItem, isDateKey, lifeDir, listDays, momentLine, normalizeItems, normalizePlan,
   nowText, parseClock, pendingDay, pickDayType, planEventText, readDay, recentSummary,
   segmentKey, templateDay, templateItems, voiceText, weekdayOf, writeDay, zonedNow,
-  cleanPlay, freeEventText, isFreeActivity, markFreeNudged, newPlay, parseSlots,
-  planFreeTick, playProgress, recordPlay, skipFreeToday,
+  cleanPlay, classifyItem, doingsFor, freeEventText, isFreeActivity, markFreeNudged, markFreeSkipped, newPlay,
+  parseDoings, parseSlots, planFreeTick, recordPlay, skipFreeToday,
 } from '../src/life/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -329,79 +329,169 @@ test('free.parseSlots：排序、去重、认中文逗号、丢非法项', () =>
   assert.deepEqual(parseSlots(null), []);
 });
 
-test('free.cleanPlay：不信任脏文件，坏条目被丢掉', () => {
+test('free.cleanPlay：不信任脏文件；老文件里的 pending 认了但不带走', () => {
   const play = cleanPlay({
     date: '2026-11-05',
     done: [{ at: 1, activity: '走走', note: 'ok' }, { at: 2, activity: '' }, null, 'x'],
     fired: { '10:00': 5, 坏键: 6 },
     pending: { slot: '10:00', since: 5, lastNudgeAt: 6, retries: 1 },
+    skippedSlots: { '14:00': { at: 7, doing: '上班' }, 补: { at: 8, doing: '开会' }, 坏键: {} },
     skipped: true,
   }, '2026-11-05');
   assert.equal(play.done.length, 1, '只有一条合格的记账');
   assert.equal(play.done[0].activity, '走走');
   assert.deepEqual(Object.keys(play.fired), ['10:00'], '坏键该被丢掉');
-  assert.equal(play.pending.retries, 1);
+  // 0.8.0 起没有 pending（不再催）：老文件里的字段读进来就丢掉，不迁移也不会炸。
+  assert.equal(play.pending, undefined);
+  assert.deepEqual(Object.keys(play.skippedSlots), ['14:00', '补'], '「补」那一档也要能读回来');
+  assert.equal(play.skippedSlots['14:00'].doing, '上班');
   assert.equal(play.skipped, true);
   // 空文件也给个能用的形状。
   assert.deepEqual(cleanPlay(null, '2026-11-05'), newPlay('2026-11-05'));
 });
 
-test('free.planFreeTick：到点就叫一次，同档不重复，做满就不叫', () => {
-  const cfg = { lifeFreeSlots: '10:00,21:00', lifeFreeGoal: 2, lifeFreeGraceMin: 20, lifeFreeMaxRetries: 1, lifeFreeRetryMin: 40 };
-  const play = newPlay('2026-11-05');
-  // 10:02 到档
-  let r = planFreeTick(play, cfg, { nowMs: 0, nowMin: 602 });
-  assert.equal(r.action, 'fire');
-  assert.equal(r.slot, '10:00');
-  markFreeNudged(play, 0, '10:00');
-  // 同一档再走一拍：挂了 pending，不该再 fire
-  r = planFreeTick(play, cfg, { nowMs: 60_000, nowMin: 603 });
-  assert.notEqual(r.action, 'fire');
+test('kind.classifyItem：睡觉优先、上班算占用、其余算她的空档', () => {
+  assert.equal(classifyItem(null), 'none');
+  assert.equal(classifyItem({ activity: '   ' }), 'none');
+  assert.equal(classifyItem('回笼觉'), 'asleep', '字符串入参也认（老调用点传过）');
+  assert.equal(classifyItem({ activity: '午睡' }), 'asleep');
+  assert.equal(classifyItem({ activity: '打盹' }), 'asleep');
+  assert.equal(classifyItem({ activity: '上班（偷偷摸鱼）' }), 'busy');
+  assert.equal(classifyItem({ activity: '通勤' }), 'busy');
+  assert.equal(classifyItem({ activity: '开会' }), 'busy');
+  // 睡着也算占用，但睡要优先：不能把「午睡」说成 busy 去报备。
+  assert.equal(classifyItem({ activity: '午睡' }), 'asleep');
+  assert.equal(classifyItem({ activity: '刷手机' }), 'free');
+  assert.equal(classifyItem({ activity: '窗边发呆' }), 'free');
+  assert.equal(classifyItem({ activity: '自己的时间' }), 'free');
 });
 
-test('free.planFreeTick：睡觉时不叫，但已经挂着的那一档照样能收尾', () => {
-  const cfg = { lifeFreeSlots: '10:00', lifeFreeGoal: 3, lifeFreeGraceMin: 20, lifeFreeMaxRetries: 1, lifeFreeRetryMin: 40 };
+test('free.planFreeTick：到点叫一次，同一档不重复；过了容错就当错过', () => {
+  const cfg = { lifeFreeSlots: '10:00,21:00', lifeFreeGraceMin: 20 };
   const play = newPlay('2026-11-05');
-  assert.equal(planFreeTick(play, cfg, { nowMs: 0, nowMin: 602, asleep: true }).action, 'none',
+  let r = planFreeTick(play, cfg, { nowMin: 602, kind: 'free' });
+  assert.deepEqual([r.action, r.slot], ['fire', '10:00']);
+  markFreeNudged(play, 0, '10:00');
+  // 同一档再走一拍：不再 fire，也不催。
+  r = planFreeTick(play, cfg, { nowMin: 603, kind: 'free' });
+  assert.equal(r.action, 'none');
+  // 容错窗口过了（10:40）也不再补叫这一档——下一档就是下一档。
+  r = planFreeTick(play, cfg, { nowMin: 640, kind: 'free' });
+  assert.equal(r.action, 'none');
+});
+
+test('free.planFreeTick：睡觉不叫，也不把这一档记成已处理', () => {
+  const cfg = { lifeFreeSlots: '10:00', lifeFreeGraceMin: 20 };
+  const play = newPlay('2026-11-05');
+  assert.equal(planFreeTick(play, cfg, { nowMin: 602, kind: 'asleep' }).action, 'none',
     '睡着的时候还叫她过自己的时间');
-  // 已经叫过、挂着 pending：睡觉也要能催/收尾，不能永远挂着。
-  markFreeNudged(play, 0, '10:00');
-  const r = planFreeTick(play, cfg, { nowMs: 41 * 60_000, nowMin: 643, asleep: true });
-  assert.equal(r.action, 'retry');
+  assert.deepEqual(play.fired, {}, '睡着了不该吃掉这一档：醒了还在容错窗口里就该能叫');
 });
 
-test('free：记账、进度、跳过、跨档', () => {
-  const cfg = { lifeFreeGoal: 2 };
+test('free.planFreeTick：忙着时默认跳过，开了 lifeFreeBusyCall 才叫', () => {
+  const cfg = { lifeFreeSlots: '10:00', lifeFreeGraceMin: 20 };
   const play = newPlay('2026-11-05');
-  assert.deepEqual(playProgress(play, 2), { done: 0, goal: 2, left: 2, reached: false });
+  const skip = planFreeTick(play, cfg, { nowMin: 602, kind: 'busy' });
+  assert.deepEqual([skip.action, skip.slot], ['skip', '10:00']);
+  const fire = planFreeTick(play, { ...cfg, lifeFreeBusyCall: true }, { nowMin: 602, kind: 'busy' });
+  assert.deepEqual([fire.action, fire.slot, fire.kind], ['fire', '10:00', 'busy']);
+});
+
+test('free：记账、跳过、忙时留痕', () => {
+  const play = newPlay('2026-11-05');
   recordPlay(play, { nowMs: 0, activity: '出去走走', note: '看见一只猫' });
   assert.equal(play.done.length, 1);
-  assert.equal(playProgress(play, 2).left, 1);
   recordPlay(play, { nowMs: 0, activity: '看了会儿视频' });
-  assert.equal(playProgress(play, 2).reached, true, '做满了还说不满');
+  assert.equal(play.done.length, 2);
   assert.throws(() => recordPlay(play, { nowMs: 0, activity: '' }), /activity/);
   skipFreeToday(play);
   assert.equal(play.skipped, true);
-  assert.equal(play.pending, null);
-  // goal = 0 表示只叫不计数
-  assert.equal(playProgress(play, 0).left, null);
+  assert.equal(planFreeTick(play, { lifeFreeSlots: '21:00' }, { nowMin: 1262, kind: 'free' }).action, 'none');
+
+  // 忙时跳过要留痕（面板据此解释「为什么没叫」），并记成已处理，免得每拍重判。
+  const p2 = newPlay('2026-11-05');
+  markFreeSkipped(p2, 1, '10:00', '上班（公司）');
+  assert.equal(p2.fired['10:00'], 1);
+  assert.equal(p2.skippedSlots['10:00'].doing, '上班（公司）');
 });
 
-test('free：只有日程说是自由段时才用「你自己的时间」这句措辞', () => {
+test('free.planFreeTick：今天一档都没处理过时补一档（应用下午才开）', () => {
+  const fresh = newPlay('2026-11-05');
+  const r = planFreeTick(fresh, { lifeFreeSlots: '10:00,21:00', lifeFreeGraceMin: 20 }, { nowMin: 900, kind: 'free' });
+  assert.deepEqual([r.action, r.slot], ['fire', '补']);
+});
+
+test('free：只有日程说是空档时才用「你自己的时间」这句措辞', () => {
   const play = newPlay('2026-11-05');
-  const free = freeEventText({ slot: '21:00', play, cfg: { lifeFreeGoal: 3 }, where: '在家玩（家）', menu: '- 随便', freeNow: true, nowHm: '21:00' });
+  const free = freeEventText({ slot: '21:00', kind: 'free', play, cfg: {}, where: '在家玩（家）', menu: '- 随便', nowHm: '21:00' });
   assert.match(free, /你自己的时间/);
   assert.match(free, /随便/);
-  const gap = freeEventText({ slot: '15:00', play, cfg: {}, where: '通勤（路上）', menu: '- 随便', freeNow: false, nowHm: '15:00' });
-  assert.ok(!gap.includes('你自己的时间'), '日程说她在通勤，却告诉她「现在是你的时间」');
+  // 没有日程（空档）：还是给例子，但不说「就是你的时间」。
+  const gap = freeEventText({ slot: '15:00', kind: 'none', play, cfg: {}, where: '', menu: '- 随便', nowHm: '15:00' });
+  assert.ok(!gap.includes('你自己的时间'), '没有日程却说「现在是你的时间」');
   assert.match(gap, /空档/);
+});
+
+test('free：忙着时只说报备，不说「这是你的时间」，也不贴出门的例子', () => {
+  const play = newPlay('2026-11-05');
+  recordPlay(play, { nowMs: Date.parse('2026-11-05T10:02:00+08:00'), activity: '出去走走' });
+  const busy = freeEventText({
+    slot: '10:30', kind: 'busy', play, cfg: { lifeFreeAskReport: false },
+    where: '上班（公司）', menu: '- 出去转转', nowHm: '10:30',
+  });
+  assert.ok(!busy.includes('你自己的时间'), '忙着的时候不能说「这是你的时间」');
+  assert.match(busy, /这会儿你在上班/);
+  assert.match(busy, /feast_life_play/, '还是得说怎么记一笔');
+  assert.ok(!busy.includes('出去转转'), '忙时不该贴出门的例子');
+  assert.ok(!busy.includes('跟主人说一句'), 'askReport 关着却提醒了');
 });
 
 test('free：日程那段本身叫「自己的时间」时，不拼出「你在自己的时间里」', () => {
   const play = newPlay('2026-11-05');
-  const text = freeEventText({ slot: '21:00', play, cfg: {}, where: '自己的时间（家）', menu: '', freeNow: true });
+  const text = freeEventText({ slot: '21:00', kind: 'free', play, cfg: {}, where: '自己的时间（家）', menu: '' });
   assert.ok(!/本来在自己的时间/.test(text), `措辞别扭：${text.split('\n')[1]}`);
   assert.match(text, /你现在在家/);
+});
+
+// --------------------------------------------------------------------------
+// 能做的事（lifeDoings）
+// --------------------------------------------------------------------------
+
+test('doings：按日型分节，认名字也认 id；没写日型的算通用', () => {
+  const all = parseDoings([
+    '- 睡到自然醒，起来泡杯茶',
+    '上班日：',
+    '- 在公司写方案，被叫去开会',
+    '- 午休找主人聊两句（qq 发消息）',
+    'restday:',
+    '* 追番（bvp_watch_now mode="text"）',
+    '1. 下楼买菜，顺手发条空间动态',
+  ].join('\n'));
+  assert.deepEqual(doingsFor(all, { id: 'workday', name: '上班日' }), [
+    '在公司写方案，被叫去开会',
+    '午休找主人聊两句（qq 发消息）',
+  ]);
+  assert.deepEqual(doingsFor(all, { id: 'restday', name: '休息日' }), [
+    '追番（bvp_watch_now mode="text"）',
+    '下楼买菜，顺手发条空间动态',
+  ]);
+  // 没有专属节就退回通用那一份。
+  assert.deepEqual(doingsFor(all, { id: 'outing', name: '外出日' }), ['睡到自然醒，起来泡杯茶']);
+  // 没配就是空，跟以前一样由她自己编。
+  assert.deepEqual(doingsFor(parseDoings(''), { id: 'workday', name: '上班日' }), []);
+});
+
+test('doings：一块进「请她写明天」的正文；没配就整段不出现', () => {
+  const type = { id: 'restday', name: '休息日', guide: '不上班，在家待着。' };
+  const plain = planEventText({ date: '2026-11-06', type });
+  assert.ok(!plain.includes('你手边真能做的事'), '没配清单却出现了那一段');
+
+  const withDoings = planEventText({ date: '2026-11-06', type, doings: ['追番（bvp_watch_now mode="text"）'] });
+  assert.match(withDoings, /你手边真能做的事/);
+  assert.match(withDoings, /bvp_watch_now/);
+  assert.match(withDoings, /不是任务/, '清单得说清不是任务');
+  // 清单在日型之后、最近几天之前。
+  assert.ok(withDoings.indexOf('你手边真能做的事') > withDoings.indexOf('这一天按'));
 });
 
 test('free.isFreeActivity：睡觉和上班都不算自由时间', () => {

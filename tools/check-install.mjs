@@ -74,7 +74,10 @@ for (const key of Object.keys(DEFAULTS)) {
 
 if (!hasBom) problems.push('install.ps1 没有 UTF-8 BOM：Windows PowerShell 5.1 会把中文按 GBK 解成乱码');
 
-console.log(`  ✓ install.ps1 是 UTF-8 with BOM`);
+// 这一行以前是无条件打勾的：BOM 丢了照样自称「是 UTF-8 with BOM」，只在下面多一行 ✗。
+console.log(hasBom
+  ? '  ✓ install.ps1 是 UTF-8 with BOM'
+  : '  ✗ install.ps1 不是 UTF-8 with BOM（PowerShell 5.1 会把中文按 GBK 解成乱码）');
 console.log(`  ✓ 脚本 $defaults ${rows.length} 项 vs DEFAULTS ${Object.keys(DEFAULTS).length} 项`);
 for (const p of problems) console.log(`  ✗ ${p}`);
 console.log(problems.length ? `\n${problems.length} 处不一致` : '\n全部一致');

@@ -1395,9 +1395,9 @@ test('今天面板：点往期某一天会拉那一天的 day，并给出收起'
 
 test('今天面板：画出「她自己的时间」那一块（记了几件、下一档、做过什么）', async () => {
   const clock = { now: Date.parse('2026-11-05T21:02:00+08:00') };
-  const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeFreeSlots: '21:00', lifeFreeGoal: 3 } });
+  const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeFreeSlots: '21:00,22:00' } });
   try {
-    // 先让 world 那一拍叫醒她，再记一笔，面板才该显示出进度。
+    // 先记一笔，面板才该显示出今天做过什么。
     const tools = Object.fromEntries(world.tools().map((x) => [x.name, x.handler]));
     await tools.feast_life_play({ activity: '出去走走', note: '看见一只三花猫' });
 
@@ -1405,9 +1405,10 @@ test('今天面板：画出「她自己的时间」那一块（记了几件、�
     const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('她自己的时间'));
     assert.ok(block, '没有「她自己的时间」那一块');
     assert.ok(/今天记了 1 件/.test(block.textContent), `没显示记了几件：${block.textContent.slice(0, 120)}`);
-    // 措辞得清是「不再按点叫」，不是「还差几件任务」。
-    assert.ok(block.textContent.includes('不再按点叫'), '没讲清那是叫醒上限');
+    // 0.8.0 删了「记到几件就不再叫」：面板不该再有那条线，也不该有「在等她记」。
+    assert.ok(!/不再按点叫|已到数|在等她记/.test(block.textContent), `还在画配额那一套：${block.textContent.slice(0, 200)}`);
     assert.ok(!/还差 \d+ 件/.test(block.textContent), `面板写成了任务额度：${block.textContent.slice(0, 160)}`);
+    assert.ok(block.textContent.includes('下一档'), '没显示下一档');
     assert.ok(block.textContent.includes('出去走走'), '没显示她做过什么');
     assert.ok(block.textContent.includes('看见一只三花猫'), '没显示那笔的细节');
     // 提示语要说清单只是举例。

@@ -7,6 +7,7 @@
  */
 import { cleanDay } from './store.js';
 import { dateLabel } from './time.js';
+import { doingsLines } from './doings.js';
 
 /**
  * 事件正文：给她的写作要求（她看得到），也是工具参数的格式说明。
@@ -15,10 +16,14 @@ import { dateLabel } from './time.js';
  * 让她写日程时 outfit / scene / props 用库里的正名，生图工作室那边解析才稳。
  * 库读不到就是空串，这段就省掉（不强指不存在的东西）。
  *
+ * `doings` 是 doingsFor(parseDoings(cfg.lifeDoings), type) 的结果：主人按日型备的
+ * 「能做的事」清单。给了就在这里列出来，让她写出来的每一段是真能做的一件事，
+ * 而不是「在家玩」这种空白。没给就是空数组，这段整段不出现（跟以前一样由她自己编）。
+ *
  * `rewrite` 是主人从面板点「重写明天」时给的：那一天她已经写好了，这次是**重写**，
  * 措辞和夜里第一次请她写不一样，免得她以为自己从没写过。
  */
-export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', rewrite = false } = {}) {
+export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', doings = [], rewrite = false } = {}) {
   const name = who.name || '她';
   const lines = [
     rewrite
@@ -29,6 +34,8 @@ export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:0
   if (rewrite) {
     lines.push('（之前那一版已经收了；不想改就用 feast_life_view 看一眼再照着交回一遍，改主意也完全可以。）');
   }
+  // 主人备的「能做的事」：紧跟在日型后面，让她写每一段时手边有具体的事可选。
+  lines.push(...doingsLines(doings));
   if (recent) lines.push(`最近几天：\n${recent}`);
   if (wardrobe) lines.push(wardrobe);
   lines.push(`饭点照旧是 ${mealSlots}，别把这两段排成别的事；吃饭那几段可以写去哪儿吃、和谁一起。`);

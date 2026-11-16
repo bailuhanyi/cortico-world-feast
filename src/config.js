@@ -78,19 +78,21 @@ export const DEFAULTS = Object.freeze({
   lifeMaxItems: 24,
   /** 允许她自己改「今天已经过完」的时段（默认不允许：那是事实，不是计划）。 */
   lifeAdjustPast: false,
+  /**
+   * 按日型给她备的「能做的事」，进「请她写明天」那条事件的正文：让她写出来的每一段
+   * 是真能做的一件事，而不是「在家玩」这种空白。留空 = 不生效（跟以前一样由她自己编）。
+   * 格式与容错规则见 life/doings.js。
+   */
+  lifeDoings: '',
   // ---- 自由时间（0.7.0 从 playtime World 并进来）----
   /** 自由时间总开关。0.7.2 补：之前代码里认这个键但配置表没声明，等于只能手改 config.json。 */
   lifeFreeEnabled: true,
-  /** 她自己的时间：几点叫醒她。留空 = 不叫（但工具和面板还在）。 */
+  /** 她自己的时间：几点说那句话。留空 = 不叫（但工具和面板还在）。**档数 = 一天最多叫几次**。 */
   lifeFreeSlots: '10:00,14:00,21:00',
-  /** 到几条就不再**按点叫**（不是任务额度：到了照样能记、能继续做）。0 = 只叫不计数。 */
-  lifeFreeGoal: 3,
-  /** 到点后多少分钟内还算这一档（应用刚启动的容错）。 */
+  /** 到点后多少分钟内还算这一档（应用刚启动或卡住时的追赶窗口）。 */
   lifeFreeGraceMin: 20,
-  /** 叫醒后没记账，隔多少分钟催一次。 */
-  lifeFreeRetryMin: 40,
-  /** 一档最多催几次；0 = 不催。 */
-  lifeFreeMaxRetries: 1,
+  /** 日程说她这会儿在上班/通勤/开会时叫不叫：false = 不叫、面板留一行；true = 照样叫，但说成「报备」。睡觉永远不叫。 */
+  lifeFreeBusyCall: false,
   /** 叫醒时贴给她的例子，原样进事件；默认只给通用说法，不点名别的扩展的工具。 */
   lifeFreeMenu: [
     '- 出去转转，走一小段路，看看外面现在什么样',
@@ -191,18 +193,16 @@ const ZH = {
     lifeMaxItemsDesc: '她自己写明天时的段数上限；写多了按时间顺序裁掉后面的，再补齐 00:00–24:00。',
     lifeAdjustPast: '允许她改过去',
     lifeAdjustPastDesc: '默认关着：今天已经过完的时段她不能改——日程是计划，过去的应该是事实，回头篡改就等于编自己做过什么。打开后她也能改今天早上的安排（主人从面板改不受这个开关限制）。',
+    lifeDoings: '她能做的事（按日型填）',
+    lifeDoingsDesc: '填了之后，每晚请她写明天时会把这张单子一起给她，让她写出来的每段是真能做的一件事，而不是「在家玩」这种空白。写法：一行「上班日:」开一节，下面一行一件，例如「- 在公司写方案，被叫去开会」「- 午休找主人聊两句（qq 发消息）」「- 追番（bvp_watch_now mode="text"）」。日型名也能写 id（workday / restday / outing / homebody / overtime / slacking）；没写日型的那些行对所有日子通用。**要写扩展工具就把工具名和调用写法写清，而且只写你真装了的**（这里不自动检测，写了她会照着做但做不成）。留空 = 不生效，跟以前一样由她自己编。',
     lifeFreeEnabled: '她自己的时间',
     lifeFreeEnabledDesc: '自由时间总开关。关掉后不再按点叫醒她，工具和面板照旧可用（想自己开始随时能开始）。',
     lifeFreeSlots: '几点的档',
-    lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点叫醒她一次「现在是你自己的时间，做点自己想做的」；日程说这会儿在睡觉就不叫。留空 = 不叫（工具和面板照样能用）。',
-    lifeFreeGoal: '记到几件就不再叫',
-    lifeFreeGoalDesc: '注意这是**叫醒的上限，不是任务额度**：记到这个数只表示「今天不再按点叫你了」，不表示不许再动——她想做什么随时能做，记多少都算数。0 = 只叫不计数（会一直叫到晚上，不推荐）。',
+    lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点说一句「现在是你自己的时间，做点自己想做的」——**档数就是一天最多叫几次**（想少叫几次就少写几个点）。日程说这会儿在睡觉就不叫；在上班/通勤/开会时按下面的「忙着的时候也叫」处理。留空 = 不叫（工具和面板照样能用）。',
     lifeFreeGraceMin: '档位容错',
     lifeFreeGraceMinDesc: '到点后多少分钟内还算这一档；应用刚启动或短暂卡顿时不至于直接跳过。',
-    lifeFreeRetryMin: '没记就催',
-    lifeFreeRetryMinDesc: '叫醒后没记账，隔多少分钟再催一次。',
-    lifeFreeMaxRetries: '最多催几次',
-    lifeFreeMaxRetriesDesc: '一档催完还没记就放掉，等下一档；0 = 不催。',
+    lifeFreeBusyCall: '忙着的时候也叫',
+    lifeFreeBusyCallDesc: '开启时，到点发现她日程里正在上班/通勤/开会，也照样说一句，只是不说「现在是你自己的时间」，而说「这会儿你在上班，想记就随手记一笔」——拍照报备那种用法打开它，六档就都会到。关掉时这些档不叫，只在面板上留一行「没叫：她那会儿在上班」。**睡觉永远不叫**，这一项不管睡不睡。',
     lifeFreeMenu: '叫醒时给的例子',
     lifeFreeMenuDesc: '原样贴进叫醒事件里，措辞上明确写着「这些只是例子，不照着也行」。默认只写通用说法（不点名别的扩展的工具——World 不该依赖别的扩展）。想让她真用上某个工具，在这里写明，例如「去客厅坐坐（parlor_query {op:"rooms"} → parlor_room {op:"visit"}）」。改完下一档生效。',
     lifeFreeAskReport: '做完说一声',
@@ -303,18 +303,16 @@ const EN = {
     lifeMaxItemsDesc: 'Upper bound when she writes a day; extra items are dropped and 00:00–24:00 is filled in.',
     lifeAdjustPast: 'Let her edit the past',
     lifeAdjustPastDesc: 'Off by default: hours of today that are already over cannot be changed by her. The schedule is a plan; the past should be what happened. Turning this on lets her edit this morning too (edits you make from the panel are never restricted).',
+    lifeDoings: 'Things she can actually do (by day type)',
+    lifeDoingsDesc: 'When filled in, this list is handed to her every night when she writes tomorrow, so each item she writes is a real thing she can do instead of a blank like "hanging out at home". Format: one section per day type on its own line ("Rest day:"), then one item per line, e.g. "- writing a proposal at the office, pulled into a meeting", "- saying hi to the owner at lunch (qq message)", "- watching an episode (bvp_watch_now mode=\\"text\\")". Day-type ids work too (workday / restday / outing / homebody / overtime / slacking); lines before any section apply to every day. **If you name an extension tool, spell out the tool and how it is called, and only list tools you actually have** — nothing is auto-detected here. Blank = off; she invents the day herself as before.',
     lifeFreeEnabled: 'Her own time',
     lifeFreeEnabledDesc: 'Master switch for her own time. Off: no scheduled wake-ups; the tools and the panel still work (she can always start something herself).',
     lifeFreeSlots: 'Wake-up slots',
-    lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. She is woken once per slot and told this is her own time; skipped while the schedule says she is asleep. Blank = never wake her (tools and panel still work).',
-    lifeFreeGoal: 'Stop calling after',
-    lifeFreeGoalDesc: 'This is a cap on wake-ups, **not a quota**: reaching it only means she is not woken on schedule any more — she may still do things whenever she likes, and anything she logs still counts. 0 = wake but never count (not recommended).',
+    lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. She gets one line per slot saying "this is your own time" — **the number of slots is the most she will be nudged in a day** (write fewer to be called fewer times). Never while the schedule says she is asleep; while she is at work/commuting/in a meeting it depends on "Call her while she is busy". Blank = never wake her (tools and panel still work).',
     lifeFreeGraceMin: 'Slot grace',
     lifeFreeGraceMinDesc: 'How many minutes after a slot still count as that slot; keeps a restart from skipping it.',
-    lifeFreeRetryMin: 'Retry after',
-    lifeFreeRetryMinDesc: 'If she has not logged anything, wait this many minutes before nudging again.',
-    lifeFreeMaxRetries: 'Max retries',
-    lifeFreeMaxRetriesDesc: 'Give up on a slot after this many nudges; 0 = never retry.',
+    lifeFreeBusyCall: 'Call her while she is busy',
+    lifeFreeBusyCallDesc: 'When on, a slot that lands while her schedule says she is at work / commuting / in a meeting still speaks — but it does not say "this is your own time", it says "you are at work right now; log something if you want to". Turn it on for the photo-report rhythm (then all six slots land). When off those slots stay silent and the panel shows one line: "skipped: she was at work". **Never while asleep** — this switch has nothing to do with sleep.',
     lifeFreeMenu: 'Example ideas',
     lifeFreeMenuDesc: 'Pasted verbatim into the wake-up event, worded so it is clear these are only examples. Defaults stay generic on purpose — a World must not depend on another extension. To point her at a specific tool, name it here, e.g. "sit in the parlor (parlor_query {op:\"rooms\"} → parlor_room {op:\"visit\"})".',
     lifeFreeAskReport: 'Tell the owner',
@@ -542,6 +540,13 @@ function configProperties(language = 'zh') {
           description: t.lifeAdjustPastDesc,
           'x-hot': true,
         },
+        [`${K}.lifeDoings`]: {
+          type: 'string',
+          title: t.lifeDoings,
+          description: t.lifeDoingsDesc,
+          'x-multiline': true,
+          'x-hot': true,
+        },
         [`${K}.lifeFreeEnabled`]: {
           type: 'boolean',
           title: t.lifeFreeEnabled,
@@ -554,15 +559,6 @@ function configProperties(language = 'zh') {
           description: t.lifeFreeSlotsDesc,
           'x-hot': true,
         },
-        [`${K}.lifeFreeGoal`]: {
-          type: 'integer',
-          title: t.lifeFreeGoal,
-          description: t.lifeFreeGoalDesc,
-          minimum: 0,
-          maximum: 12,
-          'x-suffix': ' 件',
-          'x-hot': true,
-        },
         [`${K}.lifeFreeGraceMin`]: {
           type: 'integer',
           title: t.lifeFreeGraceMin,
@@ -572,21 +568,10 @@ function configProperties(language = 'zh') {
           'x-suffix': ' 分钟',
           'x-hot': true,
         },
-        [`${K}.lifeFreeRetryMin`]: {
-          type: 'integer',
-          title: t.lifeFreeRetryMin,
-          description: t.lifeFreeRetryMinDesc,
-          minimum: 5,
-          maximum: 240,
-          'x-suffix': ' 分钟',
-          'x-hot': true,
-        },
-        [`${K}.lifeFreeMaxRetries`]: {
-          type: 'integer',
-          title: t.lifeFreeMaxRetries,
-          description: t.lifeFreeMaxRetriesDesc,
-          minimum: 0,
-          maximum: 5,
+        [`${K}.lifeFreeBusyCall`]: {
+          type: 'boolean',
+          title: t.lifeFreeBusyCall,
+          description: t.lifeFreeBusyCallDesc,
           'x-hot': true,
         },
         [`${K}.lifeFreeMenu`]: {

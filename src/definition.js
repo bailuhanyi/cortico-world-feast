@@ -144,8 +144,8 @@ export const feastDefinition = {
       {
         type: EVENT_LIFE_PLAN,
         description: {
-          zh: '每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天和饭点，请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。',
-          en: 'Nightly ask for the day she wants to have tomorrow: date, day type, recent days and meal slots, then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks.',
+          zh: '每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天、饭点，以及主人给她备的「能做的事」（配了这一项才有），请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。',
+          en: 'Nightly ask for the day she wants to have tomorrow: date, day type, recent days, meal slots, and the "things she can actually do" list the owner prepared (when configured), then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks.',
         },
         trigger: 'flush',
       },
@@ -160,8 +160,8 @@ export const feastDefinition = {
       {
         type: EVENT_LIFE_FREE,
         description: {
-          zh: '到她自己的时间：一条 internal 事件叫醒她「现在是你自己的时间」，正文带上日程里此刻那一段和一份可配置的菜单，让她挑一件事做，做完用 feast_life_play 记一笔。日程说这会儿在睡觉或正在上班时**不推**（不把「现在是你的时间」硬塞给一个正在上班的人）。没记就催一次，催完放掉；origin 是 internal。',
-          en: 'Her own time: an internal event telling her this stretch is hers, with the schedule item she is currently in plus a configurable menu, asking her to pick something and log it with feast_life_play. Never sent while the schedule says she is asleep or busy at work — telling a working person "this time is yours" would contradict the schedule. One retry, then dropped. Internal origin.',
+          zh: '到她自己的时间：一条 internal 事件叫她「现在是你自己的时间」（或按日程换说法），正文带上日程里此刻那一段和一份可配置的菜单，让她挑一件事做，做完用 feast_life_play 记一笔。日程说这会儿在睡觉时**不推**；在上班/通勤/开会时，看配置里的「忙着的时候也叫」：关着就不推（面板留一行解释），开着就推一条「报备」式的（不说「这是你的时间」，也不给出门的例子）。档位就是一天最多叫几次，不催第二遍；origin 是 internal。',
+          en: 'Her own time: an internal event telling her this stretch is hers (or, depending on the schedule, something else entirely), with the schedule item she is currently in plus a configurable menu, asking her to pick something and log it with feast_life_play. Never sent while the schedule says she is asleep; while she is at work / commuting / in a meeting it follows the "call her while she is busy" switch — off means no event (the panel shows one line explaining it), on means a check-in style event that does not claim the time is hers and offers no going-out examples. Slots are the daily cap on calls; there is no retry. Internal origin.',
         },
         trigger: 'flush',
       },
