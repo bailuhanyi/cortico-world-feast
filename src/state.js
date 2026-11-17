@@ -176,6 +176,7 @@ export function normalizeState(raw, day) {
         ids,
         name: typeof raw.served.name === 'string' ? raw.served.name.slice(0, 60) : '',
         comboId: typeof raw.served.comboId === 'string' ? raw.served.comboId.slice(0, 60) : '',
+        ...(raw.served.by === 'self' ? { by: 'self' } : {}),
         // 旧状态没这个字段；缺了就按时间戳判余量（servedRemaining 里有退路）。
         mark: Number.isInteger(raw.served.mark) && raw.served.mark >= 0 ? raw.served.mark : null,
       };
@@ -342,7 +343,7 @@ export function lastEaten(state) {
  * 0.6.0 起端来的可以是**一桌**，所以记的是 `ids[]` 而不是一个 id。
  * `id` 仍然认（旧状态文件、面板端一道菜的旧路径），一律折成 ids[0]。
  */
-export function setServed(state, { nowMs, id, ids, name = '', comboId = '' }) {
+export function setServed(state, { nowMs, id, ids, name = '', comboId = '', by = 'owner' }) {
   const list = Array.isArray(ids) && ids.length ? ids : id ? [id] : [];
   const uniq = [...new Set(list.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()))];
   if (!uniq.length) { state.served = null; return null; }
@@ -351,6 +352,7 @@ export function setServed(state, { nowMs, id, ids, name = '', comboId = '' }) {
     ids: uniq,
     name: typeof name === 'string' ? name.slice(0, 60) : '',
     comboId: typeof comboId === 'string' ? comboId.slice(0, 60) : '',
+    ...(by === 'self' ? { by: 'self' } : {}),
     // 端来的时候已经吃过几条。余量按**从这个位置往后**的吃过记录算，而不是比时间戳——
     // 时钟被冻住（测试）或者同一毫秒里端了又吃，`e.at >= at` 会把刚端上来的那道
     // 当成"已经吃过"，一桌刚摆好就显示吃完了。

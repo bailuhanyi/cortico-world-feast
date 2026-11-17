@@ -39,8 +39,8 @@ const TOOL_SUMMARIES = {
     en: 'See the set meals available, each resolved into actual dishes.',
   },
   feast_combo: {
-    zh: '开一桌：把一个套餐配成具体几道菜摆上来，一道一道吃。',
-    en: 'Set a whole table: resolve a set meal into dishes and serve them together.',
+    zh: '自己选一桌：可选套餐名，或用 dishes 点几道菜；也可按 size / cuisine 现配。选好后逐道用 feast_eat 吃。',
+    en: 'Choose a meal for yourself: select a combo, name dishes, or generate by size/cuisine. Eat each dish with feast_eat.',
   },
   feast_together: {
     zh: '陪主人一起吃：问他要不要一起、分他一口、这顿先收了。',
@@ -98,9 +98,6 @@ export const feastDefinition = {
     cfg: ctx.cfg,
     dataDir: ctx.dataDir,
     timezone: ctx.timezone,
-    // 补齐配置段用：宿主的 /api/config 读的是落盘的 worlds.feast（不做默认值合并），
-    // 段里缺键时界面上会显示成 false / 空 / 0，和实际生效值对不上。
-    // 详见 FeastWorld#ensureConfigSection。
     persist: typeof ctx.persist === 'function' ? (patch) => ctx.persist(patch) : null,
     // 天气联网可注入（dry-mount / 测试用）；宿主正常挂载时不传，走全局 fetch。
     weatherFetch: typeof ctx.weatherFetch === 'function' ? ctx.weatherFetch : null,
@@ -112,8 +109,8 @@ export const feastDefinition = {
       {
         type: EVENT_MEAL,
         description: {
-          zh: '到饭点（或上一顿没吃，到催的时间）：正文列出今天吃过什么和几道候选，让她自己挑一道吃。origin 是 internal，按她自己的作息投递，不是主人发的消息。在配置里可以整个关掉。',
-          en: 'A meal slot came due (or the previous meal was not eaten): lists what she ate today and a few candidates. Internal origin: her own schedule, not a message from the owner. Can be switched off entirely in config.',
+          zh: '到饭点（或上一顿没吃，到催的时间）：列出今天吃过什么和候选，让她按胃口选一道、选套餐或搭配几道。选餐不算吃过，再用 feast_eat 逐道吃。origin 是 internal，按她自己的作息投递，不是主人发的消息。在配置里可以整个关掉。',
+          en: 'A meal slot came due: offers candidates and lets her choose a single dish, a set meal, or several dishes of her own. Setting the table does not count as eating; feast_eat records each dish. Internal origin, her own schedule rather than an owner message. Can be switched off in config.',
         },
         trigger: 'flush',
       },

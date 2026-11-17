@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
 import { FeastWorld, FEAST_TOOL_DECLS } from '../src/world.js';
+import { feastDefinition } from '../src/definition.js';
 import { loadDishes } from '../src/dishes.js';
 import { DEFAULTS } from '../src/config.js';
 import * as config from '../src/config.js';
@@ -153,6 +154,9 @@ test('饭点：到点推一条 internal 事件，催一次之后放掉', async (
   assert.equal(ev.senderKey, 'feast-meal');
   assert.ok(ev.text.includes('11:30'));
   assert.ok(ev.text.includes('feast_eat'));
+  assert.ok(ev.text.includes('feast_combos'));
+  assert.ok(ev.text.includes('feast_combo'));
+  assert.ok(ev.text.includes('dishes'));
   assert.ok(ev.text.includes('feast_skip'));
   await world.stop();
 
@@ -253,22 +257,86 @@ test('feast_combos：列得出预设，每套现配出具体菜名', async () =>
   await world.stop();
 });
 
-test('feast_combo：开一桌，说清几道、摆上桌、推 feast.table 事件', async () => {
+test('feast_combo：鱼自选套餐，不伪装主人端菜，逐道吃', async () => {
   const { world, events, tools } = await makeWorld();
   const r = await tools.feast_combo({ combo: '四菜一汤' });
   assert.ok(!r.failed, r.text ?? '');
   assert.ok(r.text.includes('四菜一汤'), r.text.slice(0, 120));
   assert.ok(r.text.includes('5 道'), `该说清几道：${r.text.slice(0, 120)}`);
 
-  const ev = events.find((e) => e.type === 'feast.table');
-  assert.ok(ev, '没推出 feast.table');
-  assert.equal(ev.origin, 'internal');
-  assert.ok(ev.text.includes('主人端来一桌菜'));
-  assert.ok(ev.text.includes('5道'), `事件正文该写几道：${ev.text.slice(0, 120)}`);
+  assert.equal(events.some((e) => e.type === 'feast.table'), false, '鱼自选不应伪装成主人端菜');
 
   // 吃一道，回执说得出还剩哪几道。
   const ate = await tools.feast_eat({});
   assert.ok(ate.text.includes('还剩 4 道'), `该报进度：${ate.text.split('\n').at(-1)}`);
+  await world.stop();
+});
+
+test('feast_combo：点名多道菜按顺序吃，点菜不等于吃过', async () => {
+  const { world, events, tools } = await makeWorld();
+  const result = await tools.feast_combo({ dishes: ['麻婆豆腐', 'dongpo-pork'] });
+  assert.ok(!result.failed, result.text);
+  assert.ok(result.text.includes('1. 麻婆豆腐'), result.text);
+  assert.ok(result.text.includes('2. 东坡肉'), result.text);
+  assert.equal(events.some((event) => event.type === 'feast.table'), false);
+  const history = await tools.feast_history({});
+  assert.ok(history.text.includes('吃过 0 回'), history.text);
+  const first = await tools.feast_eat({});
+  assert.ok(first.text.includes('自己选的：麻婆豆腐'), first.text);
+  assert.ok(first.text.includes('还剩 1 道：东坡肉'), first.text);
+  const second = await tools.feast_eat({});
+  assert.ok(second.text.includes('自己选的：东坡肉'), second.text);
+  assert.ok(second.text.includes('这一桌吃完了'), second.text);
+  const entries = await world.webUi('zh').invoke('history', 'list', []);
+  assert.deepEqual(entries.recent.map((entry) => entry.by), ['self', 'self']);
+  await world.stop();
+});
+
+test('feast_combo：点名先吃后一道，重启后仍记得自选餐桌和剩菜', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  await tools.feast_combo({ dishes: ['麻婆豆腐', 'dongpo-pork'] });
+  const second = await tools.feast_eat({ dish: '东坡肉' });
+  assert.ok(second.text.includes('还剩 1 道：麻婆豆腐'), second.text);
+  await world.stop();
+  const restarted = await makeWorld({ dataDir });
+  const menu = await restarted.world.webUi('zh').invoke('menu', 'list', [{}]);
+  assert.equal(menu.pending.by, 'self');
+  assert.deepEqual(menu.pending.left, ['麻婆豆腐']);
+  const first = await restarted.tools.feast_eat({});
+  assert.ok(first.text.includes('自己选的：麻婆豆腐'), first.text);
+  assert.ok(first.text.includes('这一桌吃完了'), first.text);
+  await restarted.world.stop();
+});
+
+test('feast_combo：坏菜名、错误数量和混合选法不覆盖已有餐桌', async () => {
+  const { world, tools } = await makeWorld();
+  await tools.feast_combo({ dishes: ['麻婆豆腐', 'dongpo-pork'] });
+  for (const args of [
+    { dishes: ['麻婆豆腐', '不存在的菜'] },
+    { dishes: [] },
+    { dishes: '麻婆豆腐' },
+    { dishes: [''] },
+    { dishes: [null] },
+    { dishes: Array(13).fill('麻婆豆腐') },
+    { dishes: ['麻婆豆腐'], combo: '四菜一汤' },
+    { dishes: ['麻婆豆腐'], size: 2 },
+    { dishes: ['麻婆豆腐'], cuisine: '川菜' },
+    { combo: '四菜一汤', size: 2 },
+  ]) {
+    const result = await tools.feast_combo(args);
+    assert.equal(result.failed, true, JSON.stringify(args));
+    const menu = await world.webUi('zh').invoke('menu', 'list', [{}]);
+    assert.deepEqual(menu.pending.left, ['麻婆豆腐', '东坡肉']);
+  }
+  await world.stop();
+});
+
+test('feast_combo：同一道菜用名字和 id 重复点，只摆一份', async () => {
+  const { world, tools } = await makeWorld();
+  const result = await tools.feast_combo({ dishes: ['麻婆豆腐', 'mapo-tofu'] });
+  assert.ok(!result.failed, result.text);
+  const menu = await world.webUi('zh').invoke('menu', 'list', [{}]);
+  assert.equal(menu.pending.total, 1);
   await world.stop();
 });
 
@@ -308,6 +376,120 @@ test('feast_combo：限了菜系，一桌都在那个菜系里', async () => {
   const rows = r.text.split('\n').filter((l) => /^\d+\. /.test(l));
   assert.ok(rows.length >= 2, `该配出几道：${r.text}`);
   for (const row of rows) assert.ok(row.includes('川菜'), `混进了别的菜系：${row}`);
+  await world.stop();
+});
+
+test('自己做饭：默认关闭，日程关掉也保留来源说明，热改时立即切换', async () => {
+  const { world, tools } = await makeWorld({ cfg: { lifeEnabled: false } });
+  assert.equal(DEFAULTS.selfCooked, false);
+  assert.ok(world.envPromptVars().feast_meal_origin_block.includes('自己选菜只表示自己选来吃'));
+  const selected = await tools.feast_combo({ dishes: ['麻婆豆腐', '东坡肉'] });
+  assert.ok(selected.text.startsWith('摆好了：'), selected.text);
+  assert.ok(!selected.text.includes('你亲手做好了'));
+
+  // 同一桌不用重摆：开关热改后，下一道回执采用当前设置。
+  world.cfg.selfCooked = true;
+  assert.ok(world.envPromptVars().feast_meal_origin_block.includes('都视为你亲手做的'));
+  const first = await tools.feast_eat({});
+  assert.ok(first.text.includes('你亲手做的：麻婆豆腐'), first.text);
+  world.cfg.selfCooked = false;
+  const second = await tools.feast_eat({});
+  assert.ok(second.text.includes('自己选的：东坡肉'), second.text);
+  assert.ok(!second.text.includes('你亲手做的：'), second.text);
+  assert.ok(second.text.includes('自己选菜只表示自己选来吃'), second.text);
+  const history = await world.webUi('zh').invoke('history', 'list', []);
+  assert.deepEqual(history.recent.map((entry) => entry.by), ['self', 'self']);
+  await world.stop();
+});
+
+test('自己做饭：单点、随机和按菜系挑菜的回执都采用自己做的设定', async () => {
+  const { world, tools } = await makeWorld({ cfg: { selfCooked: true } });
+  for (const args of [{ dish: '麻婆豆腐' }, {}, { cuisine: '川菜' }]) {
+    const result = await tools.feast_eat(args);
+    assert.ok(!result.failed, result.text);
+    assert.ok(result.text.includes('你亲手做的：'), result.text);
+  }
+  const history = await world.webUi('zh').invoke('history', 'list', []);
+  assert.equal(history.total, 3);
+  assert.ok(history.recent.every((entry) => entry.by === 'self'));
+  await world.stop();
+});
+
+test('自己做饭：三种选餐方式都按自己做的讲，摆桌不记吃过，也不发送主人端菜事件', async () => {
+  for (const args of [{ combo: '一个人吃' }, { dishes: ['麻婆豆腐', '东坡肉'] }, { size: 2, cuisine: '川菜' }]) {
+    const { world, events, tools } = await makeWorld({ cfg: { selfCooked: true } });
+    const result = await tools.feast_combo(args);
+    assert.ok(!result.failed, result.text);
+    assert.ok(result.text.startsWith('你亲手做好了：'), result.text);
+    assert.equal(events.some((event) => event.type === 'feast.table'), false);
+    const history = await tools.feast_history({});
+    assert.ok(history.text.includes('吃过 0 回'), history.text);
+    const menu = await world.webUi('zh').invoke('menu', 'list', [{}]);
+    const named = await tools.feast_eat({ dish: menu.pending.left.at(-1) });
+    assert.ok(named.text.includes('你亲手做的：'), named.text);
+    assert.ok(named.text.includes('还剩 1 道'), named.text);
+    const next = await tools.feast_eat({});
+    assert.ok(next.text.includes('你亲手做的：'), next.text);
+    assert.ok(next.text.includes('这一桌吃完了'), next.text);
+    await world.stop();
+  }
+});
+
+test('自己做饭：重启后按当前配置讲剩菜，来源仍为自选', async () => {
+  const { world, tools, dataDir } = await makeWorld({ cfg: { selfCooked: true } });
+  await tools.feast_combo({ dishes: ['麻婆豆腐', '东坡肉'] });
+  await tools.feast_eat({ dish: '东坡肉' });
+  await world.stop();
+  const restarted = await makeWorld({ dataDir, cfg: { selfCooked: true } });
+  const result = await restarted.tools.feast_eat({});
+  assert.ok(result.text.includes('你亲手做的：麻婆豆腐'), result.text);
+  assert.ok(result.text.includes('这一桌吃完了'), result.text);
+  const history = await restarted.world.webUi('zh').invoke('history', 'list', []);
+  assert.deepEqual(history.recent.map((entry) => entry.by), ['self', 'self']);
+  await restarted.world.stop();
+});
+
+test('自己做饭：主人端同一道、面板端一桌和喂一口仍算主人投喂', async () => {
+  const { world, tools, events } = await makeWorld({ cfg: { selfCooked: true } });
+  await tools.feast_combo({ dishes: ['麻婆豆腐', '东坡肉'] });
+  await world.feedDish('mapo-tofu');
+  const single = await tools.feast_eat({ dish: '麻婆豆腐' });
+  assert.ok(single.text.includes('主人端来的：麻婆豆腐'), single.text);
+  assert.ok(!single.text.includes('你亲手做的：'), single.text);
+
+  const ui = world.webUi('zh');
+  const table = await ui.invoke('combo', 'serve', [{ dishes: ['mapo-tofu', 'dongpo-pork'] }]);
+  assert.equal(table.ok, true, table.message);
+  const first = await tools.feast_eat({});
+  const second = await tools.feast_eat({ dish: '东坡肉' });
+  for (const result of [first, second]) {
+    assert.ok(result.text.includes('主人端来的：'), result.text);
+    assert.ok(!result.text.includes('你亲手做的：'), result.text);
+  }
+  assert.equal(events.filter((event) => event.type === 'feast.feed').length, 1);
+  assert.equal(events.filter((event) => event.type === 'feast.table').length, 1);
+
+  await world.inviteTogether();
+  const bite = await world.biteTogether('mapo-tofu');
+  assert.equal(bite.ok, true, bite.message);
+  assert.ok(events.find((event) => event.type === 'feast.together' && event.meta.kind === 'bite').text.includes('主人喂你一口'));
+  const history = await ui.invoke('history', 'list', []);
+  assert.equal(history.total, 4);
+  assert.ok(history.recent.every((entry) => entry.by === 'owner'));
+  await world.stop();
+});
+
+test('自己做饭：饭点提醒及催饭按当前开关说明来源', async () => {
+  let t = MEAL_TIME;
+  const { world, events, runTick } = await makeWorld({ now: () => t, cfg: { selfCooked: true } });
+  await runTick();
+  assert.ok(events.find((event) => event.type === 'feast.meal').text.includes('都视为你亲手做的'));
+  world.cfg.selfCooked = false;
+  t += 41 * 60_000;
+  await runTick();
+  const retry = events.filter((event) => event.type === 'feast.meal').at(-1);
+  assert.equal(retry.meta.retry, true);
+  assert.ok(retry.text.includes('自己选菜只表示自己选来吃'), retry.text);
   await world.stop();
 });
 
@@ -740,12 +922,7 @@ test('一起吃饭：没开席时，喂/自己吃/摊牌这几件事都不该静
   await world.stop();
 });
 
-test('启动时把配置段缺的键补上（否则配置页显示的值和实际不一致）', async () => {
-  // 真机踩过：那台机器从 11-05 起 worlds.feast 只有 12→24 个键，
-  // 宿主的 /api/config 是拿落盘的段直接渲染（不合并 defaults），
-  // 于是 boolean 缺 → 显示 false、string 缺 → 空、integer 缺 → 0。
-  // 结果 lifeEnabled 显示「关闭」但她天天在过日子、lifeWardrobeOn 显示
-  // 「关闭」但联动在跑——用户想关一个「看着已关」的开关，第一步反而是去打开它。
+test('启动时只补宿主传入配置中缺失的键，已有值不覆盖', async () => {
   const { FeastWorld } = await import('../src/world.js');
   const dir = `.tmp/cfgfill/${Date.now().toString(36)}`;
   // 只给两个键，模拟一份「历来没补齐」的老配置。
@@ -805,12 +982,53 @@ test('启动时把配置段缺的键补上（否则配置页显示的值和实�
   await w3.stop();
 });
 
+test('宿主已合并默认值时不补写配置，保留 false、零和空字符串', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'mergedcfg-'));
+  dirs.push(dataDir);
+  const cfg = { ...DEFAULTS, enabled: true, lifeFreeFunOn: false, lifeFreeGraceMin: 0, lifeFreeMenu: '' };
+  const writes = [];
+  const world = feastDefinition.create({
+    cfg, dataDir, timezone: TZ,
+    persist: (patch) => writes.push(patch),
+  });
+  await world.start({ log: { info() {}, warn() {} }, async pushEvent(event) { return event; } });
+  assert.equal(writes.length, 0);
+  assert.equal(world.cfg.lifeFreeFunOn, false);
+  assert.equal(world.cfg.lifeFreeGraceMin, 0);
+  assert.equal(world.cfg.lifeFreeMenu, '');
+  assert.equal(world.cfg.lifeEnabled, DEFAULTS.lifeEnabled);
+  await world.stop();
+});
+
+test('默认值持久化失败仍可启动，不把磁盘缺键误报为界面故障', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'failedcfg-'));
+  dirs.push(dataDir);
+  const warnings = [];
+  const world = new FeastWorld({
+    cfg: { enabled: true, lifeFreeFunOn: false }, dataDir, timezone: TZ,
+    timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
+    persist: () => { throw new Error('模拟配置写入失败'); },
+  });
+  await world.start({ log: { info() {}, warn(message) { warnings.push(message); } }, async pushEvent(event) { return event; } });
+  assert.equal(world.cfg.lifeFreeFunOn, false);
+  assert.equal(world.cfg.lifeEnabled, DEFAULTS.lifeEnabled);
+  assert.ok(warnings.some((message) => message.includes('运行时仍使用默认值')));
+  assert.ok(!warnings.some((message) => message.includes('界面')));
+  await world.stop();
+});
+
 test('面板与配置声明齐全', async () => {
   const { world } = await makeWorld();
   const zh = world.webUi('zh');
   assert.equal(zh.label, '鱼的每一天');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealReminder'], '缺饭点开关');
   assert.ok(zh.config[0].schema.properties['worlds.feast.mealSlots']);
+  for (const language of ['zh', 'en']) {
+    const field = world.webUi(language).config[0].schema.properties['worlds.feast.selfCooked'];
+    assert.equal(field.type, 'boolean');
+    assert.equal(field['x-hot'], true);
+    assert.ok(field.title && field.description);
+  }
   assert.ok(zh.promptDocs[0].role === 'envPrompt');
   // 每个 DEFAULTS 键（enabled 除外，它归宿主管）都必须出现在某一张配置卡里，
   // 且卡里不许冒出 DEFAULTS 没有的键。config.js 的注释一直声称有这条守门，

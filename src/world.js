@@ -96,7 +96,7 @@ export const FEAST_TOOL_DECLS = [
   {
     name: 'feast_eat',
     tags: ['write'],
-    description: '吃一道菜。dish 填菜名或 id（例如 麻婆豆腐 / mapo-tofu）；留空就吃主人刚端来的那道，没有端来的就随机给你一道。回执里有这道菜的味道、香气、口感、余韵，还有"这一口"当下的样子——同一道菜每次吃都不一样。吃完跟主人说一句你尝到了什么。',
+    description: '吃一道菜。dish 填菜名或 id；留空吃当前桌上还没吃的下一道（自己选的或主人端来的），没摆菜才随机。想一次选几道先用 feast_combo。回执有味道、香气、口感、余韵和这一口的样子。吃完记自己的反应，跟主人说一句尝到了什么。',
     parameters: {
       type: 'object',
       properties: {
@@ -168,11 +168,12 @@ export const FEAST_TOOL_DECLS = [
   {
     name: 'feast_combo',
     tags: ['write'],
-    description: '开一桌：把一个套餐配成具体的几道菜，摆到你面前，一道一道吃。combo 填套餐名或 id（例如 四菜一汤 / 清爽一餐）；留空就按你的口味现配一桌。整桌摆上来之后，feast_eat 不带 dish 就会吃桌上还没吃的那道。',
+    description: '自己选一餐：combo 选现成套餐，dishes 点名几道菜，或用 size / cuisine 按口味现配。三种方式选一种。摆上桌不算吃过，再用 feast_eat 逐道吃；dish 留空吃下一道，也可点名先吃桌上某道。不必等主人端菜，一个人也能选套餐。',
     parameters: {
       type: 'object',
       properties: {
         combo: { type: 'string', description: '哪一套：套餐名或 id。留空 = 现配一桌。' },
+        dishes: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 12, description: '自己搭配：1–12 道准确菜名或 id，例如 ["麻婆豆腐","宫保鸡丁"]。与 combo、size、cuisine 不同时填写；不自动保存成套餐。' },
         size: { type: 'integer', description: '留空且没给 combo 时，现配几道（1–12，默认按配置）。', minimum: 1, maximum: 12 },
         cuisine: { type: 'string', description: '想"一桌同一个菜系"时填，例如 川菜 / 日料。' },
       },
@@ -326,6 +327,7 @@ export class FeastWorld {
   #lifeSegment = null;
   /** 今天的自由时间记录（叫醒过哪几档、记了几笔）。懒加载，见 #freePlay。 */
   #play = null;
+  #freePendingSave = null;
   /** 生图素材库快照：envPromptVars() 是同步的，不能 await，读这里。tick 里刷新（见 #lifeEnsure）。 */
   #wardrobe = emptyWardrobe();
   /** 真实天气快照：同样同步读、tick 里异步刷新。envPromptVars() 绝不能联网。
@@ -345,16 +347,15 @@ export class FeastWorld {
   #persist = null;
   /** 天气联网实现注入（仅测试用；生产走 weather.js 的全局 fetch）。 */
   #weatherFetch = null;
-  /** 构造时拿到的原始配置段（未合并 DEFAULTS）：用来判断哪些键是「盘上没有的」。 */
-  #rawCfg = null;
+  /** 宿主传入的配置段，可能已合并默认值。 */
+  #inputCfg = null;
 
   constructor(opts = {}) {
     this.id = ID;
     // 配置段可能是手写的、只补了半截：和默认值合并一层，缺的键按默认值走，
     // 不让一个漏写的 mealReminder 悄悄把饭点关掉。
-    // 原始那份也留着（#rawCfg）：启动补配置时要判断「盘上到底有没有这个键」。
-    this.#rawCfg = opts.cfg ?? {};
-    this.cfg = { ...DEFAULTS, ...this.#rawCfg };
+    this.#inputCfg = opts.cfg ?? {};
+    this.cfg = { ...DEFAULTS, ...this.#inputCfg };
     this.dataDir = opts.dataDir ?? process.cwd();
     this.language = 'zh';
     this.timezone = opts.timezone || 'Asia/Shanghai';
@@ -369,35 +370,19 @@ export class FeastWorld {
   }
 
   /**
-   * 把 `worlds.feast` 段里缺的键补成默认值（启动时做一次）。
-   *
-   * 为什么必须补：宿主的 `/api/config` 拿落盘的段**直接**渲染
-   * （`readGroupValues` 不合并 defaults）——
-   *   boolean 缺 → 界面显示 `false`
-   *   string  缺 → 显示空
-   *   integer 缺 → 显示 `0`
-   * 而 World 自己构造时是 `{ ...DEFAULTS, ...cfg }`，缺键按默认值走。
-   * 两边一凑，就成了「界面写着关闭、其实开着」。
-   *
-   * 真机实测：那台机器从 11-05 起 `worlds.feast` 只有 12→24 个键，
-   * 配置页 10 项显示错——`lifeEnabled` 显示 false 但她天天在过日子、
-   * `lifeWardrobeOn` 显示 false 但联动在跑。用户想关一个「看着已关」的
-   * 开关，第一步反而是去把它打开，行为完全反了。
-   *
-   * 只补**缺的**键，不覆盖用户已有的值；没有 persist（dry-mount、
-   * describe 生成）就跳过。绝不抛错：补不上也要能正常起。
+   * 对宿主传入的稀疏配置补充默认值，不覆盖已有值。
+   * 宿主可能已合并默认值，此时不写盘；磁盘缺键不代表运行时缺值。
+   * 没有 persist 或持久化失败时，运行时仍使用合并后的配置。
    */
   #ensureConfigSection() {
     if (!this.#persist) return;
     try {
-      // 判据用构造时拿到的**原始段**（this.#rawCfg），不能用 this.cfg：
-      // this.cfg 已经和 DEFAULTS 合并过，每个键都在，永远判不出「缺」。
-      const raw = this.#rawCfg ?? {};
+      const input = this.#inputCfg ?? {};
       const patch = {};
       for (const [key, value] of Object.entries(DEFAULTS)) {
         // enabled 归宿主管（部署决定），不在这里写。
         if (key === 'enabled') continue;
-        if (key in raw) continue;
+        if (key in input) continue;
         patch[key] = value;
       }
       const keys = Object.keys(patch);
@@ -405,11 +390,10 @@ export class FeastWorld {
       this.#persist(patch);
       // 活对象同步一次：persist 会深合并进同一份 cfg，这里只是保险。
       Object.assign(this.cfg, patch);
-      Object.assign(raw, patch);
+      Object.assign(input, patch);
       this.#host?.log?.info?.('鱼的每一天：配置段补齐了缺失的键', { keys });
     } catch (err) {
-      // 补不上就照默认值跑，功能不受影响，只是界面会继续显示错——记一条警告。
-      this.#host?.log?.warn?.('鱼的每一天：配置段没补齐（界面可能显示和实际不一致）', { err: msg(err) });
+      this.#host?.log?.warn?.('鱼的每一天：配置默认值未写入（运行时仍使用默认值）', { err: msg(err) });
     }
   }
 
@@ -432,6 +416,13 @@ export class FeastWorld {
 
   #askReaction() {
     return this.#cfgBool('askReaction');
+  }
+
+  /** 只改变自选饭菜的生活设定，实际来源仍用 self / owner 区分。回执现读配置，支持热改。 */
+  #mealOriginHint() {
+    return this.#cfgBool('selfCooked')
+      ? '饭菜来源：你自己选的一道菜、套餐或搭配的几道菜，都视为你亲手做的，可以自然地说自己做了什么。主人端来的菜、主人喂你的一口仍是主人投喂，不能说成自己做的。'
+      : '饭菜来源：自己选菜只表示自己选来吃，不指定是谁做的，不要仅凭自选就说成自己亲手做的。主人端来的菜、主人喂你的一口仍是主人投喂。';
   }
 
   #avoidRepeat() {
@@ -615,8 +606,9 @@ export class FeastWorld {
   envPromptVars() {
     // 天气是独立的：哪怕「她的一天」整个关着，也该让鱼知道外面什么天气。
     const weather = this.#weatherLine();
+    const mealOrigin = this.#mealOriginHint();
     try {
-      if (!this.#lifeOn()) return { feast_life_block: '', feast_weather_block: weather };
+      if (!this.#lifeOn()) return { feast_life_block: '', feast_weather_block: weather, feast_meal_origin_block: mealOrigin };
       const now = this.#now();
       const z = zonedNow(this.timezone, now);
       const today = this.#lifeToday?.date === z.date ? this.#lifeToday : null;
@@ -625,10 +617,11 @@ export class FeastWorld {
       return {
         feast_life_block: envBlock({ today, tomorrow, cfg: this.cfg, tz: this.timezone, nowMs: now, wardrobe }),
         feast_weather_block: weather,
+        feast_meal_origin_block: mealOrigin,
       };
     } catch (err) {
       this.#host?.log?.warn?.('鱼的每一天：她的一天环境提示词算不出来', { err: msg(err) });
-      return { feast_life_block: '', feast_weather_block: weather };
+      return { feast_life_block: '', feast_weather_block: weather, feast_meal_origin_block: mealOrigin };
     }
   }
 
@@ -738,13 +731,6 @@ export class FeastWorld {
         // 端来的可能是一桌：吃这一桌里**还没吃的那道**。
         const remaining = servedRemaining(this.#state);
         dish = remaining.length ? (lib.byId.get(remaining[0]) ?? null) : null;
-        if (dish) {
-          by = 'owner';
-          why = this.#state.served?.name
-            ? `（主人端来的这一桌：${this.#state.served.name}）`
-            : '（主人端来的这道）';
-          servedAt = this.#state.served.at;
-        }
       }
     }
 
@@ -768,13 +754,23 @@ export class FeastWorld {
     const miss = this.#rollMiss();
     const nth = eatCount(this.#state, dish.id);
     // 吃掉之前先记下这一桌还剩几道（recordEat 之后 served 可能已经收了）。
-    const tableBefore = by === 'owner' && this.#state.served?.ids?.length > 1 ? this.#state.served : null;
+    servedTtlMin = this.#cfgNumber('ownerFeedTTL', 1, 240);
+    const currentTable = servedStillFresh(this.#state, now, servedTtlMin)
+      && servedRemaining(this.#state).includes(dish.id) ? this.#state.served : null;
+    if (currentTable) {
+      by = currentTable.by === 'self' ? 'self' : 'owner';
+      why = by === 'self' ? '自己选的' : '主人端来的';
+      servedAt = currentTable.at;
+    }
+    const tableBefore = currentTable?.ids.length > 1 ? currentTable : null;
+    if (by === 'self' && this.#cfgBool('selfCooked')) why = '你亲手做的';
     const entry = recordEat(this.#state, { nowMs: now, dish, by, miss });
     await this.#save();
 
     const body = renderBite(dish, { nth, day, miss });
     const tail = [];
-    tail.push(`——${why ? `主人端来的：${dish.name}。` : `这是你第 ${nth + 1} 次吃${dish.name}。`}${miss ? '这一口不太合口味。' : ''}`);
+    tail.push(`——${why ? `${why}：${dish.name}。` : `这是你第 ${nth + 1} 次吃${dish.name}。`}${miss ? '这一口不太合口味。' : ''}`);
+    if (by === 'self') tail.push(this.#mealOriginHint());
     if (this.#askReaction()) {
       tail.push(`吃完用 feast_reaction 记一句（action 填 ${ACTIONS.join(' / ')}，note 一句具体的），然后跟主人说一句你尝到了什么——一句话就够。`);
     } else {
@@ -960,7 +956,8 @@ export class FeastWorld {
     // 融合点：饭点本来就在她的一天里，顺带说清她这会儿原本在做什么。
     const life = this.#lifeNowBrief(now);
     if (life) lines.push(life);
-    lines.push('挑一道现在想吃的：');
+    lines.push('这顿吃一道、选套餐还是自己搭配几道，由你按胃口决定。先给几道候选：');
+    lines.push(this.#mealOriginHint());
 
     // 天气联动：大太阳/热 → 偏清爽，下雨/冷 → 偏热乎。只用现成的 category/keywords
     // 粗筛，不改菜品契约；筛不到东西或天气没取到就退回全库，不硬凑。
@@ -975,7 +972,7 @@ export class FeastWorld {
     if (whint) lines.push(whint);
     lines.push(`以上是随手给的几道；想换就用 feast_menu（能按 ${this.#lib.cuisines.slice(0, 6).join('/')} 这类菜系筛）。`);
 
-    const tail = ['直接 feast_eat 吃一道（dish 填菜名或 id；不带参数也是随机）。'];
+    const tail = ['想吃一道就 feast_eat；想吃套餐先 feast_combos 看看，再 feast_combo（combo 填套餐名）；想自己搭配就 feast_combo（dishes 填几道菜名或 id），或填 size / cuisine 按口味现配。摆好后再用 feast_eat 逐道吃，不用为凑一桌勉强多吃。'];
     if (this.#askReaction()) {
       tail.push('吃完用 feast_reaction 记一句你自己觉得怎么样，然后跟主人说一句你吃到了什么——一句话就够，不用汇报。');
     }
@@ -1046,7 +1043,7 @@ export class FeastWorld {
    * 和 feedDish 分开而不是合成一个：两者的正文不一样（一道菜说"尝这一道"，
    * 一桌要说清几道、怎么个吃法、还剩几道），事件类型也不一样。
    */
-  async feedCombo(combo, dishes, seed) {
+  async feedCombo(combo, dishes, seed, { by = 'owner' } = {}) {
     this.#ensureStarted();
     if (!dishes?.length) return { ok: false, message: '这一桌配不出菜来。' };
 
@@ -1059,10 +1056,15 @@ export class FeastWorld {
       ids: dishes.map((d) => d.id),
       name: combo?.name ?? '一桌菜',
       comboId: combo?.id ?? '',
+      by,
     });
     await this.#save();
 
     const name = combo?.name ?? '一桌菜';
+    if (by === 'self') {
+      this.#host?.log?.info?.('鱼的每一天：她自己选了一餐', { combo: combo?.id, n: dishes.length });
+      return { ok: true, pending: this.#servedView() };
+    }
     const lines = [
       `【主人端来一桌菜 · ${name}】`,
       `主人摆了${dishes.length}道菜在你面前：`,
@@ -1082,7 +1084,7 @@ export class FeastWorld {
         origin: 'internal',
         ts: new Date(now).toISOString(),
         text: lines.join('\n'),
-        meta: { combo: combo?.id ?? '', name, ids: dishes.map((d) => d.id), seed: seed ?? '' },
+        meta: { combo: combo?.id ?? '', name, ids: dishes.map((d) => d.id), seed: seed ?? '', by },
       }, { deliver: true, trigger: 'flush' });
     } else {
       throw new Error('宿主没有 pushEvent，端不过去');
@@ -1123,6 +1125,7 @@ export class FeastWorld {
       tableName: s.name || '',
       comboId: s.comboId || '',
       isTable: !single,
+      by: s.by === 'self' ? 'self' : 'owner',
     };
   }
 
@@ -1628,10 +1631,27 @@ export class FeastWorld {
 
   async #comboTool(args) {
     const ref = typeof args?.combo === 'string' ? args.combo.trim() : '';
+    const explicit = args?.dishes !== undefined;
+    if (explicit && (ref || args?.size !== undefined || args?.cuisine)) {
+      return { text: 'dishes 点名搭配时，不要同时填写 combo、size 或 cuisine。', failed: true };
+    }
+    if (ref && (args?.size !== undefined || args?.cuisine)) {
+      return { text: 'combo 选择现成套餐时，不要同时填写 size 或 cuisine；想按口味现配请留空 combo。', failed: true };
+    }
     let combo;
     let seed = '';
 
-    if (ref) {
+    if (explicit) {
+      if (!Array.isArray(args.dishes) || !args.dishes.length || args.dishes.length > MAX_TABLE
+        || args.dishes.some((dish) => typeof dish !== 'string' || !dish.trim())) {
+        return { text: 'dishes 请填写 1–12 道准确菜名或 id。', failed: true };
+      }
+      const selected = args.dishes.map((dish) => findDishExact(this.#lib, dish));
+      const unknown = args.dishes.filter((dish, index) => !selected[index]);
+      if (unknown.length) return { text: `没找到这些菜：${unknown.join('、')}。先用 feast_menu 查准确菜名，原来的桌子没有改动。`, failed: true };
+      combo = { id: 'self-selected', name: '自己搭配的一餐', kind: 'custom', dishes: [...new Set(selected.map((dish) => dish.id))] };
+      seed = `${combo.id}|${dayIn(this.timezone, this.#now())}`;
+    } else if (ref) {
       const all = await this.#allCombos();
       const found = findCombo(all, ref) ?? findPreset(ref);
       if (!found) {
@@ -1654,14 +1674,15 @@ export class FeastWorld {
       return { text: `这一桌配不出菜来${missing.length ? `：${missing.join('；')}` : ''}。换个菜系或去掉条件试试。`, failed: true };
     }
 
-    const result = await this.feedCombo(combo, dishes, seed);
+    const result = await this.feedCombo(combo, dishes, seed, { by: 'self' });
     if (!result.ok) return { text: result.message, failed: true };
 
     const lines = [
-      `摆好了：${combo.name}，${dishes.length} 道${line ? `（${line}）` : ''}。`,
+      `${this.#cfgBool('selfCooked') ? '你亲手做好了' : '摆好了'}：${combo.name}，${dishes.length} 道${line ? `（${line}）` : ''}。`,
       ...dishes.map((d, i) => `${i + 1}. ${d.name}（${d.cuisine} · ${d.category}）`),
     ];
     if (missing.length) lines.push('', `少配的：${missing.join('；')}`);
+    lines.push('', this.#mealOriginHint());
     lines.push('', '用 feast_eat 一道一道吃（dish 留空就吃还没吃的那道）。吃完跟主人说一句你尝到了什么。');
     return { text: lines.join('\n') };
   }
@@ -1998,8 +2019,21 @@ export class FeastWorld {
     return { item, kind, where: `${item.activity}${place ? `（${place}）` : ''}` };
   }
 
+  async #flushFreeReminder() {
+    if (!this.#freePendingSave) return true;
+    try {
+      await writePlay(this.dataDir, this.#freePendingSave);
+      this.#freePendingSave = null;
+      return true;
+    } catch (err) {
+      this.#host?.log?.warn?.('鱼的每一天：提醒档位记录未写入，下一拍只重试保存', { err: msg(err) });
+      return false;
+    }
+  }
+
   /** 这一拍要不要说话；说哪种话由日程决定（见 #lifeNow / freeEventText）。 */
   async #freeTick(now) {
+    if (!await this.#flushFreeReminder()) return;
     if (!this.#freeOn()) return;
     const slots = parseSlots(this.cfg?.lifeFreeSlots ?? DEFAULTS.lifeFreeSlots);
     if (!slots.length) return;
@@ -2014,8 +2048,9 @@ export class FeastWorld {
     // 0.7.1 这里是纯静默，面板上只看到「今天没有了」，用户以为功能坏了——所以留痕。
     // 打开 lifeFreeBusyCall 之后这里不会再走到，忙时改用「报备」的说法。
     if (plan.action === 'skip') {
-      markFreeSkipped(play, now, plan.slot, String(item?.activity ?? ''));
-      await writePlay(this.dataDir, play);
+      markFreeSkipped(play, now, plan.slot, String(item?.activity ?? ''), plan.mergedSlots);
+      this.#freePendingSave = play;
+      await this.#flushFreeReminder();
       this.#host?.log?.info?.('鱼的每一天：这一档不算她的自由时间', {
         slot: plan.slot, doing: item?.activity, kind,
       });
@@ -2029,8 +2064,9 @@ export class FeastWorld {
       this.#host?.log?.warn?.('鱼的每一天：叫醒她过自己的时间失败', { err: msg(err) });
       return;
     }
-    markFreeNudged(play, now, plan.slot);
-    await writePlay(this.dataDir, play);
+    markFreeNudged(play, now, plan.slot, plan.mergedSlots);
+    this.#freePendingSave = play;
+    await this.#flushFreeReminder();
     this.#host?.log?.info?.('鱼的每一天：她自己的时间', {
       slot: plan.slot, kind, done: play.done.length,
     });
@@ -2253,6 +2289,7 @@ export class FeastWorld {
     this.#lifeTomorrow = null;
     this.#lifeSegment = null;
     this.#play = null;
+    this.#freePendingSave = null;
     this.#host?.log?.info?.('鱼的每一天：她的一天已清空', { days: n, plays: p });
     return `她的 ${n} 天日程${p ? `和 ${p} 天的自由时间记录` : ''}清了；吃过的记录、口味画像和主人攒的套餐都没动。`;
   }
@@ -2669,7 +2706,6 @@ export class FeastWorld {
   async start(host) {
     if (this.#started) return;
     this.#host = host;
-    // 先补配置段：宿主的配置页读的是落盘的段，缺键会显示和实际不一致。
     this.#ensureConfigSection();
     this.#lib = await loadDishes(host?.log);
     this.#state = await this.#load();
@@ -2718,6 +2754,7 @@ export class FeastWorld {
     }
     this.#started = false;
     this.#lifeSegment = null;
+    await this.#flushFreeReminder();
     try { await this.#save(); } catch { /* 停的时候存不上就算了 */ }
     this.#host = null;  }
 }

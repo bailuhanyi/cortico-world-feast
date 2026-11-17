@@ -108,8 +108,13 @@ export function planFreeTick(play, cfg, { nowMin = 0, kind = 'free' } = {}) {
 
   const slots = parseSlots(cfg?.lifeFreeSlots);
   // 用「键在不在」而不是真假值：`fired` 里存的是时刻，0 也是合法值，`!fired[hm]` 会把它当成没叫过。
-  const due = slots.find((s) => !(s.hm in play.fired) && nowMin >= s.min && nowMin - s.min <= grace);
-  if (due) return verdict(due.hm);
+  const pending = slots.filter((slot) => !(slot.hm in play.fired) && nowMin >= slot.min && nowMin - slot.min <= grace);
+  const due = pending.at(-1);
+  if (due) {
+    const plan = verdict(due.hm);
+    if (pending.length > 1) plan.mergedSlots = pending.slice(0, -1).map((slot) => slot.hm);
+    return plan;
+  }
 
   // 今天一次都没处理过（应用下午才开）：补一档，别让一整天白过。
   if (slots.length && Object.keys(play.fired).length === 0
@@ -120,14 +125,17 @@ export function planFreeTick(play, cfg, { nowMin = 0, kind = 'free' } = {}) {
 }
 
 /** 记下这一档已经处理过（叫过）。 */
-export function markFreeNudged(play, nowMs, slot) {
-  play.fired[slot] = nowMs;
+export function markFreeNudged(play, nowMs, slot, mergedSlots = []) {
+  for (const handledSlot of [...mergedSlots, slot]) play.fired[handledSlot] = nowMs;
 }
 
 /** 记下这一档没叫（她那时候被占着），留给面板解释。 */
-export function markFreeSkipped(play, nowMs, slot, doing = '') {
-  play.fired[slot] = nowMs;
-  play.skippedSlots = { ...(play.skippedSlots ?? {}), [slot]: { at: nowMs, doing: text(doing, 40) } };
+export function markFreeSkipped(play, nowMs, slot, doing = '', mergedSlots = []) {
+  markFreeNudged(play, nowMs, slot, mergedSlots);
+  play.skippedSlots ??= {};
+  for (const handledSlot of [...mergedSlots, slot]) {
+    play.skippedSlots[handledSlot] = { at: nowMs, doing: text(doing, 40) };
+  }
 }
 
 /** 记一笔做过的事。 */

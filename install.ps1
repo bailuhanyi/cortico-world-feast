@@ -144,6 +144,7 @@ $defaults = [ordered]@{
   mealMaxRetries    = 1
   tickSec           = 30
   askReaction    = $true
+  selfCooked        = $false
   dislikeChance     = 0
   avoidRepeat    = $true
   ownerFeedTTL      = 30

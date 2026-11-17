@@ -36,7 +36,7 @@
     },
     {
       "name": "feast_eat",
-      "description": "吃一道菜。dish 填菜名或 id（例如 麻婆豆腐 / mapo-tofu）；留空就吃主人刚端来的那道，没有端来的就随机给你一道。回执里有这道菜的味道、香气、口感、余韵，还有\"这一口\"当下的样子——同一道菜每次吃都不一样。吃完跟主人说一句你尝到了什么。",
+      "description": "吃一道菜。dish 填菜名或 id；留空吃当前桌上还没吃的下一道（自己选的或主人端来的），没摆菜才随机。想一次选几道先用 feast_combo。回执有味道、香气、口感、余韵和这一口的样子。吃完记自己的反应，跟主人说一句尝到了什么。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -185,13 +185,22 @@
     },
     {
       "name": "feast_combo",
-      "description": "开一桌：把一个套餐配成具体的几道菜，摆到你面前，一道一道吃。combo 填套餐名或 id（例如 四菜一汤 / 清爽一餐）；留空就按你的口味现配一桌。整桌摆上来之后，feast_eat 不带 dish 就会吃桌上还没吃的那道。",
+      "description": "自己选一餐：combo 选现成套餐，dishes 点名几道菜，或用 size / cuisine 按口味现配。三种方式选一种。摆上桌不算吃过，再用 feast_eat 逐道吃；dish 留空吃下一道，也可点名先吃桌上某道。不必等主人端菜，一个人也能选套餐。",
       "parameters": {
         "type": "object",
         "properties": {
           "combo": {
             "type": "string",
             "description": "哪一套：套餐名或 id。留空 = 现配一桌。"
+          },
+          "dishes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 12,
+            "description": "自己搭配：1–12 道准确菜名或 id，例如 [\"麻婆豆腐\",\"宫保鸡丁\"]。与 combo、size、cuisine 不同时填写；不自动保存成套餐。"
           },
           "size": {
             "type": "integer",
@@ -210,8 +219,8 @@
         "write"
       ],
       "summary": {
-        "zh": "开一桌：把一个套餐配成具体几道菜摆上来，一道一道吃。",
-        "en": "Set a whole table: resolve a set meal into dishes and serve them together."
+        "zh": "自己选一桌：可选套餐名，或用 dishes 点几道菜；也可按 size / cuisine 现配。选好后逐道用 feast_eat 吃。",
+        "en": "Choose a meal for yourself: select a combo, name dishes, or generate by size/cuisine. Eat each dish with feast_eat."
       }
     },
     {
@@ -497,8 +506,8 @@
     {
       "type": "feast.meal",
       "description": {
-        "zh": "到饭点（或上一顿没吃，到催的时间）：正文列出今天吃过什么和几道候选，让她自己挑一道吃。origin 是 internal，按她自己的作息投递，不是主人发的消息。在配置里可以整个关掉。",
-        "en": "A meal slot came due (or the previous meal was not eaten): lists what she ate today and a few candidates. Internal origin: her own schedule, not a message from the owner. Can be switched off entirely in config."
+        "zh": "到饭点（或上一顿没吃，到催的时间）：列出今天吃过什么和候选，让她按胃口选一道、选套餐或搭配几道。选餐不算吃过，再用 feast_eat 逐道吃。origin 是 internal，按她自己的作息投递，不是主人发的消息。在配置里可以整个关掉。",
+        "en": "A meal slot came due: offers candidates and lets her choose a single dish, a set meal, or several dishes of her own. Setting the table does not count as eating; feast_eat records each dish. Internal origin, her own schedule rather than an owner message. Can be switched off in config."
       },
       "trigger": "flush"
     },
@@ -556,7 +565,7 @@
       "key": "worlds.feast.env",
       "title": "鱼的每一天",
       "role": "envPrompt",
-      "content": "## 鱼的每一天\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n- 到饭点（默认 11:30、18:00）你会收到一条【鱼的每一天】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数就吃主人端来的那道，没有就随机）。别只回一句\"我吃了\"。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- 你也可以自己开一桌：`feast_combos` 看有哪些套餐（四菜一汤、清爽一餐……），`feast_combo` 开一桌。想一个人慢慢吃就别开一桌。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n\n{{feast_life_block}}\n\n{{feast_weather_block}}\n"
+      "content": "## 鱼的每一天\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n{{feast_meal_origin_block}}\n\n- 饭菜来源按当前饭点事件和工具回执里的说明来讲；设置变更后以新回执为准。选好、做好或摆上桌都不等于已经吃过，仍要用 `feast_eat` 才记入吃过的记录。\n- 到饭点（默认 11:30、18:00）你会收到一条【鱼的每一天】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数吃桌上还没吃的下一道，没有才随机）。选好或摆上桌不算吃过，别只回一句“我吃了”。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- **这顿吃几道由你决定**，一个人也可以选套餐：`feast_combos` 看现成套餐，再用 `feast_combo` 的 `combo` 选一套；想自己搭配就用 `dishes` 填几道准确菜名或 id；想按口味现配就填 `size` / `cuisine`。这三种方式选一种，不必每顿都吃一桌，也不用等主人端菜。\n- 自己选好的餐桌会直接在工具回执里列出，不会冒充主人端菜。再用 `feast_eat` 逐道吃（留空吃下一道，也可点名先吃哪道），每道吃完可记自己的反应；只吃想吃的，不用为清空餐桌勉强多吃。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n\n{{feast_life_block}}\n\n{{feast_weather_block}}\n"
     }
   ]
 }

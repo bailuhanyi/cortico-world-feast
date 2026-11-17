@@ -17,13 +17,13 @@ cd 'E:\deep seek\feed-world'
 node tools/validate-dishes.mjs      # 菜品库：字段、九维、类别、套话、菜系与文件名一致
 node tools/selfcheck.mjs            # 复刻 Coo 的干装载检查
 node tools/publish-check.mjs --online  # 市场收录口径 + npm 包名占用
-npm test                            # 13 个文件，366 项
+npm test                            # 13 个文件，386 项
 node tools/make-describe.mjs --check
 ```
 
 `prepublishOnly` 已经把这些串起来了：`npm publish` 之前会自动跑一遍，有任何一处失败就发不出去。这不是多余的谨慎——`describe.json` 与代码脱节、标签写了词表外的值、图标超 512KB，都会让市场那张卡片缺一块，而发出去之后改不了（只能发新版本）。
 
-当前状态（0.8.0）：**17 项通过、0 失败、4 条警告**（没截 `screenshots`；工具数 / 工具 token 在卡片上会标 yellow——0.7.0 之后工具涨到 16 个；解包 2.1MB；没查在线包名占用）；**366 项测试全绿**（13 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 42 · wardrobe 20 · life-world 50 · weather 10 · funlink 14 · maplink 20 · world 41 · panels 47）。
+当前状态（0.9.0）：**18 项通过、0 失败、3 条警告**（`--online` 跑法：没截 `screenshots`；工具数 / 工具 token 在卡片上会标 yellow——0.7.0 之后工具涨到 16 个；解包 2.1MB）；**386 项测试全绿**（13 个文件：dishes 25 · eat 14 · state 31 · combos 39 · together 13 · life 45 · wardrobe 20 · life-world 55 · weather 10 · funlink 14 · maplink 20 · world 53 · panels 47）。
 
 ---
 
@@ -118,7 +118,7 @@ npm publish --otp 123456
 npm pack --dry-run
 ```
 
-0.8.0 应该是 **61 个文件**，解包约 2.1MB（压缩后大小以 `npm pack --dry-run` 的输出为准）：
+0.9.0 应该是 **61 个文件**，解包约 2.1MB（压缩后大小以 `npm pack --dry-run` 的输出为准）：
 `package.json`、`src/`（含 28 个菜品 json + `src/life/` 13 个 js）、`dist/webui.js`、`describe.json`、
 `assets/icon.png`、`README.md`、`CHANGELOG.md`、`PUBLISHING.md`、`GUIDE.md`。
 
@@ -135,15 +135,15 @@ npm publish --otp 123456      # 没开 2FA、或用了带 bypass 2FA 的 granula
 
 这个包不是新包（0.1.1 / 0.2.0 / 0.3.0 / 0.4.0 / 0.5.0 / 0.6.0 / 0.6.1 / 0.6.2 / 0.6.3 / 0.7.0 / 0.7.1 / 0.7.2 都发过），所以**不需要** `--access public`（那是作用域包 `@you/xxx` 才要的）。
 
-`latest` 会从 **0.7.5** 走到 **0.8.0**。版本序列是 0.6.0 → … → 0.7.3 → 0.7.4 → 0.7.5 → 0.8.0。
+`latest` 会从 **0.8.0** 走到 **0.9.0**。版本序列是 0.6.0 → … → 0.7.3 → 0.7.4 → 0.7.5 → 0.8.0 → 0.9.0。
 （0.6.0 那会儿「0.7.0」这个号本来打算给套餐用、后来并进了 0.6.0；真正的 0.7.0 是后来「她的一天」才发的。）
 
 发完立刻验：
 
 ```powershell
-npm view cortico-world-feast version          # 应回 0.8.0
+npm view cortico-world-feast version          # 应回 0.9.0
 npm view cortico-world-feast cortico --json   # 应能看到 kind/api/displayName/tags/locales
-npm view cortico-world-feast dist-tags        # latest 应是 0.8.0
+npm view cortico-world-feast dist-tags        # latest 应是 0.9.0
 ```
 
 `npm view` 走的是 CDN，刚发出去可能有几十秒到几分钟的滞后，回 `E404` 先等一下再查。
@@ -186,8 +186,8 @@ gh issue create --repo Pal-AI-Lab/cortico-extensions `
 "screenshots": ["assets/screenshot-1.png", "assets/screenshot-2.png", "assets/screenshot-3.png"],
 ```
 
-7. 截图塞进**当前这一版**：现在的版本号是 `0.8.0`（还没发），加完直接 `npm publish` 就行；
-   要是 0.8.0 已经发出去了，就再升一位重发
+7. 截图塞进**当前这一版**：现在的版本号是 `0.9.0`（还没发），加完直接 `npm publish` 就行；
+   要是 0.9.0 已经发出去了，就再升一位重发
 
 截图改了就必须发新版本——市场按版本扫包，不发新版本改不了已收录的那一版。
 

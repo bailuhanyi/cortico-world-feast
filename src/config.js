@@ -40,6 +40,8 @@ export const DEFAULTS = Object.freeze({
   tickSec: 30,
   /** 吃完回执里要不要提醒她跟主人说一句。 */
   askReaction: true,
+  /** 自己选的菜是否按「她亲手做的」来讲；主人投喂不受影响。 */
+  selfCooked: false,
   /** 吃到不喜欢的概率（百分比）。0 = 每道都合口味。 */
   dislikeChance: 0,
   /** 同一道菜连着吃要不要拦一下，劝她换一道。 */
@@ -157,6 +159,8 @@ const ZH = {
     tickSecDesc: '多久检查一次是否到点；30 秒足够，改小没有意义。',
     askReaction: '吃完说一句',
     askReactionDesc: '开启时，吃饭回执和主人端菜的正文里都会带一句「跟主人说说你吃到了什么」。',
+    selfCooked: '自己选的菜当作自己做的',
+    selfCookedDesc: '开启后，她自己选的一道菜、套餐或搭配的几道菜，都按「自己亲手做的」来讲；关闭时只表示自己选来吃，不指定是谁做的。主人从面板端来的菜、一起吃饭时喂她的一口仍按主人投喂处理。改完后的饭点提醒和工具回执立即采用当前设置，吃过的记录不重写。',
     dislikeChance: '不合口味的概率',
     dislikeChanceDesc: '吃到不喜欢的百分比。0 = 每道都合口味（陪伴向默认）；调高会偶尔出现"这一口不太对付"。',
     avoidRepeat: '别连着吃同一道',
@@ -267,6 +271,8 @@ const EN = {
     tickSecDesc: 'How often to check the clock; 30 seconds is plenty.',
     askReaction: 'Tell the owner',
     askReactionDesc: 'When on, the eating receipt and owner-served dishes both ask her to say one line about how it tasted.',
+    selfCooked: 'Treat her own choices as home-cooked',
+    selfCookedDesc: 'When on, dishes she chooses herself, including set meals and generated selections, are described as cooked by her. When off, choosing food does not specify who cooked it. Owner-served dishes and bites remain from the owner. New reminders and tool receipts use the current setting immediately; eating history is unchanged.',
     dislikeChance: 'Chance of a miss',
     dislikeChanceDesc: 'Percentage chance a dish just does not land. 0 = everything lands.',
     avoidRepeat: 'Avoid repeats',
@@ -404,6 +410,12 @@ function configProperties(language = 'zh') {
           type: 'boolean',
           title: t.askReaction,
           description: t.askReactionDesc,
+          'x-hot': true,
+        },
+        [`${K}.selfCooked`]: {
+          type: 'boolean',
+          title: t.selfCooked,
+          description: t.selfCookedDesc,
           'x-hot': true,
         },
         [`${K}.dislikeChance`]: {
@@ -656,7 +668,7 @@ export const CONFIG_GROUPS = Object.freeze([
     key: 'meal',
     pick: (k) => k === 'mealReminder' || k === 'mealSlots' || k === 'mealGraceMin'
       || k === 'mealRetryMin' || k === 'mealMaxRetries' || k === 'tickSec'
-      || k === 'askReaction' || k === 'dislikeChance' || k === 'avoidRepeat'
+      || k === 'askReaction' || k === 'selfCooked' || k === 'dislikeChance' || k === 'avoidRepeat'
       || k === 'ownerFeedTTL' || k === 'menuSize',
   },
   {

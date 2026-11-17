@@ -380,6 +380,46 @@ test('free.planFreeTick：到点叫一次，同一档不重复；过了容错就
   assert.equal(r.action, 'none');
 });
 
+test('free.planFreeTick：积压档位合并到最近一档，保存后不会连续补发', () => {
+  const cfg = { lifeFreeSlots: '10:00,10:05,10:10,11:00', lifeFreeGraceMin: 20 };
+  const play = newPlay('2026-11-05');
+  const plan = planFreeTick(play, cfg, { nowMin: 610, kind: 'free' });
+  assert.equal(plan.slot, '10:10');
+  assert.deepEqual(plan.mergedSlots, ['10:00', '10:05']);
+  assert.deepEqual(play.fired, {});
+  markFreeNudged(play, 1, plan.slot, plan.mergedSlots);
+  const restored = cleanPlay(JSON.parse(JSON.stringify(play)), play.date);
+  assert.deepEqual(Object.keys(restored.fired).sort(), ['10:00', '10:05', '10:10']);
+  assert.equal(planFreeTick(restored, cfg, { nowMin: 611, kind: 'free' }).action, 'none');
+  assert.equal(planFreeTick(restored, cfg, { nowMin: 660, kind: 'free' }).slot, '11:00');
+});
+
+test('free.planFreeTick：睡醒后才合并档位，忙时跳过也处理全部积压档位', () => {
+  const cfg = { lifeFreeSlots: '10:00,10:05,10:10', lifeFreeGraceMin: 20 };
+  const play = newPlay('2026-11-05');
+  assert.equal(planFreeTick(play, cfg, { nowMin: 610, kind: 'asleep' }).action, 'none');
+  assert.deepEqual(play.fired, {});
+  const plan = planFreeTick(play, cfg, { nowMin: 612, kind: 'busy' });
+  assert.equal(plan.action, 'skip');
+  assert.equal(plan.slot, '10:10');
+  markFreeSkipped(play, 1, plan.slot, '上班', plan.mergedSlots);
+  assert.deepEqual(Object.keys(play.skippedSlots).sort(), ['10:00', '10:05', '10:10']);
+  assert.equal(planFreeTick(play, cfg, { nowMin: 613, kind: 'free' }).action, 'none');
+});
+
+test('free.planFreeTick：合并不包含已处理档位或窗口外档位，零时刻记录仍有效', () => {
+  const cfg = { lifeFreeSlots: '09:00,10:00,10:05,10:10', lifeFreeGraceMin: 20 };
+  const play = newPlay('2026-11-05');
+  markFreeNudged(play, 0, '10:05');
+  const plan = planFreeTick(play, cfg, { nowMin: 610, kind: 'free' });
+  assert.equal(plan.slot, '10:10');
+  assert.deepEqual(plan.mergedSlots, ['10:00']);
+  markFreeNudged(play, 1, plan.slot, plan.mergedSlots);
+  assert.equal(play.fired['10:05'], 0);
+  assert.ok(!('09:00' in play.fired));
+  assert.equal(planFreeTick(play, cfg, { nowMin: 611, kind: 'free' }).action, 'none');
+});
+
 test('free.planFreeTick：睡觉不叫，也不把这一档记成已处理', () => {
   const cfg = { lifeFreeSlots: '10:00', lifeFreeGraceMin: 20 };
   const play = newPlay('2026-11-05');

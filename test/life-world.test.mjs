@@ -11,7 +11,7 @@
  * 临时目录故意不删：见 life.test.mjs 末尾的说明（删目录会被沙箱当批量删除拦下）。
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rmdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -19,7 +19,7 @@ import { test, report } from './harness.mjs';
 import { FeastWorld, FEAST_TOOL_DECLS } from '../src/world.js';
 import { feastDefinition } from '../src/definition.js';
 import { DEFAULTS, EVENT_LIFE_FREE, EVENT_LIFE_MOMENT, EVENT_LIFE_PLAN } from '../src/config.js';
-import { addDays, dateLabel, listDays, readDay, readPlay, templateDay, writeDay } from '../src/life/index.js';
+import { addDays, dateLabel, listDays, playPath, readDay, readPlay, templateDay, writeDay } from '../src/life/index.js';
 import { clearWardrobeCache } from '../src/life/wardrobe.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -282,8 +282,10 @@ test('envPromptVars：关掉就是一整段空字符串，而不是 null / 抛�
   const { world } = await makeWorld({ cfg: { lifeEnabled: false } });
   const vars = world.envPromptVars();
   // 0.7.3 加了天气块：默认关（没填城市）时它也是空串，和 feast_life_block 同构。
-  // 模板里有两个 {{...}} 占位符，两个变量都得给（空串即可），缺一个宿主会留下字面量。
-  assert.deepEqual(vars, { feast_life_block: '', feast_weather_block: '' },
+  // 日程和天气关掉仍要提供变量；独立的饭菜来源说明继续保留。
+  assert.equal(typeof vars.feast_meal_origin_block, 'string');
+  assert.ok(vars.feast_meal_origin_block.includes('自己选菜只表示自己选来吃'));
+  assert.deepEqual(vars, { feast_life_block: '', feast_weather_block: '', feast_meal_origin_block: vars.feast_meal_origin_block },
     '关掉时该给空字符串（返回 null 会把整份 ENV_PROMPT 一起省略）');
   await world.stop();
 });
@@ -745,6 +747,110 @@ test('自由时间：日程说在睡觉/上班时不叫，自由时段才叫', a
     assert.equal(n, want, `${label}（${slot}）叫了 ${n} 次，该是 ${want}`);
     await world.stop();
   }
+});
+
+test('自由时间：积压档位只发最近一档，重启后不补发旧档，后续档照常叫', async () => {
+  const clock = { t: Date.parse(DAY + 'T21:12:00+08:00') };
+  const cfg = { lifeFreeSlots: '21:00,21:05,21:10,22:00' };
+  const first = await makeWorld({ now: () => clock.t, cfg });
+  await first.runTick();
+  await first.runTick();
+  assert.equal(first.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  assert.equal(first.lifeEvents(EVENT_LIFE_FREE)[0].meta.slot, '21:10');
+  const saved = await readPlay(first.dataDir, DAY);
+  assert.deepEqual(Object.keys(saved.fired).sort(), ['21:00', '21:05', '21:10']);
+  await first.world.stop();
+  const restarted = await makeWorld({ now: () => clock.t, cfg, dataDir: first.dataDir });
+  await restarted.runTick();
+  assert.equal(restarted.lifeEvents(EVENT_LIFE_FREE).length, 0);
+  clock.t = Date.parse(DAY + 'T22:02:00+08:00');
+  await restarted.runTick();
+  assert.equal(restarted.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  assert.equal(restarted.lifeEvents(EVENT_LIFE_FREE)[0].meta.slot, '22:00');
+  await restarted.world.stop();
+});
+
+test('自由时间：发送失败不消耗积压档位，下一拍成功后只叫一次', async () => {
+  const setup = await makeWorld({
+    now: () => Date.parse(DAY + 'T21:12:00+08:00'),
+    cfg: { lifeFreeSlots: '21:00,21:05,21:10' },
+  });
+  const push = setup.host.pushEvent;
+  let attempts = 0;
+  setup.host.pushEvent = async (event, options) => {
+    if (event.type === EVENT_LIFE_FREE && ++attempts === 1) throw new Error('模拟发送失败');
+    return push(event, options);
+  };
+  await setup.runTick();
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 0);
+  assert.equal(await readPlay(setup.dataDir, DAY), null);
+  await setup.runTick();
+  await setup.runTick();
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  assert.equal(attempts, 2);
+  const saved = await readPlay(setup.dataDir, DAY);
+  assert.deepEqual(Object.keys(saved.fired).sort(), ['21:00', '21:05', '21:10']);
+  await setup.world.stop();
+});
+
+test('自由时间：送达后写盘失败只重试保存，关闭提醒也会补存，重启不重叫', async () => {
+  const now = () => Date.parse(DAY + 'T21:02:00+08:00');
+  const cfg = { lifeFreeSlots: '21:00' };
+  const setup = await makeWorld({ now, cfg });
+  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  const warnings = [];
+  setup.host.log.warn = (message) => warnings.push(message);
+  await mkdir(blockedPath);
+  await setup.runTick();
+  await setup.runTick();
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  assert.equal(await readPlay(setup.dataDir, DAY), null);
+  assert.ok(warnings.some((message) => message.includes('重试保存')));
+  await rmdir(blockedPath);
+  setup.world.cfg.lifeFreeEnabled = false;
+  await setup.runTick();
+  const saved = await readPlay(setup.dataDir, DAY);
+  assert.ok(saved && '21:00' in saved.fired, '没有新提醒时也应重试保存已送达记录');
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  await setup.world.stop();
+  const restarted = await makeWorld({ now, cfg, dataDir: setup.dataDir });
+  await restarted.runTick();
+  assert.equal(restarted.lifeEvents(EVENT_LIFE_FREE).length, 0);
+  await restarted.world.stop();
+});
+
+test('自由时间：停止前补存已送达记录，重启后不重叫', async () => {
+  const now = () => Date.parse(DAY + 'T21:02:00+08:00');
+  const cfg = { lifeFreeSlots: '21:00' };
+  const setup = await makeWorld({ now, cfg });
+  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  await mkdir(blockedPath);
+  await setup.runTick();
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  await rmdir(blockedPath);
+  await setup.world.stop();
+  const saved = await readPlay(setup.dataDir, DAY);
+  assert.ok(saved && '21:00' in saved.fired);
+  const restarted = await makeWorld({ now, cfg, dataDir: setup.dataDir });
+  await restarted.runTick();
+  assert.equal(restarted.lifeEvents(EVENT_LIFE_FREE).length, 0);
+  await restarted.world.stop();
+});
+
+test('自由时间：清空日程后不恢复此前保存失败的旧记录', async () => {
+  const setup = await makeWorld({
+    now: () => Date.parse(DAY + 'T21:02:00+08:00'), cfg: { lifeFreeSlots: '21:00' },
+  });
+  await setup.tools.feast_life_play({ activity: '旧记录' });
+  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  await mkdir(blockedPath);
+  await setup.runTick();
+  await setup.world.webUi('zh').storage.find((item) => item.key === 'feast-life').clear();
+  await rmdir(blockedPath);
+  setup.world.cfg.lifeFreeSlots = '';
+  await setup.runTick();
+  assert.equal(await readPlay(setup.dataDir, DAY), null);
+  await setup.world.stop();
 });
 
 test('自由时间：叫醒事件带上日程里那一段、菜单和记账指引', async () => {
