@@ -222,7 +222,7 @@ function fakeClock(clock) {
   return () => { Date.now = realTime; };
 }
 
-async function mountPanels({ language = 'zh', failList = false, clock = null, cfg = {} } = {}) {
+async function mountPanels({ language = 'zh', failList = false, clock = null, cfg = {}, todayList = null, failThread = false, failRetry = false } = {}) {
   // 每次一个独立目录：共用一个的话，上一个用例端过的菜、吃过的记录会漏到下一个用例里，
   // 于是"刚端上来"和"早就吃完了"混在一起，测出来的东西是假的。
   const dataDir = `.tmp/panels/${panelRun}/${panelSeq += 1}`;
@@ -263,6 +263,22 @@ async function mountPanels({ language = 'zh', failList = false, clock = null, cf
       const record = { method, args };
       invocations.push(record);
       if (failList && method === 'list') throw new Error('boom');
+      if (ctx.panelId === 'today' && method === 'list' && todayList) {
+        const base = await decl.invoke(ctx.panelId, method, args ?? []);
+        const result = typeof todayList === 'function' ? todayList(base) : { ...base, ...todayList };
+        record.result = result;
+        return result;
+      }
+      if (ctx.panelId === 'today' && method === 'plan' && args?.[0]?.retry) {
+        const result = { ok: true };
+        record.result = result;
+        return result;
+      }
+      if (ctx.panelId === 'today' && ['thread', 'recovery'].includes(method)) {
+        const result = { ok: true };
+        record.result = result;
+        return result;
+      }
       // 面板 id 直接透传：写死成 menu/history 的话，套餐面板的调用会打到菜单面板上。
       const result = await decl.invoke(ctx.panelId, method, args ?? []);
       record.result = result;
@@ -296,6 +312,7 @@ test('bundle 形状对：面板 id 与服务端声明一一对上，mount 都是
     assert.equal(typeof b.default.panels[id].mount, 'function', `${id} 缺 mount`);
   }
   assert.ok(!Array.isArray(b.default.panels));
+  assert.equal(b.default.panels.today, b.default.panels['today'], '按 panel id 取菜单导出，避免依赖列表位置');
 });
 
 test('菜单面板：挂载后拉到菜、画出首屏卡片、注入了样式', async () => {
@@ -1137,6 +1154,77 @@ test('套餐面板：英文界面的按钮和标题是英文', async () => {
  * 今天面板要靠服务端已经有今天的日程。启动时 #lifeEnsure 会用模板兜底落一天，
  * 但这条路径依赖「今天没有文件」；每个用例一个独立目录，所以天然满足。
  */
+test('今天首页：摘要区分计划与事实，线程和存储操作调用新契约', async () => {
+  const { mount, world, panels, root, invocations } = await mountPanels({ todayList: {
+    actual: [{ at: 1, hm: '11:30', kind: 'meal', text: '午饭', note: '一起吃' }],
+    upcoming: [{ start: '13:00', activity: '散步' }],
+    pending: { name: '水果' }, together: { invite: { at: 1 } },
+    planRetryAvailable: false,
+    storageIssues: [{ key: 'state', label: '状态文件', status: 'error', message: '读取失败', backupAvailable: true }],
+    threads: { items: [{ id: 'th-1', text: '买花', sourceDate: '2026-11-05', sourceActivity: '路过花店', source: 'coo', status: 'active' }] },
+  } });
+  try {
+    await mount('today');
+    assert.ok(root.textContent.includes('今天留下的事'));
+    assert.ok(root.textContent.includes('午饭') && root.textContent.includes('一起吃'));
+    assert.ok(root.textContent.includes('她邀请你一起吃饭'));
+    assert.ok(root.textContent.includes('这是计划，不代表事情已经发生'));
+    assert.ok(root.textContent.includes('水果') || root.textContent.includes('有一份餐点'));
+    assert.ok(root.textContent.includes('她留下: 买花'));
+    const threadInput = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.maxLength === 120);
+    assert.ok(threadInput, '缺有 120 字上限的想法输入框');
+    threadInput.value = '周末买花'; threadInput.fire('input');
+    root.findByText('记下想法').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'thread'), '新增 thread 调用');
+    assert.deepEqual(invocations.find((i) => i.method === 'thread').args, [{ text: '周末买花' }]);
+    await waitFor(() => invocations.filter((i) => i.method === 'list').length >= 2, '新增 thread 后刷新完成');
+    const reload = root.findByText('重新读取');
+    reload.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'recovery'), '重新读取调用');
+    assert.deepEqual(invocations.find((i) => i.method === 'recovery').args, [{ key: 'state', action: 'reload' }]);
+    const restore = root.findByText('从备份恢复');
+    assert.ok(restore, '有备份时应显示恢复按钮');
+    const savedWindow = globalThis.window;
+    globalThis.window = { ...(savedWindow ?? {}), confirm: () => true };
+    restore.fire('click');
+    await waitFor(() => invocations.filter((i) => i.method === 'recovery').length > 1, '备份恢复调用');
+    assert.deepEqual(invocations.filter((i) => i.method === 'recovery').at(-1).args, [{ key: 'state', action: 'restore' }]);
+    if (savedWindow) globalThis.window = savedWindow; else delete globalThis.window;
+  } finally { panels.lastHandle?.dispose?.(); }
+  await world.stop();
+});
+
+test('今天面板：thread 完成与搁下、pending 重发走正确动作', async () => {
+  const { mount, world, panels, root, invocations } = await mountPanels({ todayList: {
+    tomorrow: { date: '2026-11-06', source: 'pending', items: [] },
+    planRetryAvailable: true,
+    threads: { items: [
+      { id: 'a', text: '读书', sourceDate: '2026-11-05', source: 'owner', status: 'active' },
+      { id: 'b', text: '散步', sourceDate: '2026-11-05', source: 'coo', status: 'active' },
+    ] },
+  } });
+  const savedWindow = globalThis.window;
+  globalThis.window = { ...(savedWindow ?? {}), confirm: () => true };
+  try {
+    await mount('today');
+    assert.ok(root.findAll((n) => n.tagName === 'BUTTON' && n.textContent.includes('已经跟她说了')).length, '空 items 的 pending 仍应被识别');
+    assert.ok(root.findByText('重新发送'), '10 分钟后才有的重发动作应显示');
+    root.findByText('重新发送').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'plan' && i.args[0]?.retry), 'plan retry 调用');
+    assert.deepEqual(invocations.find((i) => i.method === 'plan' && i.args[0]?.retry).args, [{ retry: true }]);
+    root.findByText('完成').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'thread' && i.args[0]?.status === 'done'), 'thread done 调用');
+    const drop = root.findByText('搁下');
+    assert.ok(drop, '第二条活跃 thread 应仍可操作');
+    drop.fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'thread' && i.args[0]?.status === 'dropped'), 'thread dropped 调用');
+  } finally {
+    if (savedWindow) globalThis.window = savedWindow; else delete globalThis.window;
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
 test('今天面板：画出今天的时间线和「此刻」，此刻那一段被点亮', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, invocations, world, panels } = await mountPanels({ clock });
@@ -1427,6 +1515,102 @@ test('今天面板：自由时间关着时只说一句，不硬画进度', async
     const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('她自己的时间'));
     assert.ok(block, '缺自由时间那一块');
     assert.ok(block.textContent.includes('关着'), `关着时该有说明：${block.textContent.slice(0, 100)}`);
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：关闭上班先预览确认，再提交版本并支持撤销', async () => {
+  const savedWindow = globalThis.window;
+  const confirmations = [];
+  globalThis.window = { ...(savedWindow ?? {}), confirm: (message) => { confirmations.push(message); return true; } };
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels, invocations } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    assert.ok(block, '没有「今天上不上班」那一块');
+    // 周四模板是上班日：上班那个键是当前项（被禁用），不上班那个键可点。
+    const onBtn = block.findByText('上班');
+    const offBtn = block.findByText('不上班');
+    assert.ok(onBtn && offBtn, `两个键没画全：${block.textContent.slice(0, 120)}`);
+    assert.equal(onBtn.disabled, true, '当前状态那个键该是禁用的（不然点了没变化，像没反应）');
+    offBtn.fire('click');
+    await waitFor(() => invocations.filter((i) => i.method === 'work').length >= 2, '预览后提交');
+    const calls = invocations.filter((i) => i.method === 'work');
+    assert.equal(calls[0].args[0].action, 'preview');
+    assert.equal(typeof calls[1].args[0].revision, 'string');
+    assert.ok(confirmations[0].includes('通勤'));
+    await waitFor(() => Boolean(root.findByText('撤销关闭上班')), '显示撤销');
+    root.findByText('撤销关闭上班').fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'work' && i.args[0].action === 'undo'), '执行撤销');
+  } finally {
+    panels.lastHandle?.dispose?.();
+    if (savedWindow) globalThis.window = savedWindow; else delete globalThis.window;
+    await world.stop();
+  }
+});
+
+test('今天面板：不上班的日子，按钮翻到「不上班」那一侧', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock });
+  try {
+    await writeDay(world.dataDir, templateDay('2026-11-05', { now: clock.now, work: false, dayTypeId: 'restday' }));
+    const root = await mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    assert.ok(block, '没有「今天上不上班」那一块');
+    assert.equal(block.findByText('不上班').disabled, true, '不上班那天该把「不上班」标成当前');
+    assert.equal(block.findByText('上班').disabled, false, '上班那个键该能点');
+  } finally {
+    panels.lastHandle?.dispose?.();
+  }
+  await world.stop();
+});
+
+test('今天面板：说明今天是「她定的饭点」还是「配置的饭点」', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const first = await mountPanels({ clock });
+  try {
+    await writeDay(first.world.dataDir, templateDay('2026-11-05', {
+      now: clock.now, dayTypeId: 'workday', mealSlots: ['12:30', '19:40'],
+    }));
+    const root = await first.mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    assert.ok(block, '没有那一块');
+    assert.ok(block.textContent.includes('饭点由她定'), `没说她定过饭点：${block.textContent.slice(0, 160)}`);
+    assert.ok(block.textContent.includes('12:30'), '没把她定的档位写出来');
+    assert.ok(block.textContent.includes('19:40'));
+  } finally {
+    first.panels.lastHandle?.dispose?.();
+  }
+  await first.world.stop();
+
+  // 她没定的日子：说清是配置那组，不是她定的。
+  const second = await mountPanels({ clock });
+  try {
+    const root = await second.mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    assert.ok(block.textContent.includes('饭点走配置'), `没说清这组是配置来的：${block.textContent.slice(0, 160)}`);
+  } finally {
+    second.panels.lastHandle?.dispose?.();
+  }
+  await second.world.stop();
+});
+
+test('今天面板：日程还没写时，上班开关给一句说明而不是两个点了没用的键', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels } = await mountPanels({ clock });
+  try {
+    // 删掉今天的日程 = 还没想好这一天怎么过。
+    const { rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    await rm(join(world.dataDir, 'feast', 'life', '2026-11-05.json'), { force: true });
+    const root = await mount('today');
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    assert.ok(block, '没有那一块');
+    assert.ok(block.textContent.includes('还没有日程'), `该给一句说明：${block.textContent.slice(0, 140)}`);
+    assert.ok(!block.findByText('上班'), '没有日程时不该给一个点不动的键');
   } finally {
     panels.lastHandle?.dispose?.();
   }

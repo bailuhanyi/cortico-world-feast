@@ -8,11 +8,14 @@
  * 这里没有「配置」：所有开关都走 worlds.feast.*（ctx.cfg，热改），
  * 日型表是代码里的常量 + 可选覆盖，不再另开一份 config.json。
  */
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readStoredJson, writeStoredJson } from '../storage.js';
 
 import { addDays, isDateKey } from './time.js';
-import { DEFAULT_DAY_TYPES, normalizeDayTypes, normalizeItems, pickDayType, templateItems } from './schedule.js';
+import {
+  cleanMealSlots, DEFAULT_DAY_TYPES, isWorkDayType, normalizeDayTypes, normalizeItems, pickDayType, templateItems,
+} from './schedule.js';
 import { cleanPlay, isAsleepActivity } from './free.js';
 
 /** 面板的「往期」最多翻多少天。 */
@@ -32,12 +35,22 @@ const str = (v, max) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().s
  * 不信任外部（Coo 交回的 JSON、手改过的文件）：规整成一天的形状。
  * pending 是「已经请她写、还没交回」的占位，items 必须是空的，
  * 否则 normalizeItems([]) 会补出「在家」一整天，看起来像她已经想好了。
+ *
+ * `work` 是「今天上不上班」：不写就是按日型推（上班日/加班日/摸鱼日 = 上班）。
+ * 她交回的日型和这个标记对不上时**以标记为准**——主人翻了开关说今天不上班，
+ * 日程里就不该还写着通勤。`mealSlots` 是她自己定的饭点，空数组 = 没定，用配置兜底。
  */
 export function cleanDay(raw, date, opts = {}) {
   const types = normalizeDayTypes(opts.types ?? DEFAULT_DAY_TYPES);
   const src = raw && typeof raw === 'object' ? raw : {};
   const wanted = str(src.dayType?.id ?? src.dayType, 40) || str(src.dayTypeId, 40);
-  const type = pickDayType(types, date, wanted);
+  const rand = typeof opts.rand === 'function' ? opts.rand : Math.random;
+  let type = pickDayType(types, date, wanted, rand);
+  const work = typeof src.work === 'boolean' ? src.work : isWorkDayType(type);
+  if (isWorkDayType(type) !== work) {
+    // 标记和日型不一致：换一个同类的日型（优先按星期，挑不到就用该类的第一个）。
+    type = pickDayType(types, date, '', rand, work);
+  }
   const source = ['coo', 'template', 'pending', 'manual'].includes(src.source) ? src.source : 'manual';
   const changes = Array.isArray(src.changes)
     ? src.changes.slice(-20).filter((c) => c && typeof c === 'object').map((c) => ({
@@ -49,9 +62,20 @@ export function cleanDay(raw, date, opts = {}) {
   return {
     date,
     dayType: { id: type.id, name: type.name },
+    work,
     title: str(src.title, 60),
     mood: str(src.mood, 40),
     items: source === 'pending' ? [] : normalizeItems(src.items, opts.maxItems ?? 40),
+    mealSlots: cleanMealSlots(src.mealSlots),
+    ...(src.workUndo && typeof src.workUndo === 'object' && Array.isArray(src.workUndo.items)
+      && typeof src.workUndo.expected === 'string' ? {
+        workUndo: {
+          work: src.workUndo.work === true,
+          dayType: { id: str(src.workUndo.dayType?.id, 40), name: str(src.workUndo.dayType?.name, 20) },
+          items: normalizeItems(src.workUndo.items, 40),
+          expected: src.workUndo.expected.slice(0, 100000),
+        },
+      } : {}),
     source,
     by: str(src.by, 20),
     generatedAt: Number(src.generatedAt) || Date.now(),
@@ -66,36 +90,32 @@ export function pendingDay(date, type, now = Date.now()) {
 
 /** Coo 没写（或今天还没有）时的兜底，保证这一天总有内容。 */
 export function templateDay(date, opts = {}) {
-  const type = pickDayType(opts.types ?? DEFAULT_DAY_TYPES, date, opts.dayTypeId ?? '', opts.rand);
+  const type = pickDayType(opts.types ?? DEFAULT_DAY_TYPES, date, opts.dayTypeId ?? '', opts.rand, opts.work ?? null);
   return cleanDay({
     date,
     dayType: type,
+    work: opts.work,
     title: '',
     mood: '',
     items: templateItems(type),
+    mealSlots: opts.mealSlots,
     source: 'template',
     by: opts.by ?? 'timer',
     generatedAt: opts.now ?? Date.now(),
-  }, date, opts);
+  }, date, { ...opts, maxItems: 40 });
 }
 
 export async function readDay(dataDir, date) {
   if (!isDateKey(date)) return null;
-  try {
-    const raw = JSON.parse(await readFile(dayPath(dataDir, date), 'utf8'));
-    return cleanDay(raw, date);
-  } catch {
-    return null;
-  }
+  const raw = await readStoredJson(dayPath(dataDir, date));
+  return raw === null ? null : cleanDay(raw, date);
 }
 
 export async function writeDay(dataDir, day) {
   if (!day || !isDateKey(day.date)) throw new Error('写日程要先有合法日期');
   const file = dayPath(dataDir, day.date);
   await mkdir(lifeDir(dataDir), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, JSON.stringify(day, null, 2), 'utf8');
-  await rename(tmp, file);
+  await writeStoredJson(file, day);
   return day;
 }
 
@@ -104,8 +124,9 @@ export async function listDays(dataDir, limit = 14) {
   let names = [];
   try {
     names = await readdir(lifeDir(dataDir));
-  } catch {
-    return [];
+  } catch (err) {
+    if (err?.code === 'ENOENT') return [];
+    throw new Error(`日程目录读取失败，原记录已保留：${lifeDir(dataDir)}（${err?.message ?? err}）`, { cause: err });
   }
   return names
     .filter((n) => /^\d{4}-\d{2}-\d{2}\.json$/.test(n) && isDateKey(n.slice(0, 10)))
@@ -119,13 +140,15 @@ export async function clearDays(dataDir) {
   let names = [];
   try {
     names = await readdir(lifeDir(dataDir));
-  } catch {
-    return 0;
+  } catch (err) {
+    if (err?.code === 'ENOENT') return 0;
+    throw err;
   }
   let n = 0;
   for (const file of names) {
     if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(file)) continue;
-    try { await unlink(join(lifeDir(dataDir), file)); n += 1; } catch { /* 已经没了就算了 */ }
+    try { await unlink(join(lifeDir(dataDir), file)); n += 1; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+    try { await unlink(`${join(lifeDir(dataDir), file)}.bak`); } catch (err) { if (err?.code !== 'ENOENT') throw err; }
   }
   return n;
 }
@@ -137,7 +160,7 @@ export async function recentSummary(dataDir, date, n = 3) {
     const day = await readDay(dataDir, addDays(date, -i));
     if (!day || !day.items.length) continue;
     const main = day.items.filter((it) => !isAsleepActivity(it)).slice(0, 8).map((it) => it.activity).join('、');
-    lines.push(`- ${day.date}（${day.dayType.name}）：${day.title ? `${day.title}。` : ''}${main ? `做了 ${main}` : ''}`);
+    lines.push(`- ${day.date}（${day.dayType.name}）：${day.title ? `${day.title}。` : ''}${main ? `安排过 ${main}（只是计划，不代表实际完成）` : ''}`);
   }
   return lines.join('\n');
 }
@@ -158,21 +181,15 @@ export function playPath(dataDir, date) {
 
 export async function readPlay(dataDir, date) {
   if (!isDateKey(date)) return null;
-  try {
-    const raw = JSON.parse(await readFile(playPath(dataDir, date), 'utf8'));
-    return cleanPlay(raw, date);
-  } catch {
-    return null;
-  }
+  const raw = await readStoredJson(playPath(dataDir, date));
+  return raw === null ? null : cleanPlay(raw, date);
 }
 
 export async function writePlay(dataDir, play) {
   if (!play || !isDateKey(play.date)) throw new Error('写自由时间记录要先有合法日期');
   const file = playPath(dataDir, play.date);
   await mkdir(lifeDir(dataDir), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, JSON.stringify(play, null, 2), 'utf8');
-  await rename(tmp, file);
+  await writeStoredJson(file, play);
   return play;
 }
 
@@ -181,13 +198,15 @@ export async function clearPlays(dataDir) {
   let names = [];
   try {
     names = await readdir(lifeDir(dataDir));
-  } catch {
-    return 0;
+  } catch (err) {
+    if (err?.code === 'ENOENT') return 0;
+    throw err;
   }
   let n = 0;
   for (const file of names) {
     if (!/^play-\d{4}-\d{2}-\d{2}\.json$/.test(file)) continue;
-    try { await unlink(join(lifeDir(dataDir), file)); n += 1; } catch { /* 已经没了就算了 */ }
+    try { await unlink(join(lifeDir(dataDir), file)); n += 1; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+    try { await unlink(`${join(lifeDir(dataDir), file)}.bak`); } catch (err) { if (err?.code !== 'ENOENT') throw err; }
   }
   return n;
 }

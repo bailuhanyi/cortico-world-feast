@@ -78,7 +78,7 @@ export const PRESETS = [
   {
     id: 'by-taste',
     name: '按她的口味配',
-    desc: '照她吃过攒出来的口味画像挑，槽位还是齐的：有热有凉有汤。',
+    desc: '照她明确喜欢的口味挑；反馈不足时先试试新菜。有热有凉有汤。',
     slots: [
       { label: '两道热菜', count: 2, category: '热菜', byTaste: true },
       { label: '一道凉菜或小吃', count: 1, categories: ['凉菜', '小吃'], byTaste: true },
@@ -245,14 +245,16 @@ function rankSlot(slot, pool, avg) {
  *
  * @param lib           菜品库（loadDishes 的返回）
  * @param combo         一张桌（预设或自定义）
- * @param options.avg       口味画像的九维均值，给 byTaste 用；null = 不按口味
+ * @param options.avg       旧 API：九维偏好均值，给 byTaste 用；null = 不按口味
+ * @param options.preferenceAvg 明确喜欢的九维均值；提供时优先于 avg，null = 反馈不足，不回退到 avg
  * @param options.seed      种子；同一个种子同一张桌。空串 = 用 combo.id
  * @param options.exclude   绝对不能进桌的 id（比如她标记过 dislike 的）
  * @param options.demote    降到最后的一个 id（比如上一顿刚吃过的那道）
  * @returns {{ dishes, missing, taste, line }}
  *   missing：没能配出来的槽位说明（不静默——"少了一道汤"要说得出来）
  */
-export function resolveCombo(lib, combo, { avg = null, seed = '', exclude = [], demote = null } = {}) {
+export function resolveCombo(lib, combo, { avg = null, preferenceAvg = undefined, seed = '', exclude = [], demote = null } = {}) {
+  const tastePreference = preferenceAvg === undefined ? avg : preferenceAvg;
   const bad = combo?.dishes?.filter((id) => !lib.byId.has(String(id))) ?? [];
   const ex = new Set(exclude.map(String));
   const dishes = [];
@@ -277,7 +279,7 @@ export function resolveCombo(lib, combo, { avg = null, seed = '', exclude = [], 
         missing.push(`${slot.label ?? '一道菜'}没配出来（这个条件下库里没有可用的菜）`);
         continue;
       }
-      const ranked = rankSlot(slot, pool, avg);
+      const ranked = rankSlot(slot, pool, tastePreference);
       // 从前 3×want 名里抽：直接取前 want 名的话每次都一样，而且几道菜会挤在同一个味道上。
       const candidates = ranked.slice(0, Math.max(want, want * CANDIDATE_FACTOR));
       const available = candidates.length;

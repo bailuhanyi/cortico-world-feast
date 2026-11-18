@@ -173,7 +173,19 @@ test('只看不吃的档案：有九维、有食材、有做法，但没有"这�
     assert.ok(text.includes(k), `缺维度 ${k}`);
   }
   assert.ok(text.includes(dish.method));
+  assert.ok(text.includes(dish.prose));
   assert.ok(!text.includes('再喝一口'), '档案里不该混进当下那口');
+});
+
+test('日常简版回执保留关键事实但明显短于完整档案', () => {
+  const full = renderBite(dish, { nth: 0, day: '2026-11-05' });
+  const compact = renderBite(dish, { nth: 0, day: '2026-11-05', compact: true });
+  assert.ok(compact.length < full.length * 0.7, `简版未明显变短：${compact.length}/${full.length}`);
+  assert.ok(compact.includes(dish.texture));
+  assert.ok(compact.includes(dish.aroma));
+  assert.ok(compact.includes(dish.finish));
+  assert.ok(compact.includes('主味：'));
+  assert.notEqual(compact, renderBite(dish, { nth: 1, day: '2026-11-05', compact: true }));
 });
 
 await report();

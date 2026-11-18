@@ -138,6 +138,35 @@ const CSS = `
 .feast-meal{font-size:10.5px;padding:1px 6px;border-radius:999px;border:1px dashed var(--fe-line);color:var(--fe-dim);flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
 .feast-meal.is-done{border-style:solid;border-color:var(--fe-accent);color:var(--fe-accent)}
 .feast-invite-note{flex:1;min-width:150px}
+/* --- 今天：首页状态与分类时间轴 --- */
+.feast-today-home{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:10px;margin-bottom:12px}
+.feast-today-home .feast-stat{min-width:0}
+.feast-today-status{grid-column:1/-1;display:flex;flex-direction:column;gap:5px;border-top:2px solid color-mix(in srgb,var(--fe-accent) 45%,var(--fe-line))}
+.feast-today-status-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.feast-today-title{font-family:var(--fe-serif);font-size:16px;font-weight:600;color:var(--fe-title)}
+.feast-today-mood{color:var(--fe-dim)}
+.feast-status-line{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap;font-size:12px;color:var(--fe-dim)}
+.feast-work-pill{border:1px solid var(--fe-line);border-radius:999px;padding:1px 7px;color:var(--fe-dim);font-size:11px}
+.feast-work-pill.is-on{border-color:var(--fe-accent);color:var(--fe-accent)}
+.feast-actual-stream{display:flex;flex-direction:column;gap:0}
+.feast-actual-row{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--fe-line)}
+.feast-actual-row:last-child{border-bottom:0}
+.feast-category{font-size:10.5px;line-height:1.5;padding:1px 6px;border:1px solid var(--fe-line);border-radius:999px;color:var(--fe-dim);white-space:nowrap;flex:none}
+.feast-tl-row[data-category="sleep"]{border-left-color:#7183a8}
+.feast-tl-row[data-category="work"]{border-left-color:#9a7447}
+.feast-tl-row[data-category="commute"]{border-left-color:#6d9b92}
+.feast-tl-row[data-category="meal"]{border-left-color:#bc8057}
+.feast-tl-row[data-category="personal"]{border-left-color:#8c77a8}
+.feast-tl-row.is-now[data-category]{background:color-mix(in srgb,var(--fe-accent) 10%,transparent)}
+.feast-work-preview{border:1px solid var(--fe-accent);border-radius:var(--radius-md,10px);padding:9px 11px;margin-top:9px;background:color-mix(in srgb,var(--fe-accent) 5%,var(--fe-card))}
+.feast-work-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:8px}
+.feast-work-side{border:1px solid var(--fe-line);border-radius:var(--radius-sm,6px);padding:7px 9px;min-width:0}
+.feast-work-side ul{margin:5px 0 0;padding-left:19px;color:var(--fe-dim)}
+.feast-work-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.feast-tomorrow-state{margin:6px 0 10px;padding:7px 10px;border-left:2px solid var(--fe-line);background:color-mix(in srgb,var(--fe-ink) 3%,transparent);color:var(--fe-dim)}
+.feast-free-plan{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:9px 11px;border:1px solid var(--fe-line);border-radius:var(--radius-md,10px);background:var(--fe-card)}
+.feast-free-plan .feast-note{margin:0;flex:1;min-width:180px}
+@media(max-width:480px){.feast-tl-row{gap:6px;padding:7px 5px}.feast-tl-t{width:5.5em;font-size:11px}.feast-tl-d{font-size:11px}.feast-today-title{font-size:15px}.feast-actual-row{gap:5px}}
 `;
 
 const TABLE = {
@@ -270,6 +299,34 @@ const TABLE = {
     dayNoPast: '还没有往期的那一天。',
     dayBack: '← 收起',
     dayMeal: '饭点',
+    todayPlanTitle: '此刻的安排', todayActualTitle: '今天留下的事', todayNextTitle: '接下来',
+    todayPlanDisclaimer: '这是计划，不代表事情已经发生。', todayActualEmpty: '还没有记下事情。',
+    todayUpcoming: '接下来', todayPendingMeal: '有一份餐点还在等她', todayTogetherInvite: '她邀请你一起吃饭', todayTogetherActive: '你们正在一起吃饭',
+    todayDate: '日期', todayMood: (m) => `心情：${m}`, todayWorking: '今天上班', todayNotWorking: '今天休息', todayWorkUnknown: '还没有安排',
+    todayCategory: { sleep: '睡眠', work: '工作', commute: '通勤', meal: '用餐', personal: '个人' },
+    todayTomorrowEmpty: '明天还没有计划。', todayTomorrowPending: '已经请求她写明天，仍在等待回应。',
+    todayTomorrowPendingAt: (s) => `请求发出于 ${s}`, todayTomorrowCoo: '明天的计划由她写下。', todayTomorrowTemplate: '明天暂由日程模板安排。',
+    todayFreePlan: '请她想想空出来的时间', todayFreePending: '已经请她看看空出来的时间。', todayFreeNone: '今天没有明确留出的时间段。',
+    workCompareTitle: '确认今天不上班', workBefore: '当前安排', workAfter: '不上班后', workNoChanges: '没有识别到工作或通勤时段；只会更新上班状态。',
+    workCancel: '取消', workConfirm: '确认修改', workConflictNote: (n) => `仍有 ${n} 段工作安排未清理。`, workUndo: '撤销关闭上班', workUndoing: '正在撤销…',
+    todayPlanSendAt: (s) => `请求时间：${s}`, todayTimelineLabel: '分类时间轴',
+    workCategory: '工作', sleepCategory: '睡眠', commuteCategory: '通勤', mealCategory: '用餐', personalCategory: '个人',
+    workActivity: '上班', sleepActivity: '睡觉', commuteActivity: '通勤', mealActivity: '吃饭', personalActivity: '自己的时间',
+    workPreviewStale: '预览已过期，请重新预览后确认。',
+    todayActualMeal: '餐食', todayActualActivity: '活动',
+    todayStorage: '存储问题', todayReload: '重新读取', todayRestore: '从备份恢复', todayRestoreConfirm: (n) => `确认从备份恢复「${n}」？当前内容会被替换。`,
+    todayThreadTitle: '她留下的线索', todayThreadPh: '记下一个想法…', todayThreadAdd: '记下想法', todayThreadOwner: '主人记下', todayThreadCoo: '她留下', todayThreadDone: '完成', todayThreadDrop: '搁下', todayThreadDoneLabel: '已完成', todayThreadDropLabel: '已搁下',
+    todayPlanRetry: '重新发送', todayPlanRetryConfirm: '明天的计划还在等待中。要重新发送请求吗？',
+    /* --- 今天上不上班 / 饭点归谁定（0.10.0）--- */
+    workTitle: '今天上不上班',
+    workOn: '上班',
+    workOff: '不上班',
+    workHint: '说一声就改：不上班时会移除日程里的工作事件，其他安排保留。',
+    workNone: '这一天还没有日程，先请她写或等她自己写。',
+    mealByHer: '饭点由她定',
+    mealByConfig: '饭点走配置',
+    mealHerSlots: (s) => `她定的是 ${s}`,
+    mealDefaultSlots: (s) => `默认档位 ${s}`,
     /* --- 自由时间 --- */
     freeTitle: '她自己的时间',
     freeOff: '自由时间关着。',
@@ -415,6 +472,34 @@ const TABLE = {
     dayNoPast: 'Nothing here yet.',
     dayBack: '← Close',
     dayMeal: 'Meal',
+    todayPlanTitle: 'Planned for now', todayActualTitle: 'What happened today', todayNextTitle: 'Up next',
+    todayPlanDisclaimer: 'This is a plan, not a record of what happened.', todayActualEmpty: 'Nothing has been noted yet.',
+    todayUpcoming: 'Coming up', todayPendingMeal: 'A meal is still waiting for her', todayTogetherInvite: 'She invited you to eat together', todayTogetherActive: 'You are eating together',
+    todayDate: 'Date', todayMood: (m) => `Mood: ${m}`, todayWorking: 'Working today', todayNotWorking: 'Off today', todayWorkUnknown: 'Not scheduled yet',
+    todayCategory: { sleep: 'Sleep', work: 'Work', commute: 'Commute', meal: 'Meal', personal: 'Personal' },
+    todayTomorrowEmpty: 'Tomorrow has no plan yet.', todayTomorrowPending: 'She has been asked to write tomorrow; waiting for her reply.',
+    todayTomorrowPendingAt: (s) => `Request sent at ${s}`, todayTomorrowCoo: 'Tomorrow’s plan was written by her.', todayTomorrowTemplate: 'Tomorrow is temporarily using the day template.',
+    todayFreePlan: 'Ask her to think about the open time', todayFreePending: 'She has been asked to look at the open time.', todayFreeNone: 'There are no clearly open stretches today.',
+    workCompareTitle: 'Confirm off work today', workBefore: 'Current schedule', workAfter: 'After switching off work', workNoChanges: 'No work or commute blocks were identified; only the work status will change.',
+    workCancel: 'Cancel', workConfirm: 'Confirm change', workConflictNote: (n) => `${n} work blocks remain in the schedule.`, workUndo: 'Undo off-work change', workUndoing: 'Undoing…',
+    todayPlanSendAt: (s) => `Request time: ${s}`, todayTimelineLabel: 'Category timeline',
+    workCategory: 'Work', sleepCategory: 'Sleep', commuteCategory: 'Commute', mealCategory: 'Meal', personalCategory: 'Personal',
+    workActivity: 'Work', sleepActivity: 'Sleep', commuteActivity: 'Commute', mealActivity: 'Meal', personalActivity: 'Own time',
+    workPreviewStale: 'This preview is out of date. Preview again before confirming.',
+    todayActualMeal: 'Meal', todayActualActivity: 'Activity',
+    todayStorage: 'Storage issues', todayReload: 'Reload', todayRestore: 'Restore from backup', todayRestoreConfirm: (n) => `Restore “${n}” from backup? This replaces the current contents.`,
+    todayThreadTitle: 'Threads she left', todayThreadPh: 'Note an idea…', todayThreadAdd: 'Add note', todayThreadOwner: 'Noted by you', todayThreadCoo: 'Left by her', todayThreadDone: 'Done', todayThreadDrop: 'Drop', todayThreadDoneLabel: 'Done', todayThreadDropLabel: 'Dropped',
+    todayPlanRetry: 'Resend request', todayPlanRetryConfirm: 'Tomorrow’s plan is still pending. Resend the request?',
+    /* --- work today / who sets the meal times (0.10.0) --- */
+    workTitle: 'Working today?',
+    workOn: 'Working',
+    workOff: 'Off work',
+    workHint: 'One tap changes just this: on a day off the schedule should not still say commute. Nothing else in the day is touched.',
+    workNone: 'This day has no schedule yet — ask her for one, or wait for her to write it.',
+    mealByHer: 'Her own meal times',
+    mealByConfig: 'Meal times from config',
+    mealHerSlots: (s) => `she set ${s}`,
+    mealDefaultSlots: (s) => `default slots ${s}`,
     /* --- free time --- */
     freeTitle: 'Her own time',
     freeOff: 'Free time is off.',
@@ -1178,18 +1263,24 @@ const todayPanel = {
     let asking = false;
     /** 改主意表单里有没有没提交的草稿：有就说明人正在打字，别重画。 */
     let draftNode = null;
-    const hasDraft = () => Boolean(draftNode
-      && (draftNode.value || draftNode === document.activeElement));
+    const hasDraft = () => {
+      const changeDraft = changeInputs && [changeInputs.startIn, changeInputs.endIn, changeInputs.actIn]
+        .some((node) => node.value || node === document.activeElement);
+      const threadInput = wrap.querySelector('input.feast-activity');
+      return Boolean(changeDraft || threadDraft || (threadInput && threadInput === document.activeElement));
+    };
 
     /** 改主意表单的三个输入框，点时间线时往里填。 */
     let changeInputs = null;
+    let threadDraft = '';
+    let operating = false;
+    const dateLabel = (v) => v?.sourceDate ?? v?.date ?? '';
 
     const sourceLabel = (s) => (s === 'coo' ? t.daySourceCoo
       : s === 'template' ? t.daySourceTemplate
         : s === 'pending' ? t.daySourcePending
           : s === 'manual' ? t.daySourceManual : '');
     // 睡觉判据跟服务端对齐：/睡/ 认不出「回笼觉」「打盹」。
-    const isSleep = (it) => /睡|回笼觉|打盹|小憩|眯一会|补觉|午觉|赖床/.test(String(it?.activity ?? ''));
 
     /** 'HH:MM' → 当天第几分钟；坏值给 null（时间线不该因为一行脏数据整页不画）。 */
     function minuteOf(hm) {
@@ -1293,6 +1384,84 @@ const todayPanel = {
       return head;
     }
 
+    /**
+     * 「今天上不上班」+ 饭点归谁定（0.10.0）。
+     *
+     * 只有两件事，所以做成**一块**而不是两个面板：主人想改的就是「今天算不算上班」，
+     * 顺带一眼看到今天几点吃、这组档位是她定的还是配置兜底的。
+     * 两个按钮而不是一个 checkbox：翻开关时点错一次也算改，两个键各自表达一个意思更不容易点错。
+     */
+    function workSection() {
+      if (!data?.enabled) return el('div');
+      const box = el('div', 'feast-block');
+      box.appendChild(el('div', 'feast-block-t', t.workTitle));
+      const day = data.today;
+      const ready = Boolean(day?.items?.length) && day.source !== 'pending';
+      if (!ready) {
+        box.appendChild(el('div', 'feast-empty', t.workNone));
+      } else {
+        const row = el('div', 'feast-act');
+        for (const [on, label] of [[true, t.workOn], [false, t.workOff]]) {
+          const active = (data.work === true) === on;
+          const btn = el('button', active ? 'feast-btn-primary' : null, label);
+          btn.disabled = operating || (active && (on || !data.workConflicts?.length));
+          btn.onclick = async () => {
+            btn.disabled = true;
+            try {
+              let revision;
+              if (!on) {
+                const preview = await ctx.invoke('work', [{ date: data.date, work: false, action: 'preview' }]);
+                if (preview?.ok === false) throw new Error(preview.message);
+                const affected = preview.affected ?? [];
+                const lines = affected.map((it) => `${it.start}–${it.end} ${it.activity}`);
+                const message = lines.length
+                  ? `以下时段将改为居家自由安排：\n${lines.join('\n')}\n\n确认关闭上班？`
+                  : '没有识别到明确的工作事件，只修改上班状态。确认关闭上班？';
+                if (!window.confirm(message)) { btn.disabled = false; return; }
+                revision = preview.revision;
+              }
+              const r = await ctx.invoke('work', [{ date: data.date, work: on, ...(revision ? { revision } : {}) }]);
+              if (r?.ok === false) { toast(root, ctx, r.message ?? t.sayNo, true); btn.disabled = false; }
+              else { toast(root, ctx, r.message ?? t.sayOk); await refresh(); }
+            } catch (err) {
+              toast(root, ctx, t.failed(err?.message ?? err), true);
+              btn.disabled = false;
+            }
+          };
+          row.appendChild(btn);
+        }
+        box.appendChild(row);
+        box.appendChild(el('div', 'feast-note', t.workHint));
+        if (data.workConflicts?.length) {
+          box.appendChild(el('div', 'feast-note', `不上班的日程仍有 ${data.workConflicts.length} 段工作安排。内容已保留，点击“不上班”可预览并清理。`));
+        }
+        if (data.workUndoAvailable) {
+          const undo = el('button', 'feast-btn', '撤销关闭上班');
+          undo.disabled = operating;
+          undo.onclick = async () => {
+            undo.disabled = true;
+            try {
+              const r = await ctx.invoke('work', [{ date: data.date, action: 'undo' }]);
+              toast(root, ctx, r?.message ?? t.sayOk, r?.ok === false);
+              await refresh();
+            } catch (err) { toast(root, ctx, t.failed(err?.message ?? err), true); undo.disabled = false; }
+          };
+          box.appendChild(undo);
+        }
+      }
+
+      // 饭点：她定了就说她定的，没定就说配置那组。不重画时间线——那一块已经标过饭点了。
+      const slots = data.mealSlots ?? [];
+      if (slots.length) {
+        const line = el('div', 'feast-day');
+        line.appendChild(el('span', 'feast-flag', data.mealSlotsByHer ? t.mealByHer : t.mealByConfig));
+        line.appendChild(el('span', 'feast-dim',
+          data.mealSlotsByHer ? t.mealHerSlots(slots.join('、')) : t.mealDefaultSlots(slots.join('、'))));
+        box.appendChild(line);
+      }
+      return box;
+    }
+
     function nowStrip() {
       const box = el('div', 'feast-strip');
       box.appendChild(el('b', null, t.dayNow));
@@ -1303,7 +1472,7 @@ const todayPanel = {
       }
       if (!it) {
         box.appendChild(el('span', 'feast-dim', t.dayNothingNow));
-      } else if (isSleep(it)) {
+      } else if (data?.nowKind === 'asleep') {
         box.appendChild(el('span', null, t.daySleeping));
         box.appendChild(el('span', 'feast-dim', `${it.start}–${it.end}`));
       } else {
@@ -1344,6 +1513,8 @@ const todayPanel = {
       actIn.placeholder = t.dayChangePh;
       actIn.value = '';
       actIn.addEventListener('input', () => { draftNode = actIn; });
+      startIn.addEventListener('input', () => { draftNode = startIn; });
+      endIn.addEventListener('input', () => { draftNode = endIn; });
       draftNode = actIn;
       changeInputs = { box, startIn, endIn, actIn };
       const go = el('button', 'feast-btn-primary', t.dayChangeGo);
@@ -1465,6 +1636,89 @@ const todayPanel = {
       return box;
     }
 
+    function storageSection() {
+      const issues = data?.storageIssues ?? [];
+      if (!issues.length) return null;
+      const box = el('div', 'feast-block');
+      box.appendChild(el('div', 'feast-block-t', t.todayStorage));
+      for (const issue of issues) {
+        const row = el('div', 'feast-item');
+        row.appendChild(el('span', 'feast-item-n', `${issue.label}: ${issue.message}`));
+        const reload = el('button', null, t.todayReload);
+        reload.disabled = operating;
+        reload.onclick = () => void recovery(issue, 'reload');
+        row.appendChild(reload);
+        if (issue.backupAvailable) {
+          const restore = el('button', null, t.todayRestore);
+          restore.disabled = operating;
+          restore.onclick = () => { if (window.confirm(t.todayRestoreConfirm(issue.label))) void recovery(issue, 'restore'); };
+          row.appendChild(restore);
+        }
+        box.appendChild(row);
+      }
+      return box;
+    }
+
+    async function recovery(issue, action) {
+      if (operating) return;
+      operating = true;
+      try {
+        const r = await ctx.invoke('recovery', [{ key: issue.key, action }]);
+        operating = false;
+        if (r?.ok === false) toast(root, ctx, r.message ?? t.sayNo, true);
+        else await refresh();
+      } catch (err) { toast(root, ctx, t.failed(err?.message ?? err), true); }
+      finally { operating = false; }
+    }
+
+    function threadsSection() {
+      const items = data?.threads?.items ?? [];
+      const box = el('div', 'feast-block');
+      box.appendChild(el('div', 'feast-block-t', t.todayThreadTitle));
+      const list = el('div', 'feast-list');
+      for (const thread of items) {
+        if (thread.status !== 'active' && thread.status !== 'done' && thread.status !== 'dropped') continue;
+        const row = el('div', 'feast-item');
+        row.appendChild(el('span', 'feast-item-t', dateLabel(thread)));
+        row.appendChild(el('span', 'feast-item-n', `${thread.source === 'coo' ? t.todayThreadCoo : t.todayThreadOwner}: ${thread.text}${thread.sourceActivity ? ` · ${thread.sourceActivity}` : ''}`));
+        if (thread.status === 'active') {
+          const done = el('button', null, t.todayThreadDone);
+          done.disabled = operating;
+          done.onclick = () => void threadAction({ id: thread.id, status: 'done' });
+          const drop = el('button', null, t.todayThreadDrop);
+          drop.disabled = operating;
+          drop.onclick = () => void threadAction({ id: thread.id, status: 'dropped' });
+          row.appendChild(done); row.appendChild(drop);
+        } else row.appendChild(el('span', 'feast-flag', thread.status === 'done' ? t.todayThreadDoneLabel : t.todayThreadDropLabel));
+        list.appendChild(row);
+      }
+      box.appendChild(list);
+      const form = el('div', 'feast-form');
+      const input = el('input', 'feast-activity');
+      input.placeholder = t.todayThreadPh;
+      input.maxLength = 120;
+      input.value = threadDraft;
+      input.oninput = () => { threadDraft = String(input.value ?? ''); draftNode = input; };
+      draftNode = input;
+      const add = el('button', 'feast-btn-primary', t.todayThreadAdd);
+      add.disabled = operating;
+      add.onclick = () => { const text = threadDraft.trim(); if (text) void threadAction({ text }); };
+      form.appendChild(input); form.appendChild(add); box.appendChild(form);
+      return box;
+    }
+
+    async function threadAction(payload) {
+      if (operating) return;
+      operating = true;
+      try {
+        const r = await ctx.invoke('thread', [payload]);
+        operating = false;
+        if (r?.ok === false) toast(root, ctx, r.message ?? t.sayNo, true);
+        else { if (Object.hasOwn(payload, 'text')) threadDraft = ''; await refresh(); }
+      } catch (err) { toast(root, ctx, t.failed(err?.message ?? err), true); }
+      finally { operating = false; }
+    }
+
     function pastSection() {
       const box = el('div');
       box.appendChild(el('div', 'feast-combo-h', t.dayPast));
@@ -1522,35 +1776,68 @@ const todayPanel = {
 
     function render() {
       const scrollTop = wrap.scrollTop;
+      const savedChange = changeInputs ? {
+        start: changeInputs.startIn.value, end: changeInputs.endIn.value, activity: changeInputs.actIn.value,
+      } : null;
       draftNode = null;
       changeInputs = null;
       wrap.replaceChildren();
 
       if (!data) return;
 
+      const storage = storageSection();
+      if (storage) wrap.appendChild(storage);
       if (!data.enabled) {
         wrap.appendChild(el('div', 'feast-empty', t.dayOff));
         return;
       }
 
+      // 首页先呈现生活摘要。计划与实际记录明确分开，绝不把安排写成已发生。
+      const home = el('div', 'feast-stats feast-today-home');
+      const planCard = el('div', 'feast-stat');
+      planCard.appendChild(el('div', 'feast-block-t', t.todayPlanTitle));
+      planCard.appendChild(el('div', 'feast-note', t.todayPlanDisclaimer));
+      const now = data.nowItem;
+      planCard.appendChild(el('div', 'feast-stat-v', now ? `${now.start}–${now.end} ${now.activity ?? ''}` : t.dayNothingNow));
+      home.appendChild(planCard);
+      const actualCard = el('div', 'feast-stat');
+      actualCard.appendChild(el('div', 'feast-block-t', t.todayActualTitle));
+      const actuals = data.actual ?? [];
+      if (!actuals.length) actualCard.appendChild(el('div', 'feast-empty', t.todayActualEmpty));
+      else for (const item of actuals) {
+        const row = el('div', 'feast-item');
+        row.appendChild(el('span', 'feast-item-t', item.hm ?? ''));
+        row.appendChild(el('span', 'feast-item-n', `${item.text ?? ''}${item.note ? ` · ${item.note}` : ''}`));
+        actualCard.appendChild(row);
+      }
+      home.appendChild(actualCard);
+      const nextCard = el('div', 'feast-stat');
+      nextCard.appendChild(el('div', 'feast-block-t', t.todayNextTitle));
+      for (const item of (data.upcoming ?? []).slice(0, 3)) nextCard.appendChild(el('div', 'feast-item', `${item.start ?? item.hm ?? ''} ${item.activity ?? item.text ?? ''}`));
+      if (data.pending) nextCard.appendChild(el('div', 'feast-note', t.todayPendingMeal));
+      const togetherActive = Boolean(data.together?.active ?? data.together?.isTogether);
+      if (data.together?.invite || togetherActive) nextCard.appendChild(el('div', 'feast-note', togetherActive ? t.todayTogetherActive : t.todayTogetherInvite));
+      home.appendChild(nextCard);
+      wrap.appendChild(home);
       wrap.appendChild(nowStrip());
+      wrap.appendChild(workSection());
 
       // 今天：只有看今天时才给 nowMinute 高亮。点任意一段能填进下面的改主意表单。
       const canChangeToday = Boolean(data.today?.items?.length) && data.today.source !== 'pending';
-      wrap.appendChild(daySection(t.dayToday, data.today, isToday() && !viewing ? data.nowMinute : null, {
-        meals: data.mealSlots ?? [],
-        eatenAt: (data.eatenToday ?? []).map((e) => e.at),
+      const oldTimeline = el('div');
+      oldTimeline.appendChild(el('div', 'feast-combo-h', t.dayToday));
+      oldTimeline.appendChild(daySection('', data.today, isToday() && !viewing ? data.nowMinute : null, {
+        meals: data.mealSlots ?? [], eatenAt: (data.eatenToday ?? []).map((e) => e.at),
         clickable: canChangeToday && !viewing,
       }));
-
-      // 明天：来源是 pending 就说明已经问过她、还没交回。
+      wrap.appendChild(oldTimeline);
       wrap.appendChild(daySection(t.dayTomorrow, data.tomorrow, null));
 
       // 按钮跟着明天的状态走：没写 = 请她写；等她写 = 灰掉；已经写好 = 重写（要确认）。
       // 0.7.1 无脑渲染「请她写明天」，而服务端会无条件覆盖——点一下就抹掉她写好的明天。
-      const tomorrowState = (data.tomorrow?.items?.length ?? 0) > 0
-        ? (data.tomorrow.source === 'pending' ? 'pending' : 'written')
-        : 'empty';
+      const tomorrowState = data.tomorrow?.source === 'pending'
+        ? 'pending'
+        : (data.tomorrow?.items?.length ?? 0) > 0 ? 'written' : 'empty';
 
       const acts = el('div', 'feast-act');
       if (tomorrowState === 'pending') {
@@ -1558,6 +1845,25 @@ const todayPanel = {
         ask.disabled = true;
         acts.appendChild(ask);
         acts.appendChild(el('span', 'feast-dim', t.dayWaiting));
+        if (data.planRetryAvailable) {
+          const retry = el('button', null, t.todayPlanRetry);
+          retry.onclick = async () => {
+            if (!window.confirm(t.todayPlanRetryConfirm)) return;
+            retry.disabled = true;
+            operating = true;
+            try {
+              const result = await ctx.invoke('plan', [{ retry: true }]);
+              if (result?.ok === false) toast(root, ctx, result.message ?? t.sayNo, true);
+              else if (result?.message) toast(root, ctx, result.message);
+            } catch (err) {
+              toast(root, ctx, t.failed(err?.message ?? err), true);
+            } finally {
+              operating = false;
+              await refresh();
+            }
+          };
+          acts.appendChild(retry);
+        }
       } else {
         const rewrite = tomorrowState === 'written';
         const ask = el('button', rewrite ? null : 'feast-btn-primary',
@@ -1588,6 +1894,14 @@ const todayPanel = {
         wrap.appendChild(changeForm(data.date));
       }
 
+      const threads = threadsSection();
+      wrap.appendChild(threads);
+
+      if (savedChange && changeInputs) {
+        changeInputs.startIn.value = savedChange.start;
+        changeInputs.endIn.value = savedChange.end;
+        changeInputs.actIn.value = savedChange.activity;
+      }
       const free = freeSection();
       if (free) wrap.appendChild(free);
 
@@ -1614,18 +1928,17 @@ const todayPanel = {
 
     // 钟自己走：整点过后换一段了，「此刻」那个条该跟上（每 60 秒让服务端重算一遍）。
     // 只在「此刻那一段」或「日期」真的变了才重画 —— 否则会把正在填的改主意表单打断。
-    let lastKey = `${data?.nowItem?.start ?? ''}|${data?.date ?? ''}`;
+    const refreshKey = (v) => JSON.stringify({ date: v?.date, start: v?.nowItem?.start, actual: v?.actual, threads: v?.threads, storage: v?.storageIssues, tomorrow: v?.tomorrow, pending: v?.pending, together: v?.together, upcoming: v?.upcoming, retry: v?.planRetryAvailable, work: v?.work, conflicts: v?.workConflicts, undo: v?.workUndoAvailable, meals: v?.mealSlots, mealsByHer: v?.mealSlotsByHer });
+    let lastKey = refreshKey(data);
     const ticker = ctx.interval?.(() => {
       if (ctx.signal?.aborted) return;
       void (async () => {
         try {
           const next = await ctx.invoke('list', []);
-          const key = `${next?.nowItem?.start ?? ''}|${next?.date ?? ''}`;
-          // 看往期、或者表单里有没提交的草稿时，别擅自重画把人打断了。
-          if (key === lastKey || viewing || hasDraft()) {
-            data = next;
-            return;
-          }
+          const key = refreshKey(next);
+          // 看往期、编辑草稿或提交动作时，不重画；刷新后待空闲时仍能对比最新数据。
+          if (viewing || hasDraft() || operating) { data = next; return; }
+          if (key === lastKey) { data = next; return; }
           data = next;
           lastKey = key;
           render();

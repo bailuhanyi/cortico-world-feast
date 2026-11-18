@@ -205,12 +205,12 @@ export function freeEventText({
     const doing = String(where || '在忙');
     const short = doing.replace(/（[^）]*）\s*$/, '') || doing;
     const lines = [
-      `【鱼的每一天 · 这会儿你在${short}${tag}】日程里这会儿是「${doing}」，不用停下手里的，也不用特意回这条。`,
-      logged ? `今天已经记过：${freeDoneText(play, tz)}。` : '今天还没记过什么。',
-      '想记的话，随手用 feast_life_play 记一句（activity 写你正在做的事，note 一句细节）。不记也没关系，记只是给你自己攒。',
+      `【鱼的每一天 · 这会儿你在${short}${tag}】不用停下手里的，也不用回这条。`,
+      logged ? `今天已记：${freeDoneText(play, tz)}。` : '今天还没记东西。',
+      '想记就用 feast_life_play；不记也没关系。',
     ];
-    if (askReport) lines.push('顺手跟主人说一句也可以——一句话就够，不用汇报。');
-    if (nowHm) lines.push(`（现在 ${nowHm}。这条只是顺口一提，不是待办；忙就先忙。）`);
+    if (askReport) lines.push('聊到时告诉主人一句即可。');
+    if (nowHm) lines.push(`（${nowHm}，不是待办；忙就先忙。）`);
     return lines.join('\n');
   }
 
@@ -243,9 +243,9 @@ export function freeEventText({
     if (weatherHint) lines.push(weatherHint);
   }
   const tail = [];
-  tail.push('做完随手用 feast_life_play 记一笔（activity 写做了什么，note 一句细节）。不记也没关系，记只是给你自己攒。');
-  if (askReport) tail.push('顺手跟主人说一句——一句话就够，不用汇报。');
-  tail.push('现在不想动就不用管这条，今天也不催你第二次。');
+  tail.push('想记就用 feast_life_play 记一笔；不记也没关系。');
+  if (askReport) tail.push('聊到时告诉主人一句即可。');
+  tail.push('不想动就忽略这条，今天不再催。');
   lines.push(tail.join(''));
   if (nowHm) lines.push(nowLine(freeNow));
   return lines.join('\n');

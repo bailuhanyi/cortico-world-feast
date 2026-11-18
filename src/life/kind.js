@@ -22,6 +22,11 @@ const SLEEP_HINTS = /睡|回笼觉|打盹|小憩|眯一会儿|眯一会|补觉|�
 /** 明确被占用：这些时候不该被当成「她自己的时间」。 */
 const BUSY_HINTS = /睡|回笼觉|打盹|小憩|眯一会儿|眯一会|补觉|午觉|赖床|上班|通勤|开会|加班|赶工|赶稿|赶进度|工作|办公|搬砖|值班|出差|面试|上课|考试|会议|训练|排练/i;
 
+// 先消去明确不表示当下睡觉的词组、以及恰好含「工作」的地点名。
+// 只消去词组本身：例如「工作室加班」仍该算忙，「睡前看书后睡觉」仍含真正的睡觉。
+const NON_SLEEP = /睡前|睡后|睡醒(?:后)?|睡不着|(?:不想|不打算|不准备|不再|不)睡(?:觉|了)?/g;
+const PLACE_ONLY = /工作室/g;
+
 /** 兼容：老调用点传对象（item）也传过字符串（activity 名）。 */
 const activityOf = (item) => String((typeof item === 'string' ? item : item?.activity) ?? '')
   .replace(/\s+/g, ' ').trim();
@@ -33,9 +38,40 @@ const activityOf = (item) => String((typeof item === 'string' ? item : item?.act
 export function classifyItem(item) {
   const act = activityOf(item);
   if (!act) return 'none';
-  if (SLEEP_HINTS.test(act)) return 'asleep';
-  if (BUSY_HINTS.test(act)) return 'busy';
+  if (validCategory(item?.category)) {
+    if (item.category === 'sleep') return 'asleep';
+    if (item.category === 'work' || item.category === 'commute') return 'busy';
+    return 'free';
+  }
+  const hints = act.replace(NON_SLEEP, '').replace(PLACE_ONLY, '');
+  if (SLEEP_HINTS.test(hints)) return 'asleep';
+  if (BUSY_HINTS.test(hints)) return 'busy';
   return 'free';
+}
+
+export const ACTIVITY_CATEGORIES = Object.freeze(['sleep', 'work', 'commute', 'meal', 'personal']);
+export const validCategory = (value) => ACTIVITY_CATEGORIES.includes(value);
+
+const WORK_EVENT_HINTS = /上班|通勤|下班回家|加班|办公|工作(?!室)|开会|值班|出差|赶工|搬砖/;
+
+/** 显式分类优先；旧日程只识别明确工作动作，避免按地点名误删生活安排。 */
+export function isWorkEvent(item) {
+  if (validCategory(item?.category)) return item.category === 'work' || item.category === 'commute';
+  const activity = activityOf(item)
+    .replace(/下班(?:后|以后|之后)/g, '')
+    .replace(/(?:不想|不用|不再|不去|无需|取消|不)(?:上班|加班|工作|开会|通勤)/g, '')
+    .replace(/工作室/g, '');
+  return WORK_EVENT_HINTS.test(activity)
+    || /^(?:在)?(?:公司|办公室|工位)(?:里)?(?:待着|干活|摸鱼)?$/.test(activity);
+}
+
+/** 展示分类与工作开关共用；推断结果不反写旧日程。 */
+export function categoryOf(item) {
+  if (validCategory(item?.category)) return item.category;
+  if (classifyItem(item) === 'asleep') return 'sleep';
+  if (isWorkEvent(item)) return /通勤|下班回家/.test(activityOf(item)) ? 'commute' : 'work';
+  if (/吃(?:早|午|晚|夜|早午)?饭|用餐|早餐|午餐|晚餐/.test(activityOf(item))) return 'meal';
+  return 'personal';
 }
 
 /** 睡着了吗（「她自己的时间」和时段事件都用这个，别各写一份 /睡/）。 */

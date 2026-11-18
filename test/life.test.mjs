@@ -10,10 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 import { test, report } from './harness.mjs';
 import {
-  DEFAULT_DAY_TYPES, DEFAULT_VOICE, TOOL_LINE, addDays, applyChange, cleanDay, clock, dateLabel, dayText, envBlock,
-  findItem, isDateKey, lifeDir, listDays, momentLine, normalizeItems, normalizePlan,
-  nowText, parseClock, pendingDay, pickDayType, planEventText, readDay, recentSummary,
-  segmentKey, templateDay, templateItems, voiceText, weekdayOf, writeDay, zonedNow,
+  cleanDay, cleanMealSlots, DEFAULT_DAY_TYPES, DEFAULT_VOICE, TOOL_LINE, addDays, applyChange, clock, dateLabel, isWorkEvent, removeWorkEvents,
+  dayText, envBlock, findItem, isDateKey, isWorkDayType, lifeDir, listDays, momentLine, normalizeDayTypes,
+  normalizeItems, normalizePlan, nowText, parseClock, pendingDay, pickDayType, planEventText, readDay,
+  recentSummary, segmentKey, templateDay, templateItems, voiceText, weekdayOf, writeDay, zonedNow,
   cleanPlay, classifyItem, doingsFor, freeEventText, isFreeActivity, markFreeNudged, markFreeSkipped, newPlay,
   parseDoings, parseSlots, planFreeTick, recordPlay, skipFreeToday,
 } from '../src/life/index.js';
@@ -86,6 +86,51 @@ test('normalizeItems：重叠段被裁开，坏段被丢掉', () => {
   for (let i = 1; i < items.length; i += 1) assert.equal(items[i - 1].end, items[i].start);
 });
 
+test('normalizeItems：恰好到上限仍保留末段，超过上限明确拒绝', () => {
+  const items = Array.from({ length: 40 }, (_, i) => ({
+    start: clock(i * 36), end: clock((i + 1) * 36), activity: `活动${i + 1}`,
+  }));
+  const normalized = normalizeItems(items);
+  assert.equal(normalized.length, 40);
+  assert.equal(normalized.at(-1).activity, '活动40');
+  assert.equal(normalized.at(-1).end, '24:00');
+  const tooMany = [
+    ...items.slice(0, -1),
+    { start: '23:24', end: '23:42', activity: '末段看书' },
+    { start: '23:42', end: '24:00', activity: '睡觉' },
+  ];
+  const before = structuredClone(tooMany);
+  assert.throws(() => normalizeItems(tooMany), (err) => err instanceof RangeError
+    && err.status === 400 && err.code === 'SCHEDULE_ITEMS_LIMIT' && /41.*40.*合并/.test(err.message));
+  assert.deepEqual(tooMany, before, '拒绝不能修改调用方的原计划');
+  assert.throws(() => normalizePlan({ items: tooMany }, '2026-11-11'), /超过上限/);
+});
+
+test('normalizeItems：上限按修补后的全天检查，去掉重叠后可正常接收', () => {
+  const partial = [{ start: '09:00', end: '12:00', activity: '看书' }];
+  assert.throws(() => normalizeItems(partial, 3), /4.*3.*合并/, '首段睡觉和晚间补段也计入上限');
+  const full = normalizeItems(partial, 4);
+  assert.equal(full.length, 4);
+  assert.equal(full[0].start, '00:00');
+  assert.equal(full.at(-1).end, '24:00');
+  const whole = { start: '00:00', end: '24:00', activity: '在家' };
+  assert.deepEqual(normalizeItems([whole, whole, whole], 1).map((it) => it.activity), ['在家']);
+  assert.equal(normalizeItems([], 1).at(-1).end, '24:00');
+  for (const badMax of [0, -1, 1.5, NaN, Infinity, '2']) {
+    assert.throws(() => normalizeItems([], badMax), /正整数/);
+  }
+});
+
+test('applyChange：拆分后超限时明确拒绝，原始全天日程不变', () => {
+  const items = Array.from({ length: 40 }, (_, i) => ({
+    start: clock(i * 36), end: clock((i + 1) * 36), activity: `活动${i + 1}`,
+  }));
+  const before = structuredClone(items);
+  assert.throws(() => applyChange(items, { start: '00:10', end: '00:20', activity: '临时喝茶' }), /42.*40.*合并/);
+  assert.deepEqual(items, before);
+  assert.equal(items.at(-1).end, '24:00');
+});
+
 test('findItem：按当前分钟落进正确的那一段', () => {
   const z = zonedNow(TZ, EVENING);
   const i = findItem(day, z.minute);
@@ -99,6 +144,28 @@ test('pickDayType：工作日 / 周末分流，指定 id 优先', () => {
   assert.equal(pickDayType(DEFAULT_DAY_TYPES, '2026-11-14', '', () => 0).id, 'restday');
   assert.equal(pickDayType(DEFAULT_DAY_TYPES, '2026-11-10', 'outing', () => 0).id, 'outing');
   assert.equal(pickDayType([], '2026-11-10', '', () => 0).id, 'workday');
+});
+
+test('不上班清理：替换工作事件但保留非工作安排和原时段', () => {
+  const source = [
+    { start: '08:00', end: '09:00', activity: '通勤', location: '路上' },
+    { start: '09:00', end: '12:00', activity: '在办公室开会', location: '公司' },
+    { start: '12:00', end: '13:00', activity: '吃午饭', location: '公司附近' },
+    { start: '13:00', end: '17:00', activity: '工作室画画', location: '工作室' },
+  ];
+  assert.equal(isWorkEvent(source[0]), true);
+  assert.equal(isWorkEvent(source[1]), true);
+  assert.equal(isWorkEvent(source[2]), false);
+  assert.equal(isWorkEvent(source[3]), false);
+  for (const activity of ['公司附近吃饭', '下班后去看电影', '不上班，在家看书', '工作室画画', '去公司附近的书店']) {
+    assert.equal(isWorkEvent({ activity }), false, activity);
+  }
+  for (const activity of ['上班（偷偷摸鱼）', '下班回家', '在公司', '在家办公', '通勤']) {
+    assert.equal(isWorkEvent({ activity }), true, activity);
+  }
+  const cleaned = removeWorkEvents(source);
+  assert.deepEqual(cleaned.map((item) => [item.start, item.end]), source.map((item) => [item.start, item.end]));
+  assert.deepEqual(cleaned.map((item) => item.activity), ['自由安排', '自由安排', '吃午饭', '工作室画画']);
 });
 
 test('模板日程：六种日型都能排满一天', () => {
@@ -189,12 +256,91 @@ test('存取：写入是原子的，读回、往期、清空都按日期', async
   assert.deepEqual(await listDays(dataDir, 5), []);
 });
 
-test('存到一半的坏文件不会让面板崩', async () => {
-  const { writeFile, mkdir: mk } = await import('node:fs/promises');
+// --------------------------------------------------------------------------
+// 0.10.0：她可以自己定「今天上不上班」和「几点吃」
+// --------------------------------------------------------------------------
+
+test('cleanMealSlots：排序、去重、认中文逗号，最多 4 档，坏值丢掉而不是整份作废', () => {
+  assert.deepEqual(cleanMealSlots(['19:00', '12:10', '12:10']), ['12:10', '19:00']);
+  assert.deepEqual(cleanMealSlots('7:05，18:00 25:00 abc'), ['07:05', '18:00']);
+  assert.deepEqual(cleanMealSlots(['08:00', '11:00', '14:00', '18:00', '21:00']),
+    ['08:00', '11:00', '14:00', '18:00'], '超过 4 档要截住');
+  assert.deepEqual(cleanMealSlots([]), []);
+  assert.deepEqual(cleanMealSlots(null), []);
+  assert.deepEqual(cleanMealSlots(['乱写']), [], '整份都坏时给空数组，由调用方退回兜底');
+});
+
+test('isWorkDayType：上班日/加班日/摸鱼日算上班，其余不算', () => {
+  assert.equal(isWorkDayType('workday'), true);
+  assert.equal(isWorkDayType('overtime'), true);
+  assert.equal(isWorkDayType('slacking'), true);
+  assert.equal(isWorkDayType('restday'), false);
+  assert.equal(isWorkDayType('outing'), false);
+  assert.equal(isWorkDayType({ id: 'workday' }), true);
+  assert.equal(isWorkDayType(null), false);
+});
+
+test('pickDayType：说了不上班就只在不上班的日型里挑，说了上班同理', () => {
+  // 2026-11-05 是周四（工作日）。明确说不上班时**不能**因为休息日标着周末就挑不到。
+  for (const r of [0, 0.3, 0.6, 0.99]) {
+    const off = pickDayType(DEFAULT_DAY_TYPES, '2026-11-05', '', () => r, false);
+    assert.equal(isWorkDayType(off), false, `rand=${r} 挑成了 ${off.name}`);
+    const on = pickDayType(DEFAULT_DAY_TYPES, '2026-11-05', '', () => r, true);
+    assert.equal(isWorkDayType(on), true, `rand=${r} 挑成了 ${on.name}`);
+  }
+  // 没指定时仍按星期分流（周四 → 上班日那一侧）。
+  const byWeekday = pickDayType(DEFAULT_DAY_TYPES, '2026-11-05', '', () => 0);
+  assert.equal(isWorkDayType(byWeekday), true);
+});
+
+test('pickDayType：这一类被关光了也不悄悄给回上班日', () => {
+  const types = normalizeDayTypes(DEFAULT_DAY_TYPES.map((t) => (
+    isWorkDayType(t) ? { ...t, enabled: false } : t
+  )));
+  const picked = pickDayType(types, '2026-11-05', '', () => 0, false);
+  assert.equal(isWorkDayType(picked), false);
+});
+
+test('cleanDay：标记和日型对不上时以标记为准（说不上班就不该还写着通勤）', () => {
+  const off = cleanDay({ ...day, work: false }, '2026-11-10', { rand: () => 0 });
+  assert.equal(off.work, false);
+  assert.equal(isWorkDayType(off.dayType), false, `还挑成了 ${off.dayType.name}`);
+
+  const back = cleanDay({ ...off, work: true }, '2026-11-10', { rand: () => 0 });
+  assert.equal(back.work, true);
+  assert.equal(isWorkDayType(back.dayType), true);
+
+  // 不写 work 时按日型推：老日程文件没有这个字段也照常能读。
+  const legacy = cleanDay({ items: day.items, dayType: 'restday' }, '2026-11-10');
+  assert.equal(legacy.work, false);
+  assert.deepEqual(legacy.mealSlots, [], '老文件没有 mealSlots = 她没定');
+});
+
+test('templateDay：能按她说的上不上班和饭点造兜底的一天', () => {
+  const off = templateDay('2026-11-05', { now: EVENING, work: false, mealSlots: ['12:30'], rand: () => 0 });
+  assert.equal(off.work, false);
+  assert.equal(isWorkDayType(off.dayType), false);
+  assert.deepEqual(off.mealSlots, ['12:30']);
+});
+
+test('存取：她定的饭点和上班标记跟着日程一起落盘、读回', async () => {
+  const dataDir = await tmp();
+  const written = cleanDay({ ...day, work: false, mealSlots: ['12:30', '19:40'] }, '2026-11-10', { rand: () => 0 });
+  await writeDay(dataDir, written);
+  const back = await readDay(dataDir, '2026-11-10');
+  assert.deepEqual(back.mealSlots, ['12:30', '19:40']);
+  assert.equal(back.work, false);
+});
+
+
+test('存到一半的坏文件明确报错并保留原文件', async () => {
+  const { writeFile, readFile, mkdir: mk } = await import('node:fs/promises');
   const dataDir = await tmp();
   await mk(lifeDir(dataDir), { recursive: true });
-  await writeFile(join(lifeDir(dataDir), '2026-11-10.json'), '{ 坏掉的', 'utf8');
-  assert.equal(await readDay(dataDir, '2026-11-10'), null);
+  const file = join(lifeDir(dataDir), '2026-11-10.json');
+  await writeFile(file, '{ 坏掉的', 'utf8');
+  await assert.rejects(readDay(dataDir, '2026-11-10'), /记录损坏/);
+  assert.equal(await readFile(file, 'utf8'), '{ 坏掉的');
 });
 
 test('envBlock 是低频的：同一天不同时刻完全一致（不打穿前缀缓存）', () => {
@@ -237,7 +383,7 @@ test('nowText 不重复系统前缀里已有的说话方式（省上下文）', 
   assert.ok(!receipt.includes('她给自己记事用的'), '回执里重复了工具用法那句');
   // 但那三段在前缀里必须还在——省的是回执，不是前缀。
   assert.ok(prefix.includes('【怎么把这些带进聊天】'), '前缀里把说话方式弄丢了');
-  assert.ok(prefix.includes('她给自己记事用的'), '前缀里把工具用法弄丢了');
+  assert.ok(prefix.includes('feast_life_adjust'), '前缀里把工具用法弄丢了');
   // 回执本身要短：只讲事实，不夹带说明。
   assert.ok(receipt.length < 260, `回执太长了（${receipt.length} 字），夹带了说明`);
 });
@@ -364,6 +510,19 @@ test('kind.classifyItem：睡觉优先、上班算占用、其余算她的空档
   assert.equal(classifyItem({ activity: '刷手机' }), 'free');
   assert.equal(classifyItem({ activity: '窗边发呆' }), 'free');
   assert.equal(classifyItem({ activity: '自己的时间' }), 'free');
+});
+
+test('kind.classifyItem：睡前、否定睡觉和工作室地点不误判，保留真正的睡忙词', () => {
+  for (const activity of ['睡前看书', '不睡了喝茶', '不想睡觉，刷手机', '睡醒后喝茶', '睡不着看书', '工作室画画', '在工作室画画']) {
+    assert.equal(classifyItem(activity), 'free', activity);
+    assert.equal(isFreeActivity({ activity }), true, activity);
+  }
+  for (const activity of ['睡觉', '午睡', '回笼觉', '补觉', '午觉', '小憩', '眯一会儿', '赖床', '睡前看书后睡觉', '工作室午睡']) {
+    assert.equal(classifyItem(activity), 'asleep', activity);
+  }
+  for (const activity of ['上班（偷偷摸鱼）', '工作', '办公', '工作室加班', '不睡了赶稿', '睡前开会', '在工作室工作']) {
+    assert.equal(classifyItem(activity), 'busy', activity);
+  }
 });
 
 test('free.planFreeTick：到点叫一次，同一档不重复；过了容错就当错过', () => {

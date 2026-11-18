@@ -233,6 +233,7 @@ function whereLine(dish) {
  * @param opts.nth     这是第几次吃这道菜（0 = 第一次）
  * @param opts.day     本地日期，用来让不同的日子说起来不一样
  * @param opts.miss    true = 这一口不合口味
+ * @param opts.compact true = 日常简版，保留主味、口感、香气、余韵和当下的温度/角度
  * @param opts.rng     可选，注入随机源（测试用）
  */
 export function renderBite(dish, opts = {}) {
@@ -242,11 +243,20 @@ export function renderBite(dish, opts = {}) {
   const temp = tempClass(dish);
   const kind = kindOf(dish);
 
+  const compact = opts.compact === true;
   const head = [`【${dish.name}】${whereLine(dish)}`];
-  if (dish.serving) head.push('', dish.serving);
-  if (dish.prose) head.push('', dish.prose);
+  if (!compact && dish.serving) head.push('', dish.serving);
+  if (!compact && dish.prose) head.push('', dish.prose);
 
   const facts = [];
+  if (compact) {
+    // 用最强的三个维度概括主味；保留原始强度，正常吃饭不套用 miss 的负面评价。
+    const notes = Object.entries(dish.taste)
+      .sort((a, b) => b[1] - a[1])
+      .filter(([, value]) => value > 0)
+      .slice(0, 3);
+    if (notes.length) facts.push(`主味：${notes.map(([key, value]) => `${key} ${value}`).join(' · ')}`);
+  }
   if (dish.texture) facts.push(`口感：${dish.texture}`);
   if (dish.aroma) facts.push(`香气：${dish.aroma}`);
   if (dish.finish) facts.push(`余韵：${dish.finish}`);
@@ -255,8 +265,10 @@ export function renderBite(dish, opts = {}) {
   // 角度按次数分档：第几回就只说第几回该说的话，免得第二次仍在写第一印象。
   const here = [pick(TEMP[temp] ?? TEMP.hot, rng)];
   here.push(pick(ANGLE[nth < 2 ? nth : 2], rng));
-  here.push(pick(MOOD, rng));
-  here.push(pick(WITH[kind] ?? WITH.food, rng));
+  if (!compact) {
+    here.push(pick(MOOD, rng));
+    here.push(pick(WITH[kind] ?? WITH.food, rng));
+  }
   if (opts.miss) here.push(pick(MISS, rng)(dominantNote(dish)));
 
   head.push('', here.join(''));
@@ -270,6 +282,7 @@ export function renderProfile(dish) {
   if (dish.ingredients.length) lines.push(`食材：${dish.ingredients.join('、')}`);
   if (dish.method) lines.push(`做法：${dish.method}`);
   if (dish.serving) lines.push(`上桌：${dish.serving}`);
+  if (dish.prose) lines.push(`实吃：${dish.prose}`);
   lines.push(`味道：${['辣', '麻', '咸', '鲜', '甜', '酸', '苦', '油', '香'].map((k) => `${k} ${t[k]}`).join(' · ')}`);
   if (dish.texture) lines.push(`口感：${dish.texture}`);
   if (dish.aroma) lines.push(`香气：${dish.aroma}`);

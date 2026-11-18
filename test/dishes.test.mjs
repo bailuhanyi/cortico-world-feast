@@ -298,6 +298,91 @@ test('口味画像：同一道菜最多按 3 次计入，不会把画像带跑',
   assert.equal(many.total, 3);
 });
 
+test('口味画像：吃过重甜重辣只记录经历，不能当作喜欢或耐受', () => {
+  const profile = tasteProfile(lib, { counts: { 'mapo-tofu': 3 }, reactions: [] });
+  assert.ok(profile.avg);
+  assert.equal(profile.preferenceAvg, null);
+  assert.equal(profile.preferenceReady, false);
+  assert.equal(profile.feedbackCount, 0);
+  assert.deepEqual(profile.likedIds, []);
+  assert.deepEqual(profile.dislikedIds, []);
+  assert.match(profile.lines.join('\n'), /饮食经历/);
+  assert.match(profile.lines.join('\n'), /反馈不足/);
+  assert.doesNotMatch(profile.lines.join('\n'), /能吃辣|嗜甜|辣的耐受/);
+});
+
+test('口味画像：至少两道不同的明确喜欢才归纳偏好，重复喜欢不加权', () => {
+  const [a, b, c] = lib.dishes;
+  const one = tasteProfile(lib, { reactions: [
+    { id: a.id, liked: true }, { id: a.id, liked: true },
+  ] });
+  assert.equal(one.preferenceAvg, null);
+  assert.equal(one.preferenceCount, 1);
+  const profile = tasteProfile(lib, { counts: { [c.id]: 3 }, reactions: [
+    { id: a.id, liked: true }, { id: a.id, liked: true },
+    { id: b.id, liked: true }, { id: c.id, liked: false },
+  ] });
+  assert.equal(profile.preferenceReady, true);
+  assert.equal(profile.preferenceCount, 2);
+  assert.equal(profile.feedbackCount, 3);
+  assert.deepEqual(profile.avg, c.taste, '经历仍然单独保留');
+  for (const k of TASTE_FIELDS) {
+    assert.equal(profile.preferenceAvg[k], Math.round((a.taste[k] + b.taste[k]) / 2));
+  }
+  assert.deepEqual(profile.dislikedIds, [c.id]);
+});
+
+test('口味画像：同菜最新意见覆盖旧意见，喜欢讨厌可双向切换', () => {
+  const [a, b] = lib.dishes;
+  const reactions = [{ id: a.id, liked: true }, { id: b.id, liked: true }];
+  reactions.push({ id: a.id, liked: false });
+  const dislike = tasteProfile(lib, { reactions });
+  assert.deepEqual(dislike.likedIds, [b.id]);
+  assert.deepEqual(dislike.dislikedIds, [a.id]);
+  assert.equal(dislike.preferenceAvg, null, '撤回喜欢后反馈重新不足');
+  assert.deepEqual(dislike.likes, [b.name]);
+  assert.deepEqual(dislike.dislikes, [a.name]);
+
+  reactions.push({ id: a.id, liked: true });
+  const like = tasteProfile(lib, { reactions });
+  assert.deepEqual(like.likedIds, [b.id, a.id]);
+  assert.deepEqual(like.dislikedIds, []);
+  assert.equal(like.preferenceReady, true);
+  assert.deepEqual(like.dislikes, []);
+});
+
+test('口味画像：一般是中性，会撤销喜欢或讨厌，坏反馈不会覆盖有效意见', () => {
+  const [a, b] = lib.dishes;
+  const profile = tasteProfile(lib, { reactions: [
+    { id: a.id, liked: true }, { id: b.id, liked: false },
+    { id: a.id, liked: null }, { id: b.id, liked: null },
+    null, { id: a.id, liked: 'true' }, { id: b.id },
+    { id: 'missing-dish', liked: true },
+  ] });
+  assert.deepEqual(profile.likedIds, []);
+  assert.deepEqual(profile.dislikedIds, []);
+  assert.equal(profile.feedbackCount, 2);
+  assert.equal(profile.preferenceAvg, null);
+  assert.match(profile.lines.join('\n'), /反馈不足/);
+  const valid = tasteProfile(lib, { reactions: [
+    { id: a.id, liked: false }, { id: a.id, liked: 'true' },
+  ] });
+  assert.deepEqual(valid.dislikedIds, [a.id]);
+});
+
+test('口味画像：没有经历也可保留明确反馈；空画像仍返回完整偏好字段', () => {
+  const [a, b] = lib.dishes;
+  const profile = tasteProfile(lib, { reactions: [{ id: a.id, liked: true }, { id: b.id, liked: true }] });
+  assert.equal(profile.empty, true, 'empty 兼容表示没有饮食经历');
+  assert.equal(profile.avg, null);
+  assert.ok(profile.preferenceAvg);
+  assert.match(profile.lines.join('\n'), /明确喜欢/);
+  const empty = tasteProfile(lib);
+  assert.equal(empty.preferenceAvg, null);
+  assert.deepEqual(empty.likes, []);
+  assert.deepEqual(empty.dislikes, []);
+});
+
 test('坏数据不会放进来（id 重复 / 缺字段的都被跳过）', () => {
   const ids = lib.dishes.map((d) => d.id);
   assert.equal(new Set(ids).size, ids.length);

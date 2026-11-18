@@ -11,6 +11,8 @@
  * 库里有正名就归一，模型没填 outfit 时按习惯补。
  */
 import { clock, parseClock, weekdayOf } from './time.js';
+import { isWorkEvent, validCategory } from './kind.js';
+export { categoryOf, isWorkEvent, validCategory } from './kind.js';
 
 const text = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -21,7 +23,9 @@ function cleanItem(raw) {
   if (start === null || end === null) return null;
   const activity = text(raw.activity, 40);
   if (!activity) return null;
+  const category = validCategory(raw.category) ? raw.category : '';
   const item = {
+    ...(category ? { category } : {}),
     s: start,
     e: end === 0 && start > 0 ? 1440 : end,
     activity,
@@ -47,13 +51,17 @@ function cleanItem(raw) {
   if (props.length) item.props = props;
   const withs = list(raw.with);
   if (withs.length) item.with = withs;
+  if (raw.workFreed === true) item.workFreed = true;
   return item;
 }
 
 const SLEEP = { activity: '睡觉', location: '家', detail: '' };
 
-/** 排序、去重叠、补空档，保证覆盖 00:00–24:00。 */
+/** 排序、去重叠、补空档，保证覆盖 00:00–24:00；超过上限则整份拒绝，不能截掉末段。 */
 export function normalizeItems(list, max = 40) {
+  if (!Number.isSafeInteger(max) || max < 1) {
+    throw Object.assign(new RangeError('日程段数上限必须是正整数'), { status: 400 });
+  }
   const items = (Array.isArray(list) ? list : []).map(cleanItem).filter(Boolean).filter((x) => x.e > x.s);
   items.sort((a, b) => a.s - b.s || a.e - b.e);
   const out = [];
@@ -71,7 +79,12 @@ export function normalizeItems(list, max = 40) {
   const last = out[out.length - 1];
   if (last.e < 1380) out.push({ s: last.e, e: 1380, activity: '在家休息', location: '家', detail: '' });
   if (out[out.length - 1].e < 1440) out.push({ s: out[out.length - 1].e, e: 1440, ...SLEEP });
-  return out.slice(0, max).map(({ s, e, ...rest }) => ({ start: clock(s), end: clock(e), ...rest }));
+  if (out.length > max) {
+    throw Object.assign(new RangeError(`日程补齐全天后有 ${out.length} 段，超过上限 ${max} 段；请合并活动后重新提交。`), {
+      status: 400, code: 'SCHEDULE_ITEMS_LIMIT',
+    });
+  }
+  return out.map(({ s, e, ...rest }) => ({ start: clock(s), end: clock(e), ...rest }));
 }
 
 export function findItem(day, minute) {
@@ -109,6 +122,54 @@ export const DEFAULT_DAY_TYPES = [
 
 export const DAY_SCOPES = ['weekday', 'weekend', 'any'];
 
+/** 这几种日型都意味着「今天上班」。判据只此一处，别在别处再列一遍。 */
+export const WORK_DAY_TYPES = Object.freeze(['workday', 'overtime', 'slacking']);
+
+/** 撤销只比较工作状态、日型和时段；饭点变化不妨碍撤销。 */
+export const workScheduleKey = (day) => JSON.stringify([day.work, day.dayType, day.items]);
+
+/** 关闭上班后移除工作内容，以中性居家安排填回原时段。 */
+export function removeWorkEvents(items) {
+  return (Array.isArray(items) ? items : []).map((item) => isWorkEvent(item)
+    ? { start: item.start, end: item.end, activity: '自由安排', category: 'personal', workFreed: true, location: '家', detail: '' }
+    : item);
+}
+
+/** 这一天（按日型）是不是上班的日子。日型为空时按「不上班」算。 */
+export function isWorkDayType(type) {
+  const id = typeof type === 'string' ? type : type?.id;
+  return WORK_DAY_TYPES.includes(String(id ?? ''));
+}
+
+/** 她自己定的一天最多几档饭点。再多就不是「几点吃」而是又一个时间表了。 */
+export const MAX_OWN_MEAL_SLOTS = 4;
+
+/**
+ * 她自己定下的饭点：`['11:30','18:00']` 或 `'11:30,18:00'` → 去重排序后的 `['11:30','18:00']`。
+ *
+ * 和配置里的 `mealSlots` 分开：那个是**兜底**，这个是**那一天**的决定。
+ * 空数组 = 她没定（调用方据此退回兜底），不是「今天不吃了」。
+ * 非法项丢掉；整份都非法时返回空数组，由调用方兜底——不因为写错一个值就整天不叫她。
+ */
+export function cleanMealSlots(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(/[,，\s]+/);
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const m = /^(\d{1,2})[:：](\d{2})$/.exec(String(item ?? '').trim());
+    if (!m) continue;
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    if (h > 23 || mi > 59) continue;
+    const hm = `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+    if (seen.has(hm)) continue;
+    seen.add(hm);
+    out.push(hm);
+    if (out.length >= MAX_OWN_MEAL_SLOTS) break;
+  }
+  return out.sort();
+}
+
 /** 不信任外部给的日型表：去重、截断、补默认值。 */
 export function normalizeDayTypes(list) {
   const src = Array.isArray(list) ? list : DEFAULT_DAY_TYPES;
@@ -133,29 +194,56 @@ export function normalizeDayTypes(list) {
   return out.length ? out : normalizeDayTypes(DEFAULT_DAY_TYPES);
 }
 
-/** 按星期挑一个日型（加权随机）；forcedId 指定时直接用它。 */
-export function pickDayType(types, date, forcedId = '', rand = Math.random) {
+/**
+ * 按星期挑一个日型（加权随机）；forcedId 指定时直接用它。
+ *
+ * `work` 给了就按「今天上不上班」的先后来挑：`false` 时**只在不上班的日型里挑**
+ * （休息/外出/宅家），`true` 时只在上班的日型里挑。这是主人翻那个开关时
+ * 真正起作用的地方——不然「今天不上班」只剩下一个标记，日程照旧排成上班日。
+ *
+ * 两种池子都会先按星期分流（工作日/周末）再落回来；某一类被她关光了
+ * （enabled 全 false）时退回「同一类里能用的全部」，仍为空就用该类的第一个内置日型。
+ */
+export function pickDayType(types, date, forcedId = '', rand = Math.random, work = null) {
   const list = Array.isArray(types) && types.length ? types : DEFAULT_DAY_TYPES;
   if (forcedId) {
     const t = list.find((x) => x.id === forcedId || x.name === forcedId);
     if (t) return t;
   }
-  const wd = weekdayOf(date);
-  const scope = wd === 0 || wd === 6 ? 'weekend' : 'weekday';
-  const enabled = list.filter((t) => t.enabled && t.weight > 0);
-  let pool = enabled.filter((t) => t.days === scope || t.days === 'any');
-  if (!pool.length) pool = enabled;
-  if (!pool.length) return DEFAULT_DAY_TYPES[1];
-  const total = pool.reduce((n, t) => n + t.weight, 0);
+  return pickByWork(list, date, rand, work);
+}
+
+/** 先按星期分流，再按权重随机；池子空时退回全部候选。`relaxScope` 时不分星期。 */
+function pickWeighted(pool, scope, rand, relaxScope = false) {
+  let candidates = relaxScope ? pool : pool.filter((t) => t.days === scope || t.days === 'any');
+  if (!candidates.length) candidates = pool;
+  const total = candidates.reduce((n, t) => n + t.weight, 0);
   let r = rand() * total;
-  for (const t of pool) {
+  for (const t of candidates) {
     r -= t.weight;
     if (r < 0) return t;
   }
-  return pool[pool.length - 1];
+  return candidates[candidates.length - 1];
 }
 
-const WORKISH = new Set(['workday', 'overtime', 'slacking']);
+/** pickDayType 的实现：先按上班/不上班筛，再按星期筛，最后加权随机。 */
+function pickByWork(list, date, rand, work) {
+  const wd = weekdayOf(date);
+  const scope = wd === 0 || wd === 6 ? 'weekend' : 'weekday';
+  const enabled = list.filter((t) => t.enabled && t.weight > 0);
+  const explicit = work === true || work === false;
+  const want = explicit ? (t) => isWorkDayType(t) === work : () => true;
+  const pool = enabled.filter(want);
+  // 她/主人明确说了「今天上班/不上班」时**不看星期**：周四说不上班，该能挑到休息日，
+  // 而不是因为休息日标着周末就只剩宅家日。星期分流只用于没被指定的时候。
+  if (pool.length) return pickWeighted(pool, scope, rand, explicit);
+  // 这一类被她关光了：退回这一类里内置的那个，别悄悄给回上班日。
+  const fallback = DEFAULT_DAY_TYPES.find((t) => want(t));
+  if (fallback) return fallback;
+  return list.find((t) => t.enabled) ?? DEFAULT_DAY_TYPES[1];
+}
+
+const WORKISH = new Set(WORK_DAY_TYPES);
 
 /** Coo 没写时的兜底：按日型给一份朴素但完整的一天。 */
 export function templateItems(type) {

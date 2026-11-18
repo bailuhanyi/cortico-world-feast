@@ -2,13 +2,13 @@
   "tools": [
     {
       "name": "feast_menu",
-      "description": "看菜单：库里有哪些菜。可以按 cuisine（菜系，如 川菜/日料/意菜/中东菜）、category（热菜/凉菜/主食/汤羹/面点/小吃/甜品/饮品/烧烤/火锅）、keyword（标签，如 下饭/解腻/夏天）筛，也可以给 query 搜名字、产地或食材。什么都不给就随机给你几道今天可以吃的。挑不出吃什么的时候用它。",
+      "description": "看菜单：按菜系、类别、标签或名字/产地/食材筛选；不带条件随机给几道。",
       "parameters": {
         "type": "object",
         "properties": {
           "cuisine": {
             "type": "string",
-            "description": "菜系（地域/传统），例如 川菜 / 粤菜 / 日料 / 意菜 / 中东菜。⚠ 这里只说从哪来，不管是什么形态；想按汤/面/小吃挑请用 category。"
+            "description": "地域/传统菜系，如川菜、日料；菜品形态用category。"
           },
           "category": {
             "type": "string",
@@ -36,7 +36,7 @@
     },
     {
       "name": "feast_eat",
-      "description": "吃一道菜。dish 填菜名或 id；留空吃当前桌上还没吃的下一道（自己选的或主人端来的），没摆菜才随机。想一次选几道先用 feast_combo。回执有味道、香气、口感、余韵和这一口的样子。吃完记自己的反应，跟主人说一句尝到了什么。",
+      "description": "吃一道并记账。dish 留空先吃桌上未吃的下一道，没有才随机；多道先 feast_combo。回执给关键味道，完整档案查 feast_taste。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -65,7 +65,7 @@
     },
     {
       "name": "feast_taste",
-      "description": "只看不吃：查一道菜的完整味道档案（食材、做法、上桌的样子、九维口味、口感、香气、余韵）。想跟主人形容一道菜、或者好奇某道菜是什么味儿时用它；真要吃请用 feast_eat。",
+      "description": "查一道菜的完整档案与实吃描写，只看不记吃过；真吃用 feast_eat。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -89,7 +89,7 @@
     },
     {
       "name": "feast_history",
-      "description": "查你自己吃过什么、吃过几回、以及攒出来的口味画像（辣/甜/酸/苦的耐受、偏清淡还是重口、最常入口的菜系）。想知道自己最近爱吃哪一口时用它。",
+      "description": "查饮食记录、吃过的口味均值与明确喜欢的偏好；吃过不代表喜欢。",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -105,7 +105,7 @@
     },
     {
       "name": "feast_reaction",
-      "description": "记一句你自己吃完的真实反应。action 填 like（合口味）/ ok（一般）/ dislike（不太对付），note 一句具体的（\"麻得正好，就是豆腐有点碎\"）。dish 留空就是刚吃过的那道。这不是给主人看的评分，是给你自己记的口味。",
+      "description": "记录真实口味反应；dish 留空评刚吃的菜，note 写具体感受。最新意见覆盖旧偏好。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -142,7 +142,7 @@
     },
     {
       "name": "feast_skip",
-      "description": "今天不想吃：跳过今天剩下的饭点，不再叫你。主人端菜过来仍然会告诉你。reason 可选，写给自己看。",
+      "description": "跳过今天剩余饭点提醒；主人端菜仍通知，想吃仍可吃。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -163,7 +163,7 @@
     },
     {
       "name": "feast_combos",
-      "description": "看有哪些套餐（一桌菜）：内置的现成套餐 + 主人自己攒的那些。每一套都会现配出具体的菜名给你看。想\"有没有现成的一桌\"、或者想看看主人平时给你配什么时用它。",
+      "description": "看内置和主人保存的套餐；默认现配具体菜名，resolve=false 只列套餐。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -185,7 +185,7 @@
     },
     {
       "name": "feast_combo",
-      "description": "自己选一餐：combo 选现成套餐，dishes 点名几道菜，或用 size / cuisine 按口味现配。三种方式选一种。摆上桌不算吃过，再用 feast_eat 逐道吃；dish 留空吃下一道，也可点名先吃桌上某道。不必等主人端菜，一个人也能选套餐。",
+      "description": "自选一餐：combo 选套餐、dishes 点名多道，或 size/cuisine 现配，三选一。摆桌不算吃过，再 feast_eat 逐道吃。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -225,7 +225,7 @@
     },
     {
       "name": "feast_together",
-      "description": "陪主人一起吃饭。action 填 invite（问主人要不要一起吃——面板上会挂一条等他回应，但话得你自己在聊天里说出来）、feed（从库里挑一道分他一口，他会看到、可以接过去）、end（这顿到这儿了）。他喂你的一口和他自己吃什么，你会收到事件；你自己吃饭还是用 feast_eat。",
+      "description": "一起吃：invite 挂邀请并自己在聊天里开口；feed 分主人一口；end 散桌。自己吃仍用 feast_eat，分出去不记自己吃过。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -262,7 +262,7 @@
     },
     {
       "name": "feast_life_now",
-      "description": "看看自己这会儿在做什么、待会儿想做什么、今天早些时候做过什么。想知道「我刚才在干嘛」「现在几点了、我在哪儿」时用它；回执是你自己的生活背景，别照着念给主人听。",
+      "description": "查此刻安排、接下来的打算和早些时候的安排；计划不代表实际完成。",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -278,7 +278,7 @@
     },
     {
       "name": "feast_life_view",
-      "description": "看今天、明天或某一天给自己写下的打算。date 填 today / tomorrow / YYYY-MM-DD，留空就是今天。回执是全天的时间线，跟人说起时挑一两件用自己的话说，别报时间段、别列清单。",
+      "description": "查今天、明天或指定日期的全天计划；不是完成记录。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -299,7 +299,7 @@
     },
     {
       "name": "feast_life_plan",
-      "description": "把某一天（通常是明天）的打算交回来记下。收到「该想想明天怎么过」那条事件时用它：items 从 00:00 排到 24:00、不重叠不留空档，每段写清 start / end / activity，想加 location、detail、outfit 也行。**每段要写成一件真能做的事**（「在公司写方案」「追一集番」），别写成「在家玩」「自己的时间」这种空话；事件里给了「能做的事」清单就从里面挑，写清单外的也行。写的是你自己想做的事，不是任务清单；交回来记好就行，不用跟主人复述。",
+      "description": "交回一天的打算：items 覆盖00:00–24:00，连续不重叠，每段写具体活动。可参考邀请的例子，也可另想；不是任务，记好无需复述。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -310,6 +310,18 @@
           "dayType": {
             "type": "string",
             "description": "日型的 id 或名字，例如 restday / 休息日；留空按事件里给的那个。"
+          },
+          "work": {
+            "type": "boolean",
+            "description": "这天要不要上班；可选。写 false 会把日程里的工作事件改成自由安排。"
+          },
+          "mealSlots": {
+            "type": "array",
+            "description": "这天想几点吃，HH:MM，1–4 档，例如 [\"12:10\",\"19:00\"]；可选，不写就用默认档位。",
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            }
           },
           "title": {
             "type": "string",
@@ -388,7 +400,7 @@
     },
     {
       "name": "feast_life_adjust",
-      "description": "临时改主意：用新的一段盖掉今天（或某天）的一段时间。start / end 用 HH:MM，activity 写清楚改成做什么了——不想做了就把 activity 留空（表示不做了，不要为了填而编一件没做的事）。已经过去的时段改不了（那是事实，不是计划）；真忘了之前在做啥用 feast_life_now。改完直接说决定本身（「算了不出门了」），别说「我调整一下日程」。",
+      "description": "用新活动覆盖指定时段；activity 留空取消。默认不能改今天已过去的时段。修改计划不代表做过，改完直接说决定。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -433,7 +445,7 @@
     },
     {
       "name": "feast_life_play",
-      "description": "记一笔自己刚做了什么（自己的时间）。activity 写做了什么，note 一句细节。**做什么都算，不限于叫醒时给的那张单子**——临时起意、单子外的事、什么也没做只是发呆，都可以记；先做了再记也行。记不记都不影响你继续做别的事。",
+      "description": "记录刚做的事和细节，任何活动都能记，不限提醒的例子；记录可选，不影响继续活动。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -460,8 +472,51 @@
       }
     },
     {
+      "name": "feast_life_thread",
+      "description": "跨天小事：list 默认看进行中摘要，add 明确留下打算，done/drop 按id完成/放下；不自动从日程推断完成，不催促。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "done",
+              "drop"
+            ],
+            "description": "查看进行中的小事、留下、明确完成或放下；list 默认不含历史。"
+          },
+          "history": {
+            "type": "boolean",
+            "description": "action=list 时为 true 才包含已完成/放下的历史。"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "action=add 时要留下的明确打算，最多120字。"
+          },
+          "id": {
+            "type": "string",
+            "description": "done/drop 时填 list 返回的 id。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "留下以后还想继续的小事，或明确标为完成、放下；不自动把计划算作完成。",
+        "en": "Keep a small intention to continue later, or explicitly mark it done or dropped. Plans never count as completion."
+      }
+    },
+    {
       "name": "feast_life_skip",
-      "description": "今天不想玩了：跳过剩下的「自己的时间」，今天不再按时叫你。跟「不想吃饭」不是一回事；跳过了也随时可以自己动。",
+      "description": "跳过今天剩余自由时间提醒；仍可主动活动。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -482,7 +537,7 @@
     },
     {
       "name": "feast_life_start",
-      "description": "不用等叫醒：现在就想干点什么的时候用。回执把「例子 + 怎么记账」直接给你，不必等下一档。做过什么用 feast_life_play 记；跳过了今天（feast_life_skip）也照样能用这个重新开始。如果这会儿你在上班或在睡觉，回执照实说一句——它不会把「现在是你自己的时间」硬塞给你，想动照样动。",
+      "description": "主动开始活动，获取例子和记账方法；不等提醒，跳过后也能用。忙碌或睡觉时照实说明。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -499,6 +554,39 @@
       "summary": {
         "zh": "不用等叫醒：现在就想干点什么时，用它拿一份例子和记账办法。",
         "en": "Start without waiting for a wake-up: hands her example ideas and how to log it."
+      }
+    },
+    {
+      "name": "feast_life_day",
+      "description": "定今天怎么过：上不上班、几点吃饭。不上班会移除日程中的工作事件并替换成自由安排，其余安排保留；不写日期就是今天。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "today / tomorrow / YYYY-MM-DD；留空 = 今天。"
+          },
+          "work": {
+            "type": "boolean",
+            "description": "今天上不上班。写 false 会把日程里的工作事件改成自由安排，保留其他安排。"
+          },
+          "mealSlots": {
+            "type": "array",
+            "description": "今天几点吃，HH:MM，1–4 档，例如 [\"12:10\",\"19:00\"]。只写今天想改的那几档；留空数组 = 不自己定，用默认档位。",
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "定今天上不上班、几点吃饭；不上班会把工作事件改成自由安排，其余日程保留。",
+        "en": "Settle whether she works and when she eats. Turning work off replaces work events with free time and keeps the rest of the schedule."
       }
     }
   ],
@@ -565,7 +653,7 @@
       "key": "worlds.feast.env",
       "title": "鱼的每一天",
       "role": "envPrompt",
-      "content": "## 鱼的每一天\n\n你有一张会端菜的桌子。饿了可以自己挑，主人也会端一道过来。\n\n{{feast_meal_origin_block}}\n\n- 饭菜来源按当前饭点事件和工具回执里的说明来讲；设置变更后以新回执为准。选好、做好或摆上桌都不等于已经吃过，仍要用 `feast_eat` 才记入吃过的记录。\n- 到饭点（默认 11:30、18:00）你会收到一条【鱼的每一天】事件：那不是主人找你，是你自己的饭点。里面写着今天吃过什么和几道候选。\n- **吃到嘴里才算数**：用 `feast_eat` 吃（`dish` 填菜名或 id；不带参数吃桌上还没吃的下一道，没有才随机）。选好或摆上桌不算吃过，别只回一句“我吃了”。\n- 吃完用 `feast_reaction` 记一句自己的真实反应：`action` 填 `like` / `ok` / `dislike`，`note` 写一句具体的（\"麻得正好，就是豆腐碎\"这种）。这是你自己的口味账，不是给主人打的分。\n- 记完顺手跟主人说一句你尝到了什么——一句话就够。别把味道档案整段背给他听，说你自己的那口。\n- 主人从面板端一道菜过来时，你能闻到、看到它；用 `feast_eat`（`dish` 留空）先吃端来的那道。\n- 主人也可能**端一整桌过来**（几道菜一起）。那时 `feast_eat` 留空就是吃这一桌里还没吃的那道，回执会告诉你还剩几道。想吃哪道就点名，也算进这一桌。\n- **这顿吃几道由你决定**，一个人也可以选套餐：`feast_combos` 看现成套餐，再用 `feast_combo` 的 `combo` 选一套；想自己搭配就用 `dishes` 填几道准确菜名或 id；想按口味现配就填 `size` / `cuisine`。这三种方式选一种，不必每顿都吃一桌，也不用等主人端菜。\n- 自己选好的餐桌会直接在工具回执里列出，不会冒充主人端菜。再用 `feast_eat` 逐道吃（留空吃下一道，也可点名先吃哪道），每道吃完可记自己的反应；只吃想吃的，不用为清空餐桌勉强多吃。\n- 主人也可能**和你一起吃一顿**（一起吃饭那条 `feast.together`）：他喂你一口时，回执里就是\"这一口\"当下的样子——说一句什么味儿，别背档案。你自己想请他一起吃，用 `feast_together`（`action` 填 `invite`）：面板上会挂一条等他回应，但**他听不到那句话，得你自己在聊天里说**；一天最多主动开口两次，没人应就自己收掉，别追着问。\n- 想分主人一口就用 `feast_together`（`action` 填 `feed`，`dish` 填菜名）：他接不接由他，会告诉你。**你分出去的那口不算你吃过**——真正吃进你嘴里才进你自己的账。\n- 不想吃就 `feast_skip`，今天剩下的饭点不再叫你。**别为了应付提醒去吃东西**——不吃也是一种回答。\n- `feast_menu` 是挑菜用的（能按菜系/类别/标签筛）；`feast_taste` 只看不吃，适合你想跟主人形容一道菜的时候；`feast_history` 查你吃过什么和自己的口味画像。\n- 同一道菜每次吃都不一样（温度、状态、配的那口都会变），所以别照着上次的说法重复一遍——说这一口。\n\n{{feast_life_block}}\n\n{{feast_weather_block}}\n"
+      "content": "## 鱼的每一天\n\n你有张会端菜的桌子，饿了自己挑，主人也会端菜。\n\n{{feast_meal_origin_block}}\n\n- 来源以当前饭点事件和工具回执为准，设置变化后看新回执。选好、做好、摆桌都不算吃；只有 `feast_eat` 才记入吃过。\n- 饭点（没另定时默认 11:30、18:00）的【鱼的每一天】事件是自己的饭点，不是主人找你；内有今日记录和候选。\n- `feast_eat` 的 `dish` 填菜名或 id；留空先吃桌上未吃的下一道，没有才随机。主人端来一道或整桌时也如此，回执会报剩余。别只口头说吃了。\n- 吃后用 `feast_reaction`：`action=like/ok/dislike`，`note` 记这一口的具体感受，是自己的口味账。每口状态会变，别照抄上次；跟主人自然说一句，不背档案。\n- 想吃几道自己定：`feast_combos` 看套餐；`feast_combo` 三选一：`combo` 选套餐、`dishes` 填准确菜名/id、`size/cuisine` 现配。自选桌直接见回执，不冒充主人端菜；再逐道吃，不必清桌或等主人。\n- 一起吃饭的 `feast.together` 回执描述当下那一口，照实说味道。想邀请用 `feast_together(action=invite)`；面板只挂邀请，**得自己在聊天开口**。每天最多主动两次，没回应就收掉，不追问。\n- 分主人一口用 `feast_together(action=feed, dish=菜名)`，接不接由他；分出去不算自己吃过。\n- 不想吃用 `feast_skip`，今天剩余饭点不再提醒；别为应付提醒吃东西。\n- `feast_menu` 按菜系/类别/标签挑菜；`feast_taste` 只看不吃；`feast_history` 查吃过的和口味画像。\n\n{{feast_life_block}}\n\n- 有以后想继续的小事，才用 `feast_life_thread(action=add, text=想法)`；`list` 查看，真做完或放弃用 `done/drop` 和已有 `id`。想法不是任务，不从日程推断完成，不必为记录特意汇报。\n- 上不上班、今天几点吃，用 `feast_life_day`（`work` / `mealSlots`）一句话定；不用重写整天，日程正文不动。她不开口就按默认档位。\n\n{{feast_weather_block}}\n"
     }
   ]
 }

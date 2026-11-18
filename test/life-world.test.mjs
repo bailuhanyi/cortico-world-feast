@@ -11,7 +11,7 @@
  * 临时目录故意不删：见 life.test.mjs 末尾的说明（删目录会被沙箱当批量删除拦下）。
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rmdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -19,7 +19,7 @@ import { test, report } from './harness.mjs';
 import { FeastWorld, FEAST_TOOL_DECLS } from '../src/world.js';
 import { feastDefinition } from '../src/definition.js';
 import { DEFAULTS, EVENT_LIFE_FREE, EVENT_LIFE_MOMENT, EVENT_LIFE_PLAN } from '../src/config.js';
-import { addDays, dateLabel, listDays, playPath, readDay, readPlay, templateDay, writeDay } from '../src/life/index.js';
+import { addDays, dateLabel, listDays, parseSlots, playPath, readDay, readPlay, templateDay, writeDay } from '../src/life/index.js';
 import { clearWardrobeCache } from '../src/life/wardrobe.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -310,7 +310,7 @@ test('envPromptVars：配置里塞垃圾也不抛错（抛错会把整个 World 
 
 test('时段事件：换一件事才推一句，同一段里不重复推', async () => {
   const clock = { t: Date.parse(`${DAY}T09:30:00+08:00`) };
-  const { world, runTick, lifeEvents } = await makeWorld({ now: () => clock.t });
+  const { world, runTick, lifeEvents } = await makeWorld({ now: () => clock.t, cfg: { lifeMomentEvents: true } });
 
   // 启动首拍只记当前段、不推（不然一启动就冒出一条「这会儿在…」）。
   await runTick();
@@ -690,7 +690,7 @@ test('feast_life_adjust：主人从面板可以改过去，而且改动署名是
 
 test('改完日程立刻补一条时段事件：她那一拍的依据马上更新', async () => {
   const clock = { t: Date.parse(`${DAY}T15:00:00+08:00`) };
-  const { world, tools, lifeEvents, runTick } = await makeWorld({ now: () => clock.t });
+  const { world, tools, lifeEvents, runTick } = await makeWorld({ now: () => clock.t, cfg: { lifeMomentEvents: true } });
 
   // 先走一拍，把基线段落下来（首拍只记不推）。
   await runTick();
@@ -797,14 +797,14 @@ test('自由时间：送达后写盘失败只重试保存，关闭提醒也会�
   const now = () => Date.parse(DAY + 'T21:02:00+08:00');
   const cfg = { lifeFreeSlots: '21:00' };
   const setup = await makeWorld({ now, cfg });
-  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  const blockedPath = playPath(setup.dataDir, DAY);
   const warnings = [];
   setup.host.log.warn = (message) => warnings.push(message);
   await mkdir(blockedPath);
   await setup.runTick();
   await setup.runTick();
   assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
-  assert.equal(await readPlay(setup.dataDir, DAY), null);
+  await assert.rejects(readPlay(setup.dataDir, DAY), /记录读取失败/);
   assert.ok(warnings.some((message) => message.includes('重试保存')));
   await rmdir(blockedPath);
   setup.world.cfg.lifeFreeEnabled = false;
@@ -823,10 +823,11 @@ test('自由时间：停止前补存已送达记录，重启后不重叫', async
   const now = () => Date.parse(DAY + 'T21:02:00+08:00');
   const cfg = { lifeFreeSlots: '21:00' };
   const setup = await makeWorld({ now, cfg });
-  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  const blockedPath = playPath(setup.dataDir, DAY);
   await mkdir(blockedPath);
   await setup.runTick();
   assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  await assert.rejects(readPlay(setup.dataDir, DAY), /记录读取失败/);
   await rmdir(blockedPath);
   await setup.world.stop();
   const saved = await readPlay(setup.dataDir, DAY);
@@ -842,15 +843,20 @@ test('自由时间：清空日程后不恢复此前保存失败的旧记录', as
     now: () => Date.parse(DAY + 'T21:02:00+08:00'), cfg: { lifeFreeSlots: '21:00' },
   });
   await setup.tools.feast_life_play({ activity: '旧记录' });
-  const blockedPath = playPath(setup.dataDir, DAY) + '.tmp';
+  const before = await readPlay(setup.dataDir, DAY);
+  const blockedPath = `${playPath(setup.dataDir, DAY)}.bak`;
   await mkdir(blockedPath);
   await setup.runTick();
-  await setup.world.webUi('zh').storage.find((item) => item.key === 'feast-life').clear();
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
+  assert.deepEqual(await readPlay(setup.dataDir, DAY), before, '备份失败应保留旧记录，已送达状态尚未写盘');
   await rmdir(blockedPath);
+  await setup.world.webUi('zh').storage.find((item) => item.key === 'feast-life').clear();
   setup.world.cfg.lifeFreeSlots = '';
   await setup.runTick();
   assert.equal(await readPlay(setup.dataDir, DAY), null);
+  assert.equal(setup.lifeEvents(EVENT_LIFE_FREE).length, 1);
   await setup.world.stop();
+  assert.equal(await readPlay(setup.dataDir, DAY), null, '停止时也不应恢复清空前待保存的记录');
 });
 
 test('自由时间：叫醒事件带上日程里那一段、菜单和记账指引', async () => {
@@ -1264,6 +1270,343 @@ test('联动：imggen 改了 libraryRoot，feast 自动跟上（不靠默认路�
   assert.ok(vars.feast_life_block.includes('生图工作室'), '库在自定义路径下也读到了 → 前缀带指向句');
   assert.ok(vars.feast_life_block.includes('青'), '指向句带人物名');
   await world.stop();
+});
+
+test('损坏日程不会在启动或下一拍被模板覆盖', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'broken-day-'));
+  await mkdir(join(dataDir, 'feast', 'life'), { recursive: true });
+  const file = join(dataDir, 'feast', 'life', `${DAY}.json`);
+  const broken = '{broken-day';
+  await writeFile(file, broken, 'utf8');
+  const { world, runTick } = await makeWorld({ dataDir });
+  await runTick();
+  await world.stop();
+  assert.equal(await readFile(file, 'utf8'), broken);
+});
+
+test('损坏活动记录不会在提醒或记活动时被空记录覆盖', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'broken-play-'));
+  await mkdir(join(dataDir, 'feast', 'life'), { recursive: true });
+  const file = playPath(dataDir, DAY);
+  const broken = '{broken-play';
+  await writeFile(file, broken, 'utf8');
+  const { world, runTick, tools } = await makeWorld({ dataDir });
+  await runTick();
+  const out = await tools.feast_life_play({ activity: '读书' });
+  assert.equal(out.failed, true);
+  assert.match(out.text, /记录损坏/);
+  await world.stop();
+  assert.equal(await readFile(file, 'utf8'), broken);
+});
+
+test('上限为8时内置模板仍保留全天，超限重交不覆盖原日程', async () => {
+  const { world, tools, dataDir } = await makeWorld({ cfg: { lifeMaxItems: 8, lifeDayType: 'workday' } });
+  const today = await readDay(dataDir, DAY);
+  assert.equal(today.items.at(-1).end, '24:00');
+  const tomorrow = addDays(DAY, 1);
+  await tools.feast_life_plan(planPayload(tomorrow));
+  const file = join(dataDir, 'feast', 'life', `${tomorrow}.json`);
+  const before = await readFile(file, 'utf8');
+  const items = Array.from({ length: 12 }, (_, i) => ({
+    start: `${String(i * 2).padStart(2, '0')}:00`,
+    end: `${String(i * 2 + 2).padStart(2, '0')}:00`, activity: `活动${i}`,
+  }));
+  const out = await tools.feast_life_plan({ date: tomorrow, items });
+  assert.equal(out.failed, true);
+  assert.match(out.text, /合并.*重新提交/);
+  assert.equal(await readFile(file, 'utf8'), before);
+  await world.stop();
+});
+
+test('生活首页只把实际活动和饮食列为记录，计划留在安排中', async () => {
+  const { world, tools } = await makeWorld();
+  const ui = world.webUi();
+  assert.equal(ui.panels[0].id, 'today');
+  assert.ok(!ui.panels[0].getMethods.includes('recovery'));
+  let home = await ui.invoke('today', 'list', []);
+  assert.deepEqual(home.actual, []);
+  await tools.feast_life_play({ activity: '读了两章书', note: '想明天接着看' });
+  await tools.feast_eat({ dish: '麻婆豆腐' });
+  home = await ui.invoke('today', 'list', []);
+  assert.equal(home.actual.length, 2);
+  assert.ok(home.actual.some((item) => item.kind === 'activity' && item.text === '读了两章书'));
+  assert.deepEqual(home.threads.items, [], '活动不会自动变成跨天小事');
+  await world.stop();
+});
+
+test('小事明确留下后跨天进入邀请，完成或放下后不再提示', async () => {
+  const clock = { t: NOON };
+  const { world, tools, dataDir, lifeEvents } = await makeWorld({ now: () => clock.t });
+  const out = await tools.feast_life_thread({ action: 'add', text: '接着看那本书' });
+  assert.ok(!out.failed);
+  const ui = world.webUi();
+  let home = await ui.invoke('today', 'list', []);
+  const thread = home.threads.items[0];
+  assert.equal(thread.source, 'coo');
+  await ui.invoke('today', 'plan', []);
+  assert.match(lifeEvents(EVENT_LIFE_PLAN).at(-1).text, /接着看那本书/);
+  await world.stop();
+  clock.t += 24 * 60 * 60_000;
+  const restarted = await makeWorld({ dataDir, now: () => clock.t });
+  home = await restarted.world.webUi().invoke('today', 'list', []);
+  assert.equal(home.threads.items[0].id, thread.id);
+  const listed = await restarted.tools.feast_life_thread({ action: 'list' });
+  assert.equal(JSON.parse(listed.text).items.length, 1, 'list 默认只带进行中的小事');
+  const done = await restarted.tools.feast_life_thread({ action: 'done', id: thread.id });
+  assert.ok(!done.failed);
+  await restarted.world.webUi().invoke('today', 'plan', []);
+  assert.ok(!restarted.lifeEvents(EVENT_LIFE_PLAN).at(-1).text.includes('接着看那本书'));
+  await restarted.world.stop();
+});
+
+test('恢复日程会保留损坏原档，拒绝传入任意文件路径', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  await tools.feast_life_plan(planPayload(addDays(DAY, 1)));
+  await tools.feast_life_plan({ ...planPayload(addDays(DAY, 1)), title: '新想法' });
+  const file = join(dataDir, 'feast', 'life', `${addDays(DAY, 1)}.json`);
+  await writeFile(file, '{broken', 'utf8');
+  const ui = world.webUi();
+  const home = await ui.invoke('today', 'list', []);
+  assert.ok(home.storageIssues.find((item) => item.key === 'tomorrow')?.backupAvailable);
+  const bad = await ui.invoke('today', 'recovery', [{ key: file, action: 'restore' }]);
+  assert.equal(bad.ok, false);
+  const restored = await ui.invoke('today', 'recovery', [{ key: 'tomorrow', action: 'restore' }]);
+  assert.equal(restored.ok, true);
+  assert.equal((await readDay(dataDir, addDays(DAY, 1))).title, '去趟旧书店');
+  await world.stop();
+});
+
+test('等待写明天超过十分钟后手动重发一次，重复操作有冷却', async () => {
+  const clock = { t: NOON };
+  const { world, lifeEvents } = await makeWorld({ now: () => clock.t });
+  const ui = world.webUi();
+  await ui.invoke('today', 'plan', []);
+  assert.equal((await ui.invoke('today', 'list', [])).planRetryAvailable, false);
+  clock.t += 11 * 60_000;
+  assert.equal((await ui.invoke('today', 'list', [])).planRetryAvailable, true);
+  await ui.invoke('today', 'plan', [{ retry: true }]);
+  await ui.invoke('today', 'plan', [{ retry: true }]);
+  assert.equal(lifeEvents(EVENT_LIFE_PLAN).length, 2);
+  await world.stop();
+});
+
+// --------------------------------------------------------------------------
+// 0.10.0：上不上班的开关 + 饭点档位由她自己定
+// --------------------------------------------------------------------------
+
+test('feast_life_day：说不上班后换日型并移除工作事件，其他安排保留', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  const before = await readDay(dataDir, DAY);
+  assert.equal(before.work, true, '周四的模板该是上班日');
+  assert.equal(before.dayType.id, 'workday');
+
+  const out = await tools.feast_life_day({ work: false });
+  assert.ok(!out.failed, out.text);
+  const after = await readDay(dataDir, DAY);
+  assert.equal(after.work, false);
+  assert.equal(after.dayType.id === 'workday' || after.dayType.id === 'overtime' || after.dayType.id === 'slacking',
+    false, `日型还留在上班那一类：${after.dayType.name}`);
+  assert.deepEqual(after.items.map((it) => it.start), before.items.map((it) => it.start),
+    '替换工作事件时保留原时段边界');
+  assert.ok(!after.items.some((it) => /上班|通勤|下班|加班|摸鱼/.test(it.activity)),
+    '不上班后不能残留工作安排');
+  assert.ok(after.items.filter((it) => it.activity === '自由安排').every((it) => it.location === '家'),
+    '被替换的工作时段应改为居家自由安排');
+  assert.ok(after.items.some((it) => it.activity === '吃午饭'), '非工作安排应保留');
+  assert.ok(after.changes.at(-1).note.includes('不上班'));
+
+  // 再翻回来只改变标记和日型，不凭空复原已移除的工作事件。
+  await tools.feast_life_day({ work: true });
+  const back = await readDay(dataDir, DAY);
+  assert.equal(back.work, true);
+  assert.ok(!back.items.some((it) => /通勤|上班|下班回家/.test(it.activity)),
+    '翻回上班不应自动编造工作安排');
+  await world.stop();
+});
+
+test('feast_life_day：她自己定饭点，到点就按她定的叫，不是配置里那两个点', async () => {
+  const clock = { t: Date.parse(`${DAY}T12:00:00+08:00`) };
+  const { world, tools, dataDir, runTick, events } = await makeWorld({ now: () => clock.t });
+  const out = await tools.feast_life_day({ mealSlots: ['13:10', '20:00'] });
+  assert.ok(!out.failed, out.text);
+  assert.deepEqual((await readDay(dataDir, DAY)).mealSlots, ['13:10', '20:00']);
+
+  // 13:15 到点该叫她（配置里的 11:30 已经过去了，但她没定它）。
+  const meals = () => events.filter((e) => e.type === 'feast.meal');
+  assert.equal(meals().length, 0);
+  clock.t = Date.parse(`${DAY}T13:15:00+08:00`);
+  await runTick();
+  assert.equal(meals().length, 1, `该叫一顿，叫了 ${meals().length} 顿`);
+  assert.equal(meals()[0].meta.slot, '13:10');
+  await world.stop();
+});
+
+test('她自己定饭点：关掉「饭点由她自己定」就不采用，仍按配置叫', async () => {
+  const clock = { t: Date.parse(`${DAY}T12:00:00+08:00`) };
+  const { world, tools, dataDir, runTick, events } = await makeWorld({
+    now: () => clock.t, cfg: { mealSlotsByHer: false, mealSlots: '11:30,18:00' },
+  });
+  await tools.feast_life_day({ mealSlots: ['13:10'] });
+  assert.deepEqual((await readDay(dataDir, DAY)).mealSlots, ['13:10'], '她写的还是记下来，只是不采用');
+  clock.t = Date.parse(`${DAY}T13:15:00+08:00`);
+  await runTick();
+  const meals = events.filter((e) => e.type === 'feast.meal');
+  // 关掉之后 13:10 不再是档位；今天一档都没叫过，所以按配置补最近过去的那一顿（11:30）。
+  assert.ok(!meals.some((e) => e.meta.slot === '13:10'), '关掉之后 13:10 这一档不该叫');
+  assert.equal(meals.at(-1)?.meta.slot, '11:30', '仍按配置那组补一顿');
+  const list = await world.webUi().invoke('today', 'list', []);
+  assert.deepEqual(list.mealSlots, ['11:30', '18:00'], '面板上该是配置那组');
+  assert.equal(list.mealSlotsByHer, false);
+  await world.stop();
+});
+
+test('她没定饭点时，面板报的是配置那组（mealSlotsByHer=false）', async () => {
+  const { world } = await makeWorld();
+  const list = await world.webUi().invoke('today', 'list', []);
+  assert.equal(list.mealSlotsByHer, false);
+  assert.deepEqual(list.mealSlots, parseSlots(DEFAULTS.mealSlots).map((s) => s.hm));
+  assert.equal(list.work, true, '周四模板是上班日');
+  await world.stop();
+});test('feast_life_plan：写日程时顺手定饭点、说不上班，一次交回', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  const target = addDays(DAY, 1);
+  const out = await tools.feast_life_plan({ ...planPayload(target), mealSlots: ['12:30', '19:30'], work: false });
+  assert.ok(!out.failed, out.text);
+  const day = await readDay(dataDir, target);
+  assert.deepEqual(day.mealSlots, ['12:30', '19:30']);
+  assert.equal(day.work, false);
+  assert.ok(!day.items.some((it) => /上班|通勤|下班|加班|摸鱼|公司|办公室|工位/.test(it.activity)),
+    'plan 同时指定不上班时不能留下工作事件');
+  assert.match(out.text, /饭点 12:30、19:30/);
+  await world.stop();
+});
+
+test('feast_life_plan：饭点写歪了整份拒掉，原日程不动（不静默退回默认档位）', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  const target = addDays(DAY, 1);
+  await tools.feast_life_plan(planPayload(target));
+  const before = await readDay(dataDir, target);
+  const bad = await tools.feast_life_plan({ ...planPayload(target), title: '不该写进去', mealSlots: ['乱写'] });
+  assert.equal(bad.failed, true);
+  assert.match(bad.text, /HH:MM/);
+  const after = await readDay(dataDir, target);
+  assert.equal(after.title, before.title, '写歪了不该把原来那一天盖掉');
+  await world.stop();
+});
+
+test('feast_life_day：日程还没有时不凭空造一天，如实说等日程', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  const target = addDays(DAY, 3);
+  const out = await tools.feast_life_day({ date: target, work: false });
+  assert.equal(out.failed, true);
+  assert.match(out.text, /还没有日程/);
+  assert.equal(await readDay(dataDir, target), null, '别为了定个标记就写一份空日程出去');
+  await world.stop();
+});
+
+test('feast_life_day：两件事都没说时如实说没得改，不落盘', async () => {
+  const { world, tools, dataDir } = await makeWorld();
+  const before = await readFile(join(dataDir, 'feast', 'life', `${DAY}.json`), 'utf8');
+  const out = await tools.feast_life_day({});
+  assert.equal(out.failed, true);
+  assert.match(out.text, /没说要改什么/);
+  assert.equal(await readFile(join(dataDir, 'feast', 'life', `${DAY}.json`), 'utf8'), before);
+  await world.stop();
+});
+
+test('面板 work：主人一句话翻掉今天上不上班；没有日程时给 ok:false 而不是抛错', async () => {
+  const { world, dataDir } = await makeWorld();
+  const ui = world.webUi('zh');
+  const off = await ui.invoke('today', 'work', [{ date: DAY, work: false }]);
+  assert.equal(off.ok, true, off.message);
+  assert.equal((await readDay(dataDir, DAY)).work, false);
+  const on = await ui.invoke('today', 'work', [{ date: DAY, work: true }]);
+  assert.equal(on.ok, true);
+  assert.equal((await readDay(dataDir, DAY)).work, true);
+
+  const none = await ui.invoke('today', 'work', [{ date: addDays(DAY, 4), work: false }]);
+  assert.equal(none.ok, false);
+  assert.match(none.message, /还没有日程/);
+
+  const bad = await ui.invoke('today', 'work', [{ date: DAY }]);
+  assert.equal(bad.ok, false, '不写 work 时要明确拒绝');
+  await world.stop();
+});
+
+test('面板：work 在 today 的方法声明里，list 也给出这两个字段', async () => {
+  const { world } = await makeWorld();
+  const ui = world.webUi('zh');
+  const today = ui.panels.find((p) => p.id === 'today');
+  assert.ok(today.getMethods.includes('work'), 'work 没声明，面板点不到');
+  const list = await ui.invoke('today', 'list', []);
+  for (const key of ['work', 'mealSlots', 'mealSlotsByHer']) {
+    assert.ok(key in list, `list 缺 ${key}`);
+  }
+  await world.stop();
+});
+
+test('请她写明天：开着「饭点由她自己定」时正文换成邀请她定，而不是告诉她照旧', async () => {
+  const { world, tools, lifeEvents } = await makeWorld();
+  assert.ok('feast_life_day' in tools, '缺 feast_life_day');
+  await world.webUi().invoke('today', 'plan', []);
+  const text = lifeEvents(EVENT_LIFE_PLAN).at(-1).text;
+  assert.match(text, /mealSlots/, '没告诉她可以带上饭点');
+  assert.match(text, /由你定/);
+  await world.stop();
+});
+
+test('请她写明天：关掉「饭点由她自己定」时正文仍是「照旧是 11:30、18:00」', async () => {
+  const { world, lifeEvents } = await makeWorld({ cfg: { mealSlotsByHer: false } });
+  await world.webUi().invoke('today', 'plan', []);
+  const text = lifeEvents(EVENT_LIFE_PLAN).at(-1).text;
+  assert.match(text, /饭点照旧是/, '关掉后不该再邀请她自己定');
+  assert.match(text, /11:30/);
+  await world.stop();
+});
+
+test('上班预览不写盘，过期预览拒绝；撤销跨重启且保留新饭点', async () => {
+  const setup = await makeWorld();
+  const ui = setup.world.webUi('zh');
+  const before = await readDay(setup.dataDir, DAY);
+  const preview = await ui.invoke('today', 'work', [{ work: false, action: 'preview' }]);
+  assert.ok(preview.affected.some((it) => it.activity === '通勤'));
+  assert.deepEqual(await readDay(setup.dataDir, DAY), before);
+  const off = await ui.invoke('today', 'work', [{ work: false, revision: preview.revision }]);
+  assert.equal(off.ok, true);
+  const stale = await ui.invoke('today', 'work', [{ work: false, revision: preview.revision }]);
+  assert.equal(stale.ok, false);
+  await setup.tools.feast_life_day({ mealSlots: ['12:45'] });
+  await setup.world.stop();
+  const restarted = await makeWorld({ dataDir: setup.dataDir });
+  try {
+    const result = await restarted.world.webUi('zh').invoke('today', 'work', [{ action: 'undo' }]);
+    assert.equal(result.ok, true, result.message);
+    const restored = await readDay(setup.dataDir, DAY);
+    assert.deepEqual(restored.items, before.items);
+    assert.equal(restored.work, before.work);
+    assert.deepEqual(restored.mealSlots, ['12:45']);
+    assert.equal(restored.workUndo, undefined);
+  } finally { await restarted.world.stop(); }
+});
+
+test('不上班的旧日程只报告冲突；主动清理后若时段已改则拒绝撤销', async () => {
+  const setup = await makeWorld();
+  try {
+    const original = await readDay(setup.dataDir, DAY);
+    await writeDay(setup.dataDir, { ...original, work: false, dayType: { id: 'restday', name: '休息日' } });
+    const file = join(setup.dataDir, 'feast', 'life', `${DAY}.json`);
+    const bytes = await readFile(file, 'utf8');
+    const ui = setup.world.webUi('zh');
+    const home = await ui.invoke('today', 'list', []);
+    assert.ok(home.workConflicts.length > 0);
+    assert.equal(await readFile(file, 'utf8'), bytes, '查询不应静默修复磁盘');
+    await ui.invoke('today', 'work', [{ work: false }]);
+    await ui.invoke('today', 'adjust', [{ date: DAY, start: '20:00', end: '21:00', activity: '新计划' }]);
+    const changed = await readFile(file, 'utf8');
+    const undo = await ui.invoke('today', 'work', [{ action: 'undo' }]);
+    assert.equal(undo.ok, false);
+    assert.equal(await readFile(file, 'utf8'), changed);
+  } finally { await setup.world.stop(); }
 });
 
 await report();

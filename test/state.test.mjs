@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { test, report } from './harness.mjs';
 import {
-  dayIn, eatenMarkOf, eatenSince, eatenTodayText, eatCount, hmIn, lastEaten, markNudged, minutesIn,
-  newState, nextMealText, normalizeState, parseSlots, planTick, recordEat, recordReaction, rollover,
+  dayIn, eatenMarkOf, eatenSince, eatenTodayText, eatCount, effectiveMealSlots, hmIn, lastEaten, markNudged,
+  minutesIn, newState, nextMealText, normalizeState, parseSlots, planTick, recordEat, recordReaction, rollover,
   servedStillFresh, servedRemaining, setServed, skipToday, statusLine,
 } from '../src/state.js';
 
@@ -98,6 +98,46 @@ test('今天不想吃：剩下的档位不再叫', () => {
   rollover(s, '2026-11-06');
   assert.equal(planTick(s, CFG, at('2026-11-06T11:35:00+08:00'), TZ).action, 'fire', '第二天该照常叫');
 });
+
+// --- 0.10.0：她定的饭点优先于配置 --------------------------------
+
+test('effectiveMealSlots：她定了就用她定的，没定（或给空）就用配置', () => {
+  assert.deepEqual(effectiveMealSlots(CFG, null), ['11:30', '18:00'], '没定 = 配置兜底');
+  assert.deepEqual(effectiveMealSlots(CFG, []), ['11:30', '18:00'], '空数组也是没定，不是「今天不吃」');
+  assert.deepEqual(effectiveMealSlots(CFG, ['19:40', '12:30']), ['19:40', '12:30'], '她定的原样返回（顺序由 cleanMealSlots 负责）');
+  assert.deepEqual(effectiveMealSlots({ mealSlots: '' }, null), [], '配置也没档位时是真的没有');
+});
+
+test('planTick：按她定的档位叫，而不是配置里那两个点', () => {
+  const s = newState('2026-11-05');
+  // 她今天说 13:10、20:00 吃。11:35 不该叫，13:15 该叫。
+  assert.equal(planTick(s, CFG, at('2026-11-05T11:35:00+08:00'), TZ, ['13:10', '20:00']).action, 'none');
+  const plan = planTick(s, CFG, at('2026-11-05T13:15:00+08:00'), TZ, ['13:10', '20:00']);
+  assert.equal(plan.action, 'fire');
+  assert.equal(plan.slot, '13:10');
+  markNudged(s, at('2026-11-05T13:15:00+08:00'), plan.slot);
+  // 18:05 仍在「挂太久」的两小时窗口内：配置里那档 18:00 不该因为它在配置里就被叫。
+  const at18 = planTick(s, CFG, at('2026-11-05T14:30:00+08:00'), TZ, ['13:10', '20:00']);
+  assert.notEqual(at18.action, 'fire', '配置里的 18:00 在她定过档位的这一天不该再叫');
+  assert.equal(planTick(s, CFG, at('2026-11-05T20:05:00+08:00'), TZ, ['13:10', '20:00']).slot, '20:00');
+});
+
+test('planTick：她定的档位是空的就退回配置，不会一整天不叫她', () => {
+  const s = newState('2026-11-05');
+  const plan = planTick(s, CFG, at('2026-11-05T11:35:00+08:00'), TZ, []);
+  assert.equal(plan.action, 'fire');
+  assert.equal(plan.slot, '11:30');
+});
+
+test('nextMealText / statusLine 跟着她定的档位走', () => {
+  const s = newState('2026-11-05');
+  const own = ['13:10', '20:00'];
+  assert.equal(nextMealText(s, CFG, at('2026-11-05T12:00:00+08:00'), TZ, own), '13:10');
+  assert.match(statusLine(s, CFG, at('2026-11-05T12:00:00+08:00'), TZ, own), /下一顿 13:10/);
+  // 不给她定的档位时和以前一样。
+  assert.equal(nextMealText(s, CFG, at('2026-11-05T12:00:00+08:00'), TZ, null), '18:00');
+});
+
 
 test('吃过的记录：次数累加、今天清单、最近一口', () => {
   const s = newState('2026-11-05');

@@ -22,13 +22,19 @@ import { doingsLines } from './doings.js';
  *
  * `rewrite` 是主人从面板点「重写明天」时给的：那一天她已经写好了，这次是**重写**，
  * 措辞和夜里第一次请她写不一样，免得她以为自己从没写过。
+ *
+ * `mealByHer` 是配置里「饭点由她自己定」开着（0.10.0）：这时饭点那一句换成邀请，
+ * 说清她可以在交回时带上 `mealSlots`，而不是告诉她「照旧是 11:30、18:00」。
  */
-export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', doings = [], rewrite = false } = {}) {
+export function planEventText({
+  date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', doings = [],
+  rewrite = false, mealByHer = false,
+} = {}) {
   const name = who.name || '她';
   const lines = [
     rewrite
-      ? `【鱼的每一天 · 她的一天】主人想请你重新想想 ${dateLabel(date)}（${date}）。不是主人找你，也不是待办，是你自己的日子。`
-      : `【鱼的每一天 · 她的一天】该想想 ${dateLabel(date)}（${date}）怎么过了。不是主人找你，也不是待办，是你自己的日子。`,
+      ? `【鱼的每一天 · 她的一天】重新想想 ${dateLabel(date)}（${date}）：这是你自己的日子，不是待办。`
+      : `【鱼的每一天 · 她的一天】想想 ${dateLabel(date)}（${date}）怎么过：这是你自己的日子，不是待办。`,
     `这一天按「${type?.name || '普通的一天'}」来：${type?.guide || '照你平常的样子过一天。'}`,
   ];
   if (rewrite) {
@@ -38,10 +44,13 @@ export function planEventText({ date, type, recent = '', mealSlots = '11:30,18:0
   lines.push(...doingsLines(doings));
   if (recent) lines.push(`最近几天：\n${recent}`);
   if (wardrobe) lines.push(wardrobe);
-  lines.push(`饭点照旧是 ${mealSlots}，别把这两段排成别的事；吃饭那几段可以写去哪儿吃、和谁一起。`);
-  lines.push('想好之后用 feast_life_plan 交回：date 填这一天，dayType 填日型的 id，title 一句话，mood 一句话，items 从 00:00 排到 24:00、不重叠不留空档，每段写 { start, end, activity, location, detail }，想写穿了什么、手边有什么也可以加 outfit / props / situation / scene。');
-  lines.push('写的是你自己想做的事，不是任务清单；不必工整，也不用跟主人解释。交回来记好了就行，回一句「想好了」都算多。');
-  lines.push(`（${name}临时改主意时用 feast_life_adjust；忘了自己刚才在干嘛用 feast_life_now。想发图时穿着地点按日程里写的来。）`);
+  lines.push(mealByHer
+    ? `几点吃由你定：交回时带上 mealSlots（HH:MM，1–4 档，例如 ["12:10","19:00"]），那一天就按你定的叫；不写就用默认的 ${mealSlots}。吃饭那几段可以写去哪儿吃、和谁一起。`
+    : `饭点照旧是 ${mealSlots}，别把这两段排成别的事；吃饭那几段可以写去哪儿吃、和谁一起。`);
+  lines.push('想好后用 feast_life_plan 交回：date、dayType、title、mood 和从 00:00 连到 24:00 的 items；每段写 start/end/activity/location/detail，可加 outfit/props/scene。');
+  lines.push('这是想法，不是任务或完成证明；交回后不用解释。');
+  lines.push('（改主意用 feast_life_adjust；忘了此刻用 feast_life_now。想发图时沿用其中的穿着和地点。）');
+  if (mealByHer) lines.push('（上不上班、几点吃这两件事，白天想改就说一句，用 feast_life_day——不用重写一整天。）');
   return lines.join('\n');
 }
 
@@ -57,6 +66,5 @@ export function normalizePlan(raw, date, opts = {}) {
   if (named.length < 2) throw new Error('每段都要写清楚在做什么（activity）。');
   return cleanDay({ ...raw, date, source: 'coo', by: 'coo', generatedAt: Date.now() }, date, opts);
 }
-
 /** 面板/事件里给 Coo 看的 items 示例，别让她猜格式。 */
 export const PLAN_ITEM_EXAMPLE = '{ "start": "09:30", "end": "12:00", "activity": "在家收拾屋子", "location": "家", "detail": "把窗台那几盆花挪出去晒晒" }';

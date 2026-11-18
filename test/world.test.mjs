@@ -5,7 +5,7 @@
  * 定时器也是假的：把回调抓出来手动触发，不真的等 30 秒。
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
@@ -162,7 +162,7 @@ test('饭点：到点推一条 internal 事件，催一次之后放掉', async (
 
   // 时钟自己走：41 分钟后催一次，再 41 分钟放掉。
   const clock = { t: MEAL_TIME };
-  const { world: w2, events: e2, runTick: tick2 } = await makeWorld({ now: () => clock.t });
+  const { world: w2, events: e2, runTick: tick2 } = await makeWorld({ now: () => clock.t, cfg: { mealMaxRetries: 1 } });
   // 只数饭点事件：别的线（她的一天）也会往 events 里推东西，
   // 用 e2[n] 按下标取会拿到别人的事件——这条测试就变成碰运气。
   const meals = () => e2.filter((e) => e.type === 'feast.meal');
@@ -481,7 +481,7 @@ test('自己做饭：主人端同一道、面板端一桌和喂一口仍算主�
 
 test('自己做饭：饭点提醒及催饭按当前开关说明来源', async () => {
   let t = MEAL_TIME;
-  const { world, events, runTick } = await makeWorld({ now: () => t, cfg: { selfCooked: true } });
+  const { world, events, runTick } = await makeWorld({ now: () => t, cfg: { selfCooked: true, mealMaxRetries: 1 } });
   await runTick();
   assert.ok(events.find((event) => event.type === 'feast.meal').text.includes('都视为你亲手做的'));
   world.cfg.selfCooked = false;
@@ -591,13 +591,14 @@ test('主人端菜：端不存在的菜会被拒', async () => {
 test('面板数据面：菜单、单道、历史', async () => {
   const { world } = await makeWorld();
   const ui = world.webUi('zh');
-  // 面板 id 不写死（不变式 3）：这条只钉「菜单面板排在第一、且没有写操作混进 GET」。
+  // 生活首页排在第一；菜单按 id 查找，写操作不能混进 GET。
   const ids = ui.panels.map((p) => p.id);
-  assert.equal(ids[0], 'menu', `第一个面板该是菜单，现在是 ${ids[0]}`);
+  assert.equal(ids[0], 'today', `第一个面板应为生活首页，现在是 ${ids[0]}`);
   assert.ok(ids.includes('combo') && ids.includes('history'), `缺面板：${ids.join('、')}`);
   assert.equal(new Set(ids).size, ids.length, '面板 id 有重复');
-  assert.ok(ui.panels[0].getMethods.includes('list'));
-  assert.ok(!ui.panels[0].getMethods.includes('feed'), 'feed 是写操作，不该允许 GET');
+  const menuPanel = ui.panels.find((panel) => panel.id === 'menu');
+  assert.ok(menuPanel.getMethods.includes('list'));
+  assert.ok(!menuPanel.getMethods.includes('feed'), 'feed 是写操作，不该允许 GET');
 
   const list = await ui.invoke('menu', 'list', [{}]);
   assert.equal(list.total, lib.dishes.length);
@@ -1051,6 +1052,33 @@ test('面板与配置声明齐全', async () => {
   assert.deepEqual([...desc.feastDefinition.describe.events.map((e) => e.type)].sort(), declared,
     'describe 里的事件和 config.js 声明的对不上');
   await world.stop();
+});
+
+test('损坏的主记录保留生活首页恢复入口，停止不会用空记录覆盖原档', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'broken-state-'));
+  dirs.push(dataDir);
+  await mkdir(join(dataDir, 'feast'), { recursive: true });
+  const file = join(dataDir, 'feast', 'state.json');
+  const broken = '{"eaten": [broken';
+  await writeFile(file, broken, 'utf8');
+  const { world, tools } = await makeWorld({ dataDir });
+  const home = await world.webUi().invoke('today', 'list', []);
+  assert.ok(home.storageIssues.some((issue) => issue.key === 'state'));
+  const eat = await tools.feast_eat({ dish: '麻婆豆腐' });
+  assert.equal(eat.failed, true);
+  assert.match(eat.text, /今天面板/);
+  await world.stop();
+  assert.equal(await readFile(file, 'utf8'), broken);
+});
+
+test('损坏的自定义套餐不会被当成空清单覆盖', async () => {
+  const { world, dataDir } = await makeWorld();
+  const file = join(dataDir, 'feast', 'combos.json');
+  const broken = '{broken';
+  await writeFile(file, broken, 'utf8');
+  await assert.rejects(() => world.webUi().invoke('combo', 'list', []), /记录损坏/);
+  await world.stop();
+  assert.equal(await readFile(file, 'utf8'), broken);
 });
 
 await report();

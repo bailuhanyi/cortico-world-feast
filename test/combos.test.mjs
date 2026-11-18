@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { test, report } from './harness.mjs';
-import { loadDishes, TASTE_FIELDS } from '../src/dishes.js';
+import { loadDishes, tasteProfile, TASTE_FIELDS } from '../src/dishes.js';
 import {
   PRESETS, adhocCombo, comboIdFrom, comboProblem, comboSize, findCombo,
   findPreset, lightScore, normalizeCombo, resolveCombo, scoreByTaste, tableLine, tableTaste,
@@ -163,6 +163,53 @@ test('byTaste 配出来的桌，比随机桌更接近口味画像', () => {
     randAvg += r.reduce((a, d) => a + scoreByTaste(d, avg), 0) / r.length;
   }
   assert.ok(tasteAvg < randAvg, `按画像配的平均距离应该更小（${tasteAvg} vs ${randAvg}）`);
+});
+
+test('preferenceAvg 优先于旧 avg，显式 null 不拿饮食经历冒充偏好', () => {
+  const mild = Array.from({ length: 6 }, (_, i) => fake(`mild-${i}`, { 辣: 0 }));
+  const hot = Array.from({ length: 6 }, (_, i) => fake(`hot-${i}`, { 辣: 90 }));
+  const l = fakeLib([...mild, ...hot]);
+  const combo = { id: 'taste', slots: [{ count: 1, category: '热菜', byTaste: true }] };
+  const avg = hot[0].taste;
+  const preferenceAvg = mild[0].taste;
+  const old = resolveCombo(l, combo, { avg, seed: 'x' });
+  assert.equal(old.dishes[0].taste.辣, 90, '旧 avg API 继续可用');
+  const preferred = resolveCombo(l, combo, { avg, preferenceAvg, seed: 'x' });
+  assert.equal(preferred.dishes[0].taste.辣, 0, '明确喜欢优先于吃过的均值');
+  const insufficient = resolveCombo(l, combo, { avg, preferenceAvg: null, seed: 'x' });
+  const random = resolveCombo(l, combo, { seed: 'x' });
+  assert.deepEqual(insufficient, random, '偏好不足时不回退到吃过的均值');
+});
+
+test('用画像最新 dislikedIds 排除：重新喜欢和一般后可再次进入固定桌和配方桌', () => {
+  const a = fake('a', { 辣: 90 });
+  const b = fake('b', { 辣: 0 });
+  const l = fakeLib([a, b]);
+  const fixed = { id: 'fixed', dishes: ['a', 'b'] };
+  const recipe = { id: 'recipe', slots: [{ count: 2, category: '热菜', byTaste: true }] };
+  const reactions = [{ id: 'a', liked: true }, { id: 'a', liked: false }];
+  for (const combo of [fixed, recipe]) {
+    const profile = tasteProfile(l, { reactions });
+    const result = resolveCombo(l, combo, { preferenceAvg: profile.preferenceAvg, exclude: profile.dislikedIds });
+    assert.deepEqual(result.dishes.map((d) => d.id), ['b']);
+  }
+  for (const liked of [true, null]) {
+    const profile = tasteProfile(l, { reactions: [...reactions, { id: 'a', liked }] });
+    for (const combo of [fixed, recipe]) {
+      const result = resolveCombo(l, combo, { preferenceAvg: profile.preferenceAvg, exclude: profile.dislikedIds });
+      assert.equal(result.dishes.length, 2);
+      assert.ok(result.dishes.some((d) => d.id === 'a'));
+      assert.equal(result.missing.length, 0);
+    }
+  }
+});
+
+test('明确讨厌的菜即使是唯一候选也不会因兜底重新上桌', () => {
+  const l = fakeLib([fake('a', {})]);
+  const profile = tasteProfile(l, { reactions: [{ id: 'a', liked: false }] });
+  const result = resolveCombo(l, { slots: [{ count: 1, category: '热菜' }] }, { exclude: profile.dislikedIds });
+  assert.deepEqual(result.dishes, []);
+  assert.equal(result.missing.length, 1);
 });
 
 test('按画像配菜不是直接取最相近的前 N 名（那样每次都一样、还挤在同一个味道上）', () => {

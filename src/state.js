@@ -87,6 +87,12 @@ export function parseSlots(text) {
   return out.sort((a, b) => a.min - b.min);
 }
 
+/** 'HH:MM' → 当天第几分钟（0–1439）；非法给 0（调用方已经滤过一遍）。 */
+function hmToMin(hm) {
+  const [h, m] = String(hm).split(':').map(Number);
+  return h * 60 + m;
+}
+
 /** 当天的新状态（吃过的记录是跨天的，新状态从空开始）。 */
 export function newState(day) {
   return {
@@ -206,19 +212,33 @@ export function rollover(state, day) {
 }
 
 /**
+ * 今天真正生效的饭点档位。
+ *
+ * 0.10.0：她可以在自己的日程里定这一天的饭点（`day.mealSlots`），
+ * 那个优先于配置里的 `mealSlots`——配置是兜底，她定的是这一天。
+ * 她用 feast_life_meal 关掉「她自己定」时传 `own = null`，直接走配置。
+ */
+export function effectiveMealSlots(cfg, own = null) {
+  if (Array.isArray(own) && own.length) return own.filter((hm) => /^\d{2}:\d{2}$/.test(hm));
+  return parseSlots(cfg?.mealSlots).map((s) => s.hm);
+}
+
+/**
  * 这一拍该做什么：
  *  - fire  ：到某一档（catchup = 应用开晚了，补一顿）
  *  - retry ：上一档叫了没见她吃，到催的时间
  *  - drop  ：这一档催完了/挂太久了，放掉等下一顿
  *  - none  ：安静
+ *
+ * `ownSlots` 是她自己定的这一天的饭点（见 effectiveMealSlots）；空 = 用配置。
  */
-export function planTick(state, cfg, nowMs, tz) {
+export function planTick(state, cfg, nowMs, tz, ownSlots = null) {
   const day = dayIn(tz, nowMs);
   rollover(state, day);
   if (cfg.mealReminder === false) return { action: 'none' };
   if (state.skippedDay === day) return { action: 'none' };
 
-  const slots = parseSlots(cfg.mealSlots);
+  const slots = effectiveMealSlots(cfg, ownSlots).map((hm) => ({ hm, min: hmToMin(hm) }));
   if (!slots.length) return { action: 'none' };
 
   const nowMin = minutesIn(tz, nowMs);
@@ -432,10 +452,10 @@ export function recentEaten(state, n = 6) {
   return state.eaten.slice(-n).reverse();
 }
 
-/** 下一顿是哪一顿。 */
-export function nextMealText(state, cfg, nowMs, tz) {
+/** 下一顿是哪一顿。`ownSlots` 是她自己定的这一天的饭点（见 effectiveMealSlots）。 */
+export function nextMealText(state, cfg, nowMs, tz, ownSlots = null) {
   if (cfg.mealReminder === false) return '提醒关着';
-  const slots = parseSlots(cfg.mealSlots);
+  const slots = effectiveMealSlots(cfg, ownSlots).map((hm) => ({ hm, min: hmToMin(hm) }));
   if (!slots.length) return '没排饭点';
   const nowMin = minutesIn(tz, nowMs);
   const next = slots.find((s) => !state.fired[s.hm] && s.min > nowMin);
@@ -448,9 +468,9 @@ export function skipToday(state, day) {
   state.pending = null;
 }
 
-/** 状态页一行话。 */
-export function statusLine(state, cfg, nowMs, tz) {
-  const remind = cfg.mealReminder === false ? '提醒关着' : `下一顿 ${nextMealText(state, cfg, nowMs, tz)}`;
+/** 状态页一行话。`ownSlots` 同上：她自己定的这一天的饭点。 */
+export function statusLine(state, cfg, nowMs, tz, ownSlots = null) {
+  const remind = cfg.mealReminder === false ? '提醒关着' : `下一顿 ${nextMealText(state, cfg, nowMs, tz, ownSlots)}`;
   const pending = state.pending ? ` · 在等「${state.pending.slot}」这顿` : '';
   const eaten = state.eaten.filter((e) => dayIn(tz, e.at) === dayIn(tz, nowMs)).length;
   return `今天吃了 ${eaten} 道 · ${remind}${pending}`;

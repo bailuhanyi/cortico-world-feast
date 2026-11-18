@@ -66,6 +66,10 @@ const TOOL_SUMMARIES = {
     zh: '记一笔自己刚做完的事（自己的时间）：记了才知道今天做了几件。',
     en: 'Log something she just did on her own time, so the day adds up.',
   },
+  feast_life_thread: {
+    zh: '留下以后还想继续的小事，或明确标为完成、放下；不自动把计划算作完成。',
+    en: 'Keep a small intention to continue later, or explicitly mark it done or dropped. Plans never count as completion.',
+  },
   feast_life_skip: {
     zh: '今天不想玩了：跳过剩下的「自己的时间」，今天不再按时叫（随时能自己动）。',
     en: 'Skip the rest of today\'s own-time wake-ups; she can still do anything on her own.',
@@ -73,6 +77,10 @@ const TOOL_SUMMARIES = {
   feast_life_start: {
     zh: '不用等叫醒：现在就想干点什么时，用它拿一份例子和记账办法。',
     en: 'Start without waiting for a wake-up: hands her example ideas and how to log it.',
+  },
+  feast_life_day: {
+    zh: '定今天上不上班、几点吃饭；不上班会把工作事件改成自由安排，其余日程保留。',
+    en: 'Settle whether she works and when she eats. Turning work off replaces work events with free time and keeps the rest of the schedule.',
   },
 };
 

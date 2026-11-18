@@ -28,14 +28,22 @@ export const DEFAULTS = Object.freeze({
   enabled: false,
   /** 饭点提醒总开关。关掉只管"主人投喂 + 她自己想吃"，不再按点叫她。 */
   mealReminder: true,
-  /** 饭点档位，24 小时制 HH:MM，逗号分隔。 */
+  /** 饭点档位，24 小时制 HH:MM，逗号分隔。`mealSlotsByHer` 开着时这一项只是兜底。 */
   mealSlots: '11:30,18:00',
+  /**
+   * 0.10.0：饭点档位让 AI 助手自己按这一天的日程定。
+   *
+   * 开着时，她写的每一天可以在日程文件里自带 `mealSlots`（见 feast_life_day），
+   * 那一天就按她定的叫；她没定（或没写日程、用模板兜底）时仍走上面的 mealSlots。
+   * 关掉 = 她定过也不采用，一律按配置的档位叫。
+   */
+  mealSlotsByHer: true,
   /** 到点后多少分钟内还算这一档（应用刚启动/短暂卡顿的容错）。 */
   mealGraceMin: 20,
   /** 叫过之后没见她吃，隔多少分钟再叫一次。 */
   mealRetryMin: 40,
   /** 一档最多催几次；催完还没吃就放掉。 */
-  mealMaxRetries: 1,
+  mealMaxRetries: 0,
   /** 多久看一次表；30 秒足够。 */
   tickSec: 30,
   /** 吃完回执里要不要提醒她跟主人说一句。 */
@@ -67,11 +75,11 @@ export const DEFAULTS = Object.freeze({
   /** 此刻文本与时段事件的时间精度：minute / halfhour / block。 */
   lifePrecision: 'halfhour',
   /** 「待会儿想做」列几件。 */
-  lifeUpcoming: 3,
+  lifeUpcoming: 1,
   /** 傍晚几点之后，环境提示词里附上明天的打算。 */
   lifeTomorrowAfter: '18:00',
   /** 时段切换时搭车推一条轻量事件（debounce，不打断）。 */
-  lifeMomentEvents: true,
+  lifeMomentEvents: false,
   /** 强制日型（id 或名字）；留空按星期加权随机。 */
   lifeDayType: '',
   /** 要不要附上「怎么把这些带进聊天」那段说话方式。 */
@@ -87,10 +95,10 @@ export const DEFAULTS = Object.freeze({
    */
   lifeDoings: '',
   // ---- 自由时间（0.7.0 从 playtime World 并进来）----
-  /** 自由时间总开关。0.7.2 补：之前代码里认这个键但配置表没声明，等于只能手改 config.json。 */
+  /** 自由时间总开关。默认每天只在一个时段提醒；工具和面板始终可用。 */
   lifeFreeEnabled: true,
   /** 她自己的时间：几点说那句话。留空 = 不叫（但工具和面板还在）。**档数 = 一天最多叫几次**。 */
-  lifeFreeSlots: '10:00,14:00,21:00',
+  lifeFreeSlots: '21:00',
   /** 到点后多少分钟内还算这一档（应用刚启动或卡住时的追赶窗口）。 */
   lifeFreeGraceMin: 20,
   /** 日程说她这会儿在上班/通勤/开会时叫不叫：false = 不叫、面板留一行；true = 照样叫，但说成「报备」。睡觉永远不叫。 */
@@ -103,7 +111,7 @@ export const DEFAULTS = Object.freeze({
     '- 就在家待着，听点东西、发会儿呆',
   ].join('\n'),
   /** 做完要不要提醒她跟主人说一句。 */
-  lifeFreeAskReport: true,
+  lifeFreeAskReport: false,
   // ---- 娱乐时间联动（0.7.4）----
   /** 「出门逛逛」那一行要不要加。娱乐时间没装/没启用时，这一项写了也不会加。 */
   lifeFreeFunOn: true,
@@ -148,7 +156,9 @@ const ZH = {
     mealReminder: '饭点提醒',
     mealReminderDesc: '关掉之后不再按点叫她吃饭，只剩「主人端菜过来」和「她自己想吃」。想自己挑时间就开着这里、改下面的档位。',
     mealSlots: '饭点档位',
-    mealSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点叫一次；错过超过「容错」分钟就跳过这一档。',
+    mealSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点叫一次；错过超过「容错」分钟就跳过这一档。她自己在日程里定了这一天的饭点时，以她定的为准（见下一项）。',
+    mealSlotsByHer: '饭点由她自己定',
+    mealSlotsByHerDesc: '开着时，她可以在写那一天的时候顺手定下当天几点吃（`feast_life_day` 的 mealSlots，最多 4 档），也能白天临时改。她没定的日子、以及她还没写日程时，仍用上面那组档位兜底。关掉 = 她定过也不采用，一律按上面那组叫，免得日子过得零零碎碎又不好查。',
     mealGraceMin: '档位容错',
     mealGraceMinDesc: '到点后多少分钟内还算这一档；应用刚启动或短暂卡顿时不至于直接跳过。',
     mealRetryMin: '没吃就催',
@@ -188,13 +198,13 @@ const ZH = {
     lifeTomorrowAfter: '几点之后提明天',
     lifeTomorrowAfterDesc: '傍晚过了这个点，环境提示词里会附上明天的打算。一天只变一次，不会打穿前缀缓存。',
     lifeMomentEvents: '换事情时补一句',
-    lifeMomentEventsDesc: '时段切换时搭车推一条很轻的事件（debounce，不打断、睡觉时不推），补上系统前缀没法实时更新的「此刻」。',
+    lifeMomentEventsDesc: '时段切换时搭车推一条很轻的事件（默认关闭以减少唤醒）；打开后 debounce、不打断、睡觉时不推。',
     lifeDayType: '固定日型',
     lifeDayTypeDesc: '留空 = 按工作日/周末加权挑一种；填 id 或名字（workday / restday / outing / homebody / overtime / slacking）就固定用它。',
     lifeVoiceOn: '带上说话方式',
     lifeVoiceOnDesc: '附上「怎么把这些带进聊天」：别把日子说成任务清单、别报时间段、别提「日程」。',
     lifeMaxItems: '一天最多几段',
-    lifeMaxItemsDesc: '她自己写明天时的段数上限；写多了按时间顺序裁掉后面的，再补齐 00:00–24:00。',
+    lifeMaxItemsDesc: '她提交或修改日程时的段数上限；补齐全天后若超限，会请她合并后重新提交，原日程保留。内置兜底模板完整保留。',
     lifeAdjustPast: '允许她改过去',
     lifeAdjustPastDesc: '默认关着：今天已经过完的时段她不能改——日程是计划，过去的应该是事实，回头篡改就等于编自己做过什么。打开后她也能改今天早上的安排（主人从面板改不受这个开关限制）。',
     lifeDoings: '她能做的事（按日型填）',
@@ -202,7 +212,7 @@ const ZH = {
     lifeFreeEnabled: '她自己的时间',
     lifeFreeEnabledDesc: '自由时间总开关。关掉后不再按点叫醒她，工具和面板照旧可用（想自己开始随时能开始）。',
     lifeFreeSlots: '几点的档',
-    lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。到点说一句「现在是你自己的时间，做点自己想做的」——**档数就是一天最多叫几次**（想少叫几次就少写几个点）。日程说这会儿在睡觉就不叫；在上班/通勤/开会时按下面的「忙着的时候也叫」处理。留空 = 不叫（工具和面板照样能用）。',
+    lifeFreeSlotsDesc: '24 小时制 HH:MM，逗号分隔。默认每天 21:00 提醒一次；档数就是一天最多叫几次。日程说睡觉就不叫；忙时按下面的开关处理。留空 = 不叫（工具和面板照样能用）。',
     lifeFreeGraceMin: '档位容错',
     lifeFreeGraceMinDesc: '到点后多少分钟内还算这一档；应用刚启动或短暂卡顿时不至于直接跳过。',
     lifeFreeBusyCall: '忙着的时候也叫',
@@ -260,7 +270,9 @@ const EN = {
     mealReminder: 'Meal reminders',
     mealReminderDesc: 'Turn this off and she is never called to a meal; only owner-served dishes and her own appetite remain.',
     mealSlots: 'Meal slots',
-    mealSlotsDesc: '24-hour HH:MM, comma separated. One call per slot; a slot missed by more than the grace period is skipped.',
+    mealSlotsDesc: '24-hour HH:MM, comma separated. One call per slot; a slot missed by more than the grace period is skipped. When she set her own meal times for that day, hers win (see the next switch).',
+    mealSlotsByHer: 'Let her set the meal times',
+    mealSlotsByHerDesc: 'When on, she can settle that day\'s meal times while writing the day (feast_life_day, up to 4 slots), and can change them later in the day. Days she left alone — and days she has not written yet — fall back to the slots above. Off: her choice is ignored and the slots above are always used.',
     mealGraceMin: 'Slot grace',
     mealGraceMinDesc: 'How many minutes after a slot still count as that slot; keeps a restart from skipping it.',
     mealRetryMin: 'Retry after',
@@ -300,13 +312,13 @@ const EN = {
     lifeTomorrowAfter: 'Mention tomorrow after',
     lifeTomorrowAfterDesc: 'After this hour the environment note adds tomorrow. Changes once a day, so the prefix cache stays intact.',
     lifeMomentEvents: 'Nudge on a switch',
-    lifeMomentEventsDesc: 'A very light debounced event when her current activity changes (never while asleep), covering what the system prefix cannot refresh live.',
+    lifeMomentEventsDesc: 'A very light debounced event on activity changes; off by default to reduce wakeups. When on, it never fires while asleep.',
     lifeDayType: 'Fixed day type',
     lifeDayTypeDesc: 'Blank = weighted pick by weekday/weekend. Set an id or name to always use that type.',
     lifeVoiceOn: 'Include the voice note',
     lifeVoiceOnDesc: 'Adds "how to bring this into chat": never a task list, never clock times, never the word schedule.',
     lifeMaxItems: 'Max items per day',
-    lifeMaxItemsDesc: 'Upper bound when she writes a day; extra items are dropped and 00:00–24:00 is filled in.',
+    lifeMaxItemsDesc: 'Upper bound for submitted or adjusted days after filling 00:00–24:00. Over-limit changes are rejected with a request to merge activities; the existing day is preserved. Built-in fallback templates stay complete.',
     lifeAdjustPast: 'Let her edit the past',
     lifeAdjustPastDesc: 'Off by default: hours of today that are already over cannot be changed by her. The schedule is a plan; the past should be what happened. Turning this on lets her edit this morning too (edits you make from the panel are never restricted).',
     lifeDoings: 'Things she can actually do (by day type)',
@@ -314,7 +326,7 @@ const EN = {
     lifeFreeEnabled: 'Her own time',
     lifeFreeEnabledDesc: 'Master switch for her own time. Off: no scheduled wake-ups; the tools and the panel still work (she can always start something herself).',
     lifeFreeSlots: 'Wake-up slots',
-    lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. She gets one line per slot saying "this is your own time" — **the number of slots is the most she will be nudged in a day** (write fewer to be called fewer times). Never while the schedule says she is asleep; while she is at work/commuting/in a meeting it depends on "Call her while she is busy". Blank = never wake her (tools and panel still work).',
+    lifeFreeSlotsDesc: '24-hour HH:MM, comma separated. Default is one reminder at 21:00; the number of slots is the daily maximum. Never while asleep; busy periods follow the switch below. Blank = never wake her (tools and panel still work).',
     lifeFreeGraceMin: 'Slot grace',
     lifeFreeGraceMinDesc: 'How many minutes after a slot still count as that slot; keeps a restart from skipping it.',
     lifeFreeBusyCall: 'Call her while she is busy',
@@ -369,6 +381,12 @@ function configProperties(language = 'zh') {
           type: 'string',
           title: t.mealSlots,
           description: t.mealSlotsDesc,
+          'x-hot': true,
+        },
+        [`${K}.mealSlotsByHer`]: {
+          type: 'boolean',
+          title: t.mealSlotsByHer,
+          description: t.mealSlotsByHerDesc,
           'x-hot': true,
         },
         [`${K}.mealGraceMin`]: {
@@ -666,7 +684,7 @@ function configProperties(language = 'zh') {
 export const CONFIG_GROUPS = Object.freeze([
   {
     key: 'meal',
-    pick: (k) => k === 'mealReminder' || k === 'mealSlots' || k === 'mealGraceMin'
+    pick: (k) => k === 'mealReminder' || k === 'mealSlots' || k === 'mealSlotsByHer' || k === 'mealGraceMin'
       || k === 'mealRetryMin' || k === 'mealMaxRetries' || k === 'tickSec'
       || k === 'askReaction' || k === 'selfCooked' || k === 'dislikeChance' || k === 'avoidRepeat'
       || k === 'ownerFeedTTL' || k === 'menuSize',
@@ -747,13 +765,13 @@ export function panelText(language = 'zh') {
       menu: { title: 'Menu', description: 'Browse dishes, read a full flavour profile, put one on her table, or share a meal with her.' },
       combo: { title: 'Set meals', description: 'Serve a whole table: a ready-made set, or pick a few dishes and save your own.' },
       history: { title: 'What she ate', description: 'What she has eaten, and the taste profile that has accumulated.' },
-      today: { title: 'Today', description: 'The day she wrote for herself, the hours around her meals, and the days before.' },
+      today: { title: 'Today', description: 'Her life at a glance: plans, logged activities, what comes next, small intentions, and record recovery.' },
     };
   }
   return {
     menu: { title: '菜单', description: '翻菜品、看完整的味道档案，端起一道放到她面前，或者和她一起吃一顿。' },
     combo: { title: '套餐', description: '一桌一桌地端：现成的套餐，或者勾几道自己攒一桌存下来。' },
     history: { title: '吃过什么', description: '她吃过的东西，以及攒出来的口味画像。' },
-    today: { title: '今天', description: '她自己写下的这一天：饭点之外的那些时段，还有往期。' },
+    today: { title: '今天', description: '生活首页：此刻的安排、实际留下的事、接下来和还想继续的小事；记录异常也在这里恢复。' },
   };
 }

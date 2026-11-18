@@ -208,12 +208,13 @@ export function briefLine(d) {
   return `${d.name}${where}｜${d.cuisine === d.category ? d.cuisine : `${d.cuisine}·${d.category}`}${tags}${hook ? `\n    ${hook}` : ''}`;
 }
 
-/** 档位词：中文读起来才像话，「high」「low」是给代码看的。 */
-const around = (n, lo, hi, mid) => (n <= lo ? '低' : n >= hi ? '高' : mid);
+/** 至少喜欢两道不同的菜，才开始归纳口味偏好。 */
+const PREFERENCE_MIN_LIKES = 2;
 
 /**
- * 口味画像：从「吃过什么」+「反应」算出来的一小段话。
- * 同一道菜最多按 3 次计入（免得连吃三天把画像带跑）。
+ * 口味画像：avg 是饮食经历，preferenceAvg 才是明确喜欢的口味。
+ * 经历中同一道菜最多按 3 次计入；偏好每菜一票，不因重复反馈增加权重。
+ * reactions 按 state 追加顺序取同菜最后一条有效意见，null（一般）可撤销旧意见。
  */
 export function tasteProfile(lib, state) {
   const counts = state?.counts ?? {};
@@ -234,46 +235,61 @@ export function tasteProfile(lib, state) {
     ? Object.fromEntries(TASTE_FIELDS.map((k) => [k, Math.round(sum[k] / total)]))
     : null;
 
-  const dislikes = (state?.reactions ?? []).filter((r) => r.liked === false);
-  const likes = (state?.reactions ?? []).filter((r) => r.liked === true);
+  const latest = new Map();
+  for (const r of Array.isArray(state?.reactions) ? state.reactions : []) {
+    if (!r || !lib.byId.has(r.id) || ![true, false, null].includes(r.liked)) continue;
+    // 重新插入使摘要也按最新反馈顺序排列；坏记录不会盖掉已有的有效意见。
+    latest.delete(r.id);
+    latest.set(r.id, r);
+  }
+  const likes = [...latest.values()].filter((r) => r.liked === true);
+  const dislikes = [...latest.values()].filter((r) => r.liked === false);
+  const preferenceReady = likes.length >= PREFERENCE_MIN_LIKES;
+  const preferenceAvg = preferenceReady
+    ? Object.fromEntries(TASTE_FIELDS.map((k) => [k, Math.round(
+      likes.reduce((s, r) => s + lib.byId.get(r.id).taste[k], 0) / likes.length,
+    )]))
+    : null;
   const topCuisine = [...cuisineCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-  if (!avg) {
-    return {
-      empty: true,
-      avg: null,
-      total,
-      topCuisine: null,
-      lines: ['还没吃过什么，画像还是空的。'],
-    };
+  const lines = [];
+  if (avg) {
+    lines.push(`吃过的口味均值（饮食经历）：辣 ${avg.辣}／100 · 麻 ${avg.麻}／100 · 甜 ${avg.甜}／100`);
+    lines.push(`鲜：${avg.鲜}／100 · 香：${avg.香}／100 · 酸：${avg.酸}／100 · 苦：${avg.苦}／100`);
+    lines.push(`咸：${avg.咸}／100 · 油：${avg.油}／100`);
+    if (topCuisine) lines.push(`最常入口的是${topCuisine}，只表示吃过的经历。`);
+  } else {
+    lines.push('还没吃过什么，饮食经历画像还是空的。');
   }
 
-  const lines = [];
-  lines.push(`辣的耐受：${avg.辣}／100（${around(avg.辣, 15, 45, '微辣到中辣')}）`);
-  lines.push(`甜口：${avg.甜}／100（${around(avg.甜, 25, 55, '中甜')}）`);
-  lines.push(`酸：${avg.酸}／100 · 苦：${avg.苦}／100`);
-  lines.push(`咸：${avg.咸}／100 · 油：${avg.油}／100`);
-  lines.push(`厚重程度：${
-    avg.油 + avg.咸 + avg.辣 >= 190 ? '偏重口' : avg.油 + avg.咸 + avg.辣 <= 105 ? '偏清淡' : '中间'
-  }`);
-
-  const words = [];
-  if (avg.辣 >= 45) words.push('能吃辣');
-  if (avg.甜 >= 50) words.push('嗜甜');
-  if (avg.酸 >= 42) words.push('爱酸');
-  if (avg.苦 >= 26) words.push('吃得来苦');
-  if (avg.油 <= 40 && avg.咸 <= 45) words.push('偏清淡');
-  if (avg.油 >= 62) words.push('吃得住油');
-  if (topCuisine) words.push(`最常入口的是${topCuisine}`);
-  if (words.length) lines.push(`一句话：${words.join('、')}。`);
+  if (!preferenceAvg) {
+    lines.push(`喜欢偏好：反馈不足（目前明确喜欢 ${likes.length} 道，至少需要 ${PREFERENCE_MIN_LIKES} 道不同的菜）；吃过不代表喜欢。`);
+  } else {
+    lines.push(`喜欢的口味均值（${likes.length} 道明确喜欢的菜）：${TASTE_FIELDS.map((k) => `${k} ${preferenceAvg[k]}／100`).join(' · ')}`);
+    const words = [];
+    if (preferenceAvg.辣 >= 45) words.push('偏爱辣口');
+    if (preferenceAvg.甜 >= 50) words.push('偏爱甜口');
+    if (preferenceAvg.酸 >= 42) words.push('偏爱酸口');
+    if (preferenceAvg.苦 >= 26) words.push('喜欢的菜里有苦味');
+    if (preferenceAvg.油 <= 40 && preferenceAvg.咸 <= 45) words.push('偏爱清淡');
+    if (preferenceAvg.油 >= 62) words.push('偏爱油润');
+    lines.push(`喜欢偏好：${words.length ? words.join('、') : '暂未呈现明显的口味倾向'}（仅据明确喜欢的菜归纳）。`);
+  }
 
   return {
-    empty: false,
+    empty: !avg,
     avg,
     total,
     topCuisine,
-    likes: likes.map((r) => r.name || r.id).slice(-6),
-    dislikes: dislikes.map((r) => r.name || r.id).slice(-6),
+    preferenceAvg,
+    preferenceReady,
+    preferenceCount: likes.length,
+    preferenceMinLikes: PREFERENCE_MIN_LIKES,
+    feedbackCount: latest.size,
+    likedIds: likes.map((r) => r.id),
+    dislikedIds: dislikes.map((r) => r.id),
+    likes: likes.map((r) => r.name || lib.byId.get(r.id).name).slice(-6),
+    dislikes: dislikes.map((r) => r.name || lib.byId.get(r.id).name).slice(-6),
     lines,
   };
 }
