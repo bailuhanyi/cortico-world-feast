@@ -16,7 +16,8 @@
 - 验证：20 个测试文件合计 **601/601 通过**（其余 19 个文件 513 项通过，面板更新旧标题位置断言后 88/88 通过）；规范、824 道菜、自检 12 项、在线发布检查 18 项、源码与测试语法、声明同步及 diff 空白检查通过。明天区块新回归覆盖中英文与三种计划状态。真实 Coo GUI 验收尚未完成。
 - 最终归档：`.tmp/release/0.12.1-final/cortico-world-feast-0.12.1.tgz`，66 个文件，823,803 字节，解包 2,388,533 字节。SHA-1 `3977ff25beaf7e08fbbe524a34735bbcb3fb5831`；npm pack integrity 为 `sha512-b2Sjkq7pXpfKO//VP/hGJpM3zUPEylDNJBhcOBPe1NVqXjefAOUrgqTWBAO6F+v8qFCd+F0uz2wJdAE5WPEbIA==`。
 - 与经官方 integrity 核验的线上 0.12.0 比较：66 个发布文件中仅 `dist/webui.js`、`package.json`、`CHANGELOG.md`、`PUBLISHING.md`、`README.md`、`GUIDE.md` 六个不同；全部 `src/**` 与 `describe.json` 一致，无新业务逻辑。dist 差异仅上述三项界面修改与对应注释。
-- npm 身份校验返回 **E401 Unauthorized**，需要维护者恢复登录后继续实际发布及 registry 后验收；准备完成与生成 tgz 均不代表已发布。
+- 最终归档独立审计通过：实测 SHA-512、文件大小与 pack metadata 一致，66/66 文件与工作区逐字节一致；包内已确认「换一桌」、复选框和明天标题三项修改。证据见 `.tmp/release-ui-fixes-audit-0121-final/verification-report.json`。
+- **2026-11-20 用户选择「稍后发布」**。npm 身份校验仍为 E401；保持 npm 未发布、Git 未推送且未创建版本标签。仅在用户后续明确要求继续时恢复发布，届时先重新核对身份与 0.12.1 版本是否仍可用；准备完成与生成 tgz 不代表已发布。
 - 当前发布指令以 [PUBLISHING.md](PUBLISHING.md) 的 **0.12.1** 为准。
 
 ---
