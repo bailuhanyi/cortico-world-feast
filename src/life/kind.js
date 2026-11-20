@@ -26,6 +26,10 @@ const BUSY_HINTS = /睡|回笼觉|打盹|小憩|眯一会儿|眯一会|补觉|�
 // 只消去词组本身：例如「工作室加班」仍该算忙，「睡前看书后睡觉」仍含真正的睡觉。
 const NON_SLEEP = /睡前|睡后|睡醒(?:后)?|睡不着|(?:不想|不打算|不准备|不再|不)睡(?:觉|了)?/g;
 const PLACE_ONLY = /工作室/g;
+const workHints = (activity) => activity
+  .replace(/下班(?:后|以后|之后)/g, '')
+  .replace(/(?:不想|不打算|不准备|不用|不再|不去|无需|取消|不)(?:上班|加班|工作|开会|通勤)/g, '')
+  .replace(PLACE_ONLY, '');
 
 /** 兼容：老调用点传对象（item）也传过字符串（activity 名）。 */
 const activityOf = (item) => String((typeof item === 'string' ? item : item?.activity) ?? '')
@@ -38,14 +42,11 @@ const activityOf = (item) => String((typeof item === 'string' ? item : item?.act
 export function classifyItem(item) {
   const act = activityOf(item);
   if (!act) return 'none';
-  if (validCategory(item?.category)) {
-    if (item.category === 'sleep') return 'asleep';
-    if (item.category === 'work' || item.category === 'commute') return 'busy';
-    return 'free';
-  }
-  const hints = act.replace(NON_SLEEP, '').replace(PLACE_ONLY, '');
-  if (SLEEP_HINTS.test(hints)) return 'asleep';
-  if (BUSY_HINTS.test(hints)) return 'busy';
+  const hints = workHints(act).replace(NON_SLEEP, '');
+  // 展示分类不等于有空：个人活动也可能在上课，personal 不能让睡眠保护失效。
+  if (item?.category === 'sleep' || SLEEP_HINTS.test(hints)) return 'asleep';
+  if (item?.category === 'work' || item?.category === 'commute'
+    || isWorkEvent(item) || BUSY_HINTS.test(hints)) return 'busy';
   return 'free';
 }
 
@@ -57,10 +58,7 @@ const WORK_EVENT_HINTS = /上班|通勤|下班回家|加班|办公|工作(?!室)
 /** 显式分类优先；旧日程只识别明确工作动作，避免按地点名误删生活安排。 */
 export function isWorkEvent(item) {
   if (validCategory(item?.category)) return item.category === 'work' || item.category === 'commute';
-  const activity = activityOf(item)
-    .replace(/下班(?:后|以后|之后)/g, '')
-    .replace(/(?:不想|不用|不再|不去|无需|取消|不)(?:上班|加班|工作|开会|通勤)/g, '')
-    .replace(/工作室/g, '');
+  const activity = workHints(activityOf(item));
   return WORK_EVENT_HINTS.test(activity)
     || /^(?:在)?(?:公司|办公室|工位)(?:里)?(?:待着|干活|摸鱼)?$/.test(activity);
 }

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { test, report } from './harness.mjs';
-import { loadDishes, findDish, findDishExact, filterDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine, CATEGORIES } from '../src/dishes.js';
+import { loadDishes, findDish, findDishExact, filterDishes, filterMenuDishes, recommendMenuDishes, pickFew, pickOne, tasteProfile, TASTE_FIELDS, briefLine, CATEGORIES } from '../src/dishes.js';
 import { GROUP_CAPS } from '../tools/validate-dishes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -251,6 +251,190 @@ test('筛选：菜系 / 类别 / 标签 / 自由词', () => {
   const byQuery = filterDishes(lib, { query: '花椒' });
   assert.ok(byQuery.length >= 1, '搜花椒应该有结果');
   assert.equal(filterDishes(lib, {}).length, lib.dishes.length);
+});
+
+const MENU_NOW = Date.UTC(2026, 10, 19, 12);
+const MENU_DAY = 24 * 3600_000;
+
+// 菜单规则用小库固定边界，避免绑在真实菜系的道数或数据顺序上。
+function menuLibrary(...ids) {
+  const dishes = ids.map((id) => ({
+    ...lib.dishes[0], id, name: id, alias: '', cuisine: '川菜', category: '热菜',
+    region: '四川', keywords: ['清香'], ingredients: ['花椒'], taste: { ...lib.dishes[0].taste },
+  }));
+  return { dishes, byId: new Map(dishes.map((d) => [d.id, d])) };
+}
+
+const menuIds = (dishes) => dishes.map((d) => d.id);
+
+test('菜单喜欢：最新有效反馈决定喜欢，撤销、厌恶反转与坏反馈均沿用画像规则', () => {
+  const menu = menuLibrary('withdrawn', 'revived', 'disliked', 'still-liked', 'eaten-only');
+  const state = { counts: { 'eaten-only': 4 }, reactions: [
+    { id: 'withdrawn', liked: true }, { id: 'withdrawn', liked: null },
+    { id: 'withdrawn', liked: 'true' },
+    { id: 'revived', liked: false, at: MENU_NOW },
+    { id: 'revived', liked: true, at: MENU_NOW - MENU_DAY },
+    { id: 'disliked', liked: true }, { id: 'disliked', liked: false },
+    { id: 'disliked', liked: 'true' },
+    { id: 'still-liked', liked: true }, { id: 'still-liked' },
+    null, { id: 'missing', liked: true },
+  ] };
+  const liked = menuIds(filterMenuDishes(menu, state, { quick: 'liked' }, MENU_NOW));
+  assert.deepEqual(liked, ['revived', 'still-liked']);
+  assert.deepEqual(new Set(liked), new Set(tasteProfile(menu, state).likedIds));
+  assert.ok(!liked.includes('eaten-only'), '仅有吃过计数不构成喜欢');
+});
+
+test('菜单没吃过：eaten 剪裁不抹掉持久 counts，仍在的过去记录也不误当尝鲜', () => {
+  const menu = menuLibrary('trimmed', 'retained', 'history-only', 'never');
+  const state = {
+    counts: { trimmed: 8, retained: 1, never: 0 },
+    eaten: [
+      { id: 'retained', at: MENU_NOW - MENU_DAY },
+      { id: 'history-only', at: MENU_NOW - MENU_DAY },
+    ],
+  };
+  assert.ok(!state.eaten.some((e) => e.id === 'trimmed'), '模拟老记录已剪掉而计数保留');
+  assert.deepEqual(menuIds(filterMenuDishes(menu, state, { quick: 'untried' }, MENU_NOW)), ['never']);
+});
+
+test('菜单最近：包含恰好七天及当前时刻，排除过期、未来、坏时间并按最近一次倒序', () => {
+  const menu = menuLibrary('edge', 'near', 'now', 'old', 'future', 'past-and-future', 'bad', 'counts-only');
+  const state = { counts: { 'counts-only': 9 }, eaten: [
+    { id: 'near', at: MENU_NOW - 3 * MENU_DAY },
+    { id: 'edge', at: MENU_NOW - 7 * MENU_DAY },
+    { id: 'now', at: MENU_NOW },
+    { id: 'old', at: MENU_NOW - 7 * MENU_DAY - 1 },
+    { id: 'near', at: MENU_NOW - 1 },
+    { id: 'future', at: MENU_NOW + 1 },
+    { id: 'past-and-future', at: MENU_NOW - MENU_DAY },
+    { id: 'past-and-future', at: MENU_NOW + MENU_DAY },
+    { id: 'bad', at: NaN }, { id: 'bad', at: Infinity },
+    { id: 'bad', at: String(MENU_NOW) }, { id: 'bad', at: null },
+    null, { id: 'missing', at: MENU_NOW },
+  ] };
+  assert.deepEqual(menuIds(filterMenuDishes(menu, state, { quick: 'recent' }, MENU_NOW)),
+    ['now', 'near', 'past-and-future', 'edge']);
+});
+
+test('菜单快捷筛选：与原菜系、类别、标签、查询逐项求交，all 保持旧筛选语义', () => {
+  const menu = menuLibrary('match', 'quick-out', 'wrong-cuisine', 'wrong-category', 'wrong-keyword', 'wrong-query');
+  menu.byId.get('wrong-cuisine').cuisine = '粤菜';
+  menu.byId.get('wrong-category').category = '凉菜';
+  menu.byId.get('wrong-keyword').keywords = ['浓郁'];
+  menu.byId.get('wrong-query').ingredients = ['豆腐'];
+  const filter = { cuisine: '川菜', category: '热菜', keyword: '清香', query: '花椒' };
+  const ordinary = filterDishes(menu, filter);
+  const all = ['match', 'quick-out'];
+  assert.deepEqual(menuIds(ordinary), all);
+  assert.deepEqual(filterMenuDishes(menu, {}, filter, MENU_NOW), ordinary);
+  assert.deepEqual(menuIds(filterMenuDishes(menu, {}, { ...filter, quick: 'all' }, MENU_NOW)), all);
+  for (const quick of ['liked', 'untried', 'recent']) {
+    const state = {
+      counts: { 'quick-out': 1 },
+      reactions: menu.dishes.filter((d) => d.id !== 'quick-out').map((d) => ({ id: d.id, liked: true })),
+      eaten: quick === 'recent'
+        ? menu.dishes.filter((d) => d.id !== 'quick-out').map((d) => ({ id: d.id, at: MENU_NOW })) : [],
+    };
+    assert.deepEqual(menuIds(filterMenuDishes(menu, state, { ...filter, quick }, MENU_NOW)), ['match'], quick);
+  }
+  assert.deepEqual(filterMenuDishes(menu, {}, {}, MENU_NOW), menu.dishes);
+  assert.deepEqual(filterMenuDishes(menu, {}, { quick: 'liked' }, MENU_NOW), []);
+});
+
+test('菜单推荐：明确讨厌始终排除，喜欢反转和中性撤销可重新进入候选', () => {
+  const menu = menuLibrary('blocked', 'revived', 'neutral', 'eaten-only');
+  const state = { counts: { 'eaten-only': 4 }, reactions: [
+    { id: 'blocked', liked: true }, { id: 'blocked', liked: false }, { id: 'blocked', liked: 'true' },
+    { id: 'revived', liked: false }, { id: 'revived', liked: true },
+    { id: 'neutral', liked: false }, { id: 'neutral', liked: null },
+  ] };
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, state, { nowMs: MENU_NOW, rng: () => 0 })),
+    ['revived', 'neutral', 'eaten-only']);
+  assert.deepEqual(menuIds(filterMenuDishes(menu, state, { quick: 'liked' }, MENU_NOW)), ['revived']);
+});
+
+test('菜单推荐：优先没吃过及最近未吃，近期反复吃降级，不足才用近期菜补齐', () => {
+  const menu = menuLibrary('repeated', 'once', 'old', 'fresh');
+  const state = { counts: { repeated: 9, once: 1, old: 5 }, eaten: [
+    { id: 'repeated', at: MENU_NOW - MENU_DAY },
+    { id: 'repeated', at: MENU_NOW - 2 * MENU_DAY },
+    { id: 'once', at: MENU_NOW },
+    { id: 'old', at: MENU_NOW - 8 * MENU_DAY },
+    { id: 'old', at: MENU_NOW + 1 },
+  ] };
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, state, { nowMs: MENU_NOW, rng: () => 0 })),
+    ['fresh', 'old', 'once'], '即使反复吃的排在库首，也不能抢占尝鲜位置');
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, state, { quick: 'recent', nowMs: MENU_NOW, rng: () => 0 })),
+    ['once', 'repeated'], '仅有近期菜时允许补齐，但不突破 recent 筛选');
+});
+
+test('菜单推荐：历史剪裁后仍把有持久 counts 的菜排在未尝鲜菜之后', () => {
+  const menu = menuLibrary('trimmed', 'fresh');
+  const state = { counts: { trimmed: 20 }, eaten: [] };
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, state, { limit: 1, nowMs: MENU_NOW, rng: () => 0 })), ['fresh']);
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, state, { quick: 'untried', nowMs: MENU_NOW, rng: () => 0 })), ['fresh']);
+});
+
+test('菜单推荐：严格限定快捷筛选与全部原条件交集，少于三道不向外凑数', () => {
+  const menu = menuLibrary('keep-a', 'keep-b', 'blocked', 'wrong-cuisine', 'wrong-category', 'wrong-keyword', 'wrong-query', 'not-liked');
+  menu.byId.get('wrong-cuisine').cuisine = '粤菜';
+  menu.byId.get('wrong-category').category = '凉菜';
+  menu.byId.get('wrong-keyword').keywords = ['浓郁'];
+  menu.byId.get('wrong-query').ingredients = ['豆腐'];
+  const state = { reactions: menu.dishes.filter((d) => d.id !== 'not-liked').map((d) => ({ id: d.id, liked: true })) };
+  state.reactions.push({ id: 'blocked', liked: false });
+  const filter = { cuisine: '川菜', category: '热菜', keyword: '清香', query: '花椒', quick: 'liked' };
+  const pool = new Set(menuIds(filterMenuDishes(menu, state, filter, MENU_NOW)));
+  for (const rng of [() => 0, () => 0.999]) {
+    const picks = recommendMenuDishes(menu, state, { ...filter, limit: 99, nowMs: MENU_NOW, rng });
+    assert.deepEqual(new Set(menuIds(picks)), new Set(['keep-a', 'keep-b']));
+    assert.ok(picks.every((d) => pool.has(d.id)));
+  }
+});
+
+test('菜单推荐：最多三道且按 id 不重复，同层随机支持注入及较小 limit', () => {
+  const menu = menuLibrary('a', 'b', 'c', 'd');
+  menu.dishes.push(menu.dishes[0]);
+  const low = recommendMenuDishes(menu, {}, { limit: 99, nowMs: MENU_NOW, rng: () => 0 });
+  const high = recommendMenuDishes(menu, {}, { nowMs: MENU_NOW, rng: () => 0.999 });
+  assert.deepEqual(menuIds(low), ['a', 'b', 'c']);
+  assert.deepEqual(menuIds(high), ['d', 'c', 'b']);
+  assert.equal(new Set(menuIds(low)).size, low.length);
+  assert.ok(low.every((d) => menu.byId.get(d.id) === d), '返回原始菜品对象');
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, {}, { limit: 1.9, nowMs: MENU_NOW, rng: () => 0 })), ['a']);
+  for (const limit of [0, -1]) {
+    assert.deepEqual(recommendMenuDishes(menu, {}, { limit, rng: () => assert.fail('limit 为零不应抽签') }), []);
+  }
+});
+
+test('菜单推荐：单道池、全讨厌、筛选为空和空库都有准确的结果', () => {
+  const menu = menuLibrary('only');
+  assert.deepEqual(menuIds(recommendMenuDishes(menu, {}, { nowMs: MENU_NOW, rng: () => 0 })), ['only']);
+  const rng = () => assert.fail('空池不应抽签');
+  assert.deepEqual(recommendMenuDishes(menu, { reactions: [{ id: 'only', liked: false }] }, { rng }), []);
+  assert.deepEqual(recommendMenuDishes(menu, {}, { cuisine: '不存在的菜系', rng }), []);
+  assert.deepEqual(recommendMenuDishes(menu, {}, { quick: 'liked', rng }), []);
+  assert.deepEqual(recommendMenuDishes(menuLibrary(), {}, { rng }), []);
+});
+
+test('菜单纯函数：不重排或修改库、历史、计数及反馈，不改变旧随机和筛选契约', () => {
+  const menu = menuLibrary('recent', 'fresh', 'old');
+  const state = {
+    counts: Object.freeze({ recent: 1, old: 2 }),
+    eaten: Object.freeze([{ id: 'old', at: MENU_NOW - 8 * MENU_DAY }, { id: 'recent', at: MENU_NOW }]),
+    reactions: Object.freeze([{ id: 'fresh', liked: true }]),
+  };
+  Object.freeze(state);
+  Object.freeze(menu.dishes);
+  const before = JSON.stringify({ dishes: menu.dishes, state });
+  filterMenuDishes(menu, state, { quick: 'recent' }, MENU_NOW);
+  filterMenuDishes(menu, state, { quick: 'liked' }, MENU_NOW);
+  recommendMenuDishes(menu, state, { nowMs: MENU_NOW, rng: () => 0 });
+  assert.equal(JSON.stringify({ dishes: menu.dishes, state }), before);
+  assert.equal(filterDishes(menu), menu.dishes, '旧筛选仍返回原始未筛数组');
+  assert.equal(filterDishes(menu, { quick: 'liked' }), menu.dishes, '旧筛选不引入 quick 语义');
+  assert.equal(pickFew(menu, 0, { rng: () => 0 }).length, 1, '旧 pickFew 的至少一道语义保留');
 });
 
 test('随机挑菜：不重复、会避开指定的那道', () => {

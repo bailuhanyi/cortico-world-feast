@@ -21,6 +21,20 @@
           "query": {
             "type": "string",
             "description": "自由搜：菜名、产地、食材都行，例如 花椒 / 潮汕 / 芝士。"
+          },
+          "quick": {
+            "type": "string",
+            "enum": [
+              "all",
+              "liked",
+              "untried",
+              "recent"
+            ],
+            "description": "快捷看全部/明确喜欢/未尝过/近7天吃过。"
+          },
+          "recommend": {
+            "type": "boolean",
+            "description": "换口味：在筛选内推荐最多3道，避开明确讨厌，降低近期重复。"
           }
         },
         "additionalProperties": false
@@ -350,6 +364,17 @@
                   "type": "string",
                   "description": "这会儿在做什么，一句短的。"
                 },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "sleep",
+                    "work",
+                    "commute",
+                    "meal",
+                    "personal"
+                  ],
+                  "description": "可选分类：sleep睡眠/work工作/commute通勤/meal用餐/personal个人安排；不填自动判断，个人活动也可能忙碌。"
+                },
                 "location": {
                   "type": "string",
                   "description": "在哪儿，可选。"
@@ -419,6 +444,22 @@
           "activity": {
             "type": "string",
             "description": "改成做什么。留空 = 不做了（取消这一段），不是必填。"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "",
+              "sleep",
+              "work",
+              "commute",
+              "meal",
+              "personal"
+            ],
+            "description": "可选分类；空字符串清除分类并自动判断。分类只用于活动分组，不保证空闲。"
+          },
+          "fillRequest": {
+            "type": "string",
+            "description": "仅回应补充空闲安排邀请时，原样带回邀请中的请求编号；只允许修改邀请列出的时段。"
           },
           "location": {
             "type": "string",
@@ -588,6 +629,106 @@
         "zh": "定今天上不上班、几点吃饭；不上班会把工作事件改成自由安排，其余日程保留。",
         "en": "Settle whether she works and when she eats. Turning work off replaces work events with free time and keeps the rest of the schedule."
       }
+    },
+    {
+      "name": "feast_life_journal",
+      "description": "回看计划与实际记录；手动设标题，或从实际记录ID保存1–2条为文字纪念卡。卡不会自动生成。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "view",
+              "title",
+              "card",
+              "export"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "today / YYYY-MM-DD，默认今天。"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "手动标题，title动作可用空串清除。"
+          },
+          "selectedIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "card动作填view返回的实际记录ID。"
+          },
+          "cardId": {
+            "type": "string",
+            "description": "export动作填已有纪念卡ID。"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "view的实际记录起始位置，默认0。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "read",
+        "write"
+      ],
+      "summary": {
+        "zh": "回看一天的计划与实际，手动写小标题，从真实记录保存文字纪念卡。",
+        "en": "Review plans and actual records, set a manual title, and save selected real moments as text keepsakes."
+      }
+    },
+    {
+      "name": "feast_life_style",
+      "description": "生活提醒预设：list查询，preview查看差异；仅按用户明确要求apply并带回预览revision。保留工作规则与日程。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "preview",
+              "apply"
+            ]
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "quiet",
+              "daily",
+              "lively"
+            ],
+            "description": "安静/日常/多一点互动。"
+          },
+          "revision": {
+            "type": "string",
+            "description": "apply时填最近preview返回的revision。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "tags": [
+        "read",
+        "write"
+      ],
+      "summary": {
+        "zh": "预览并按用户要求应用安静、日常或多一点互动的生活提醒设置。",
+        "en": "Preview and apply quiet, daily or livelier reminders at the user’s request."
+      }
     }
   ],
   "events": [
@@ -626,8 +767,8 @@
     {
       "type": "feast.life.plan",
       "description": {
-        "zh": "每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天、饭点，以及主人给她备的「能做的事」（配了这一项才有），请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。",
-        "en": "Nightly ask for the day she wants to have tomorrow: date, day type, recent days, meal slots, and the \"things she can actually do\" list the owner prepared (when configured), then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks."
+        "zh": "每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天、饭点，以及主人给她备的「能做的事」（配了这一项才有），请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。主人主动点击补充空闲时，meta.reason=fill-free；只邀请用 feast_life_adjust 携请求编号补充指定时段，可不回应。",
+        "en": "Nightly ask for the day she wants to have tomorrow: date, day type, recent days, meal slots, and the \"things she can actually do\" list the owner prepared (when configured), then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks. An owner-requested fill-free invitation uses meta.reason=fill-free and asks for optional feast_life_adjust replies limited to listed slots with the request id."
       },
       "trigger": "flush"
     },

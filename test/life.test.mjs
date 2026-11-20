@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { test, report } from './harness.mjs';
 import {
   cleanDay, cleanMealSlots, DEFAULT_DAY_TYPES, DEFAULT_VOICE, TOOL_LINE, addDays, applyChange, clock, dateLabel, isWorkEvent, removeWorkEvents,
-  dayText, envBlock, findItem, isDateKey, isWorkDayType, lifeDir, listDays, momentLine, normalizeDayTypes,
+  dayText, envBlock, findItem, isDateKey, isWorkDayType, lifeDir, listDays, momentLine, normalizeDayTypes, categoryOf,
   normalizeItems, normalizePlan, nowText, parseClock, pendingDay, pickDayType, planEventText, readDay,
   recentSummary, segmentKey, templateDay, templateItems, voiceText, weekdayOf, writeDay, zonedNow,
   cleanPlay, classifyItem, doingsFor, freeEventText, isFreeActivity, markFreeNudged, markFreeSkipped, newPlay,
@@ -700,6 +700,34 @@ test('free.isFreeActivity：睡觉和上班都不算自由时间', () => {
   assert.equal(isFreeActivity({ activity: '通勤' }), false);
   assert.equal(isFreeActivity({ activity: '睡觉' }), false);
   assert.equal(isFreeActivity(null), false);
+});
+
+test('分类与提醒分离：个人活动仍可忙碌，睡眠不被分类绕过，否定上班不算忙', () => {
+  for (const category of [undefined, 'personal', 'meal', 'work']) {
+    assert.equal(classifyItem({ activity: '午睡', category }), 'asleep');
+  }
+  assert.equal(classifyItem({ activity: '上课', category: 'personal' }), 'busy');
+  assert.equal(categoryOf({ activity: '上课', category: 'personal' }), 'personal');
+  assert.equal(classifyItem({ activity: '不上班，在家看书' }), 'free');
+  assert.equal(classifyItem({ activity: '下班后去看电影' }), 'free');
+  assert.equal(classifyItem({ activity: '在家看书', category: 'work' }), 'busy');
+  assert.equal(isWorkEvent({ activity: '公司附近吃饭', category: 'meal' }), false);
+  assert.equal(isWorkEvent({ activity: '处理一些事情', category: 'work' }), true);
+  assert.equal(categoryOf({ activity: '通勤' }), 'commute');
+  assert.equal(categoryOf({ activity: '吃午饭' }), 'meal');
+});
+
+test('分类正常落盘，缺失或无效值不反写推断；分段修改可清除分类', async () => {
+  const items = normalizeItems([{ start: '00:00', end: '24:00', activity: '在家', category: 'personal' }]);
+  assert.equal(items[0].category, 'personal');
+  assert.equal(normalizeItems([{ ...items[0], category: 'bad' }])[0].category, undefined);
+  const changed = applyChange(items, { start: '10:00', end: '11:00', activity: '上课', category: '' });
+  assert.equal(changed.find((it) => it.activity === '上课').category, undefined);
+  assert.equal(changed[0].category, 'personal');
+  const dir = await tmp();
+  const written = cleanDay({ items, dayType: 'restday', source: 'coo' }, '2026-11-10');
+  await writeDay(dir, written);
+  assert.equal((await readDay(dir, written.date)).items[0].category, 'personal');
 });
 
 await report();

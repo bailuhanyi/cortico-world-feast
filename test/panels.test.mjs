@@ -1,17 +1,16 @@
 /**
- * 面板的冒烟测试。
- *
- * dist/webui.js 只在 Coo 里跑，测试里跑不到——最容易藏错误的地方。
- * 这里用一个够用的极简 DOM 桩（createElement / appendChild / replaceChildren /
- * classList / textContent / querySelector）把两个面板都真挂一遍，喂真实数据面，
- * 断言：往 ctx.root 里写了东西、点了「端给她」会调 feed、点菜会调 dish、失败时有错误卡。
+ * 用真实数据面挂载 dist 中的四个面板，验证 invoke、DOM 节点和交互契约。
+ * DOM 桩不模拟布局、绘制或原生输入法；这些断言不代表 GUI 视觉验收。
  */
 import assert from 'node:assert/strict';
-import { test, report } from './harness.mjs';
+import { test as registerTest, report } from './harness.mjs';
 import { FeastWorld } from '../src/world.js';
 import { loadDishes } from '../src/dishes.js';
 import { DEFAULTS } from '../src/config.js';
-import { templateDay, writeDay } from '../src/life/index.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { templateDay, writeDay, readDay, newPlay, writePlay } from '../src/life/index.js';
 import { parseSlots } from '../src/state.js';
 
 const lib = await loadDishes();
@@ -38,7 +37,22 @@ class Node {
     // 真 <input> 的光标位：面板恢复焦点时读它、setSelectionRange 写它。
     this.selectionStart = 0;
     this.selectionEnd = 0;
+    this.dataset = {};
+    this.scrollTop = 0;
+    this.scrollHeight = 0;
+    this.clientHeight = 0;
+    if (this.tagName === 'DETAILS') this.open = false;
   }
+
+  contains(node) { return node === this || this.childNodes.some((child) => child.contains(node)); }
+  get parentElement() { return this.parentNode; }
+  get children() { return this.childNodes.filter((node) => node.tagName !== '#TEXT'); }
+  get firstChild() { return this.childNodes[0] ?? null; }
+  getBoundingClientRect() {
+    const { top = 0, bottom = top } = this.rect ?? {};
+    return { top, bottom, left: 0, right: 0, width: 0, height: bottom - top };
+  }
+  scrollIntoView() {}
 
   get textContent() {
     if (this.childNodes.length) return this.childNodes.map((c) => c.textContent).join('');
@@ -46,31 +60,46 @@ class Node {
   }
 
   set textContent(v) {
-    this.childNodes = [];
+    this.replaceChildren();
     this._text = v === null || v === undefined ? '' : String(v);
   }
 
   appendChild(node) {
-    this.childNodes.push(node);
-    node.parentNode = this;
-    this._text = '';
+    this.insertBefore(node, null);
     return node;
   }
 
-  append(...nodes) {
-    for (const n of nodes) this.appendChild(typeof n === 'string' ? Object.assign(new Node('#text'), { _text: n }) : n);
-  }
+  append(...nodes) { nodes.forEach((node) => this.appendChild(Node.from(node))); }
+  prepend(...nodes) { const first = this.firstChild; nodes.forEach((node) => this.insertBefore(Node.from(node), first)); }
+  static from(node) { return node instanceof Node ? node : Object.assign(new Node('#text'), { _text: String(node) }); }
 
-  prepend(node) {
-    this.childNodes.unshift(node);
+  insertBefore(node, reference) {
+    if (node === reference) return node;
+    if (reference && reference.parentNode !== this) throw new Error('NotFoundError');
+    node.remove();
+    const index = reference ? this.childNodes.indexOf(reference) : this.childNodes.length;
+    this.childNodes.splice(index, 0, node);
     node.parentNode = this;
+    this._text = '';
     return node;
   }
 
   replaceChildren(...nodes) {
-    this.childNodes = [];
+    for (const child of [...this.childNodes]) child.remove();
     this._text = '';
-    for (const n of nodes) this.appendChild(n);
+    this.append(...nodes);
+  }
+
+  replaceChild(node, old) {
+    if (node !== old) { this.insertBefore(node, old); old.remove(); }
+    return old;
+  }
+
+  replaceWith(...nodes) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    for (const node of nodes) parent.insertBefore(Node.from(node), this);
+    if (!nodes.includes(this)) this.remove();
   }
 
   remove() {
@@ -78,6 +107,7 @@ class Node {
     const i = this.parentNode.childNodes.indexOf(this);
     if (i >= 0) this.parentNode.childNodes.splice(i, 1);
     this.parentNode = null;
+    if (document.activeElement && this.contains(document.activeElement)) document.activeElement = null;
   }
 
   get classList() {
@@ -100,6 +130,27 @@ class Node {
     (this._listeners[type] ??= []).push(fn);
   }
 
+  removeEventListener(type, fn) {
+    this._listeners[type] = (this._listeners[type] ?? []).filter((listener) => listener !== fn);
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+    if (name === 'id') this.id = String(value);
+    if (name.startsWith('data-')) this.dataset[Node.dataKey(name)] = String(value);
+  }
+  getAttribute(name) {
+    if (name.startsWith('data-')) return this.dataset[Node.dataKey(name)] ?? null;
+    if (name === 'id') return this.id ?? null;
+    return this.attributes[name] ?? null;
+  }
+  removeAttribute(name) {
+    delete this.attributes[name];
+    if (name === 'id') delete this.id;
+    if (name.startsWith('data-')) delete this.dataset[Node.dataKey(name)];
+  }
+  static dataKey(name) { return name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase()); }
+
   /** 面板重画后会调它恢复焦点：真 DOM 里 focus() 会把 activeElement 指过来。 */
   focus() {
     document.activeElement = this;
@@ -110,11 +161,15 @@ class Node {
     this.selectionEnd = end;
   }
 
+  click() { if (!this.disabled) this.fire('click'); }
+
   /** 触发一个事件（onclick 这类属性也一并触发）。 */
-  fire(type = 'click') {
-    for (const fn of this._listeners[type] ?? []) fn({ type, target: this });
+  fire(type = 'click', init = {}) {
+    const event = { type, target: this, defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}, ...init };
+    for (const fn of this._listeners[type] ?? []) fn(event);
     const prop = this[`on${type}`];
-    if (typeof prop === 'function') prop({ type, target: this });
+    if (typeof prop === 'function') prop(event);
   }
 
   /** 先序遍历找节点。 */
@@ -128,15 +183,27 @@ class Node {
     return n[0] ?? null;
   }
 
-  querySelectorAll(sel) {
-    const isTag = !sel.startsWith('.');
-    const clss = isTag ? [] : sel.split('.').filter(Boolean);
-    return [...this.walk()].filter((n) => {
-      if (n === this) return false;
-      if (isTag) return n.tagName === sel.toUpperCase();
-      return clss.every((c) => c && n.classList.contains(c));
+  querySelectorAll(sel) { return [...this.walk()].slice(1).filter((n) => n.matches(sel)); }
+
+  matches(sel) {
+    return sel.split(',').some((part) => {
+      let ok = true;
+      const plain = part.trim().replace(/\[([\w-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/g, (_, name, quoted, single, bare) => {
+        const value = quoted ?? single ?? bare;
+        const actual = this.getAttribute(name);
+        ok &&= actual !== null && (value === undefined || value === actual);
+        return '';
+      });
+      const tag = /^[\w-]+/.exec(plain)?.[0];
+      if (tag && tag.toUpperCase() !== this.tagName) return false;
+      for (const [, prefix, token] of plain.matchAll(/([.#])([\w-]+)/g)) {
+        if (prefix === '.' ? !this.classList.contains(token) : this.id !== token) return false;
+      }
+      return ok;
     });
   }
+
+  closest(sel) { return this.matches(sel) ? this : this.parentElement?.closest(sel) ?? null; }
 
   /** 测试用：按 class 收集所有文本。 */
   texts(cls) {
@@ -152,6 +219,11 @@ class Node {
   }
 }
 
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const originalComputedStyle = Object.getOwnPropertyDescriptor(globalThis, 'getComputedStyle');
+Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, writable: true, value: (node) => node.style ?? {} });
 globalThis.document = {
   createElement: (tag) => new Node(tag),
   createTextNode: (t) => Object.assign(new Node('#text'), { _text: String(t) }),
@@ -182,6 +254,7 @@ async function waitFor(check, what = '条件', timeoutMs = 2000) {
  * 所以先搜一下把它筛出来，再点。搜不到就直接失败，别让后面的断言拿到 undefined.fire。
  */
 async function openDishCard(root, name) {
+  if (root.querySelector('.feast-detail-n')?.textContent.includes(name)) return;
   const find = () => root.querySelectorAll('.feast-card').find((c) => c.textContent.includes(name));
   if (!find()) {
     const search = root.findAll((n) => n.tagName === 'INPUT').find((i) => String(i.placeholder ?? '').includes('搜菜名'));
@@ -199,18 +272,67 @@ async function openDishCard(root, name) {
 // 夹具
 // --------------------------------------------------------------------------
 
-const invocations = [];
-/**
- * 每个用例一份独立的数据目录，见 mountPanels。
- * 带上 pid 和启动时间：只按序号的话，第二次跑测试会读到上一次留下的 state.json。
- */
+// 各用例独立目录，并在用例失败时也卸载面板和恢复全局桩。
 let panelSeq = 0;
-const panelRun = `${process.pid}-${Date.now().toString(36)}`;
-/**
- * 面板登记的定时器。每次都从 mountPanels 重新给一份：文件级共享的话，
- * `intervals.find(...)` 会摸到上一个用例的旧面板留下的定时器，测起来就是假的。
- */
-const intervalBox = { list: [] };
+const panelRun = await mkdtemp(join(tmpdir(), 'feed-world-panels-'));
+const panelWorlds = [];
+const activePanels = new Set();
+const globals = ['window', 'localStorage'];
+const restoreGlobal = (name, descriptor) => {
+  if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+  else delete globalThis[name];
+};
+const setGlobal = (name, value) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+const endTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+function test(name, run) {
+  registerTest(name, async () => {
+    const previous = globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]);
+    try { await run(); }
+    finally {
+      for (const panel of activePanels) panel.dispose();
+      document.activeElement = null;
+      Date.now = realTime;
+      for (const [key, descriptor] of previous) restoreGlobal(key, descriptor);
+    }
+  });
+}
+
+function memoryStorage() {
+  const values = new Map();
+  const writes = [];
+  return {
+    values, writes,
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+    getItem(key) { return values.get(String(key)) ?? null; },
+    setItem(key, value) { writes.push([String(key), String(value)]); values.set(String(key), String(value)); },
+    removeItem(key) { values.delete(String(key)); },
+    clear() { values.clear(); },
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+/** 给异步响应设置关卡，让测试明确控制先后顺序而不依赖 I/O 快慢。 */
+function deferInvocations(matches) {
+  const queue = [];
+  return {
+    queue,
+    hook(call, next) {
+      if (!matches(call)) return next();
+      const gate = deferred();
+      queue.push({ call, ...gate, next });
+      return gate.promise;
+    },
+    async take(predicate, description) { return waitFor(() => queue.find(({ call }) => predicate(call)), description); },
+  };
+}
 
 /**
  * 假钟：把 Date.now 接到一个可推进的 `{ now }` 上（面板每次走表都现读一次 Date.now，
@@ -222,80 +344,128 @@ function fakeClock(clock) {
   return () => { Date.now = realTime; };
 }
 
-async function mountPanels({ language = 'zh', failList = false, clock = null, cfg = {}, todayList = null, failThread = false, failRetry = false } = {}) {
-  // 每次一个独立目录：共用一个的话，上一个用例端过的菜、吃过的记录会漏到下一个用例里，
-  // 于是"刚端上来"和"早就吃完了"混在一起，测出来的东西是假的。
-  const dataDir = `.tmp/panels/${panelRun}/${panelSeq += 1}`;
+async function mountPanels({ language = 'zh', failList = false, clock = null, cfg = {}, todayList = null, workHandler = null, workPolicyHandler = null, fillFreeHandler = null, persist = null, invokeHook = null, storage } = {}) {
+  // 每个用例一个目录，整次运行还有 mkdtemp 隔离；最后统一清理。
+  const dataDir = join(panelRun, String(panelSeq += 1));
   const world = new FeastWorld({
     cfg: { ...DEFAULTS, enabled: true, ...cfg },
     dataDir,
+    persist,
     timezone: 'Asia/Shanghai',
     now: clock ? () => clock.now : () => Date.parse('2026-11-05T12:05:00+08:00'),
     random: () => 0.5,
     timers: { setInterval: () => 1, clearInterval() {}, setTimeout: () => 1 },
   });
+  panelWorlds.push(world);
   await world.start({
     log: { info() {}, warn() {} },
     async pushEvent(e) { return { ...e, cursor: 1 }; },
   });
   const decl = world.webUi(language);
 
-  const bundle = await import('../dist/webui.js?' + Math.random());
+  const importBundle = () => import('../dist/webui.js?' + Math.random());
+  const bundle = await importBundle();
   const root = new Node('div');
+  Object.assign(root.style, { overflowY: 'auto' });
+  Object.assign(root, { clientHeight: 400, scrollHeight: 2000 });
   const timeouts = [];
+  const intervals = [];
+  const invocations = [];
   const panels = { lastHandle: null };
-  intervalBox.list.length = 0; // 只清空，不换数组（换掉的话外面拿到的还是旧的）
-  const ctx = {
-    pageId: 'world:feast',
-    panelId: '',
-    language,
-    root,
-    signal: { aborted: false },
-    timeout(fn) { timeouts.push(fn); return { dispose() {} }; },
-    interval(fn, ms) {
-      const entry = { fn, ms, disposed: false };
-      intervalBox.list.push(entry);
-      return { dispose() { entry.disposed = true; } };
-    },
-    async invoke(method, args) {
-      // 回执也留着：有些断言要看服务端真返回了什么（例如「端这一桌」端过去的菜名），
-      // 光看"调了哪个方法"抓不到"端过去的和你看到的不一样"。
-      const record = { method, args };
-      invocations.push(record);
-      if (failList && method === 'list') throw new Error('boom');
-      if (ctx.panelId === 'today' && method === 'list' && todayList) {
-        const base = await decl.invoke(ctx.panelId, method, args ?? []);
-        const result = typeof todayList === 'function' ? todayList(base) : { ...base, ...todayList };
-        record.result = result;
-        return result;
-      }
-      if (ctx.panelId === 'today' && method === 'plan' && args?.[0]?.retry) {
-        const result = { ok: true };
-        record.result = result;
-        return result;
-      }
-      if (ctx.panelId === 'today' && ['thread', 'recovery'].includes(method)) {
-        const result = { ok: true };
-        record.result = result;
-        return result;
-      }
-      // 面板 id 直接透传：写死成 menu/history 的话，套餐面板的调用会打到菜单面板上。
-      const result = await decl.invoke(ctx.panelId, method, args ?? []);
-      record.result = result;
-      return result;
-    },
+  const configureStorage = () => {
+    if (storage === undefined) return;
+    setGlobal('localStorage', storage);
+    setGlobal('window', { ...globalThis.window, localStorage: storage });
   };
 
-  async function mount(id) {
-    ctx.panelId = id;
+  async function defaultInvoke(panelId, method, args) {
+    if (failList && method === 'list') throw new Error('boom');
+    if (panelId === 'today') {
+      if (method === 'list' && todayList) {
+        const result = await decl.invoke(panelId, method, args);
+        return typeof todayList === 'function' ? todayList(result) : { ...result, ...todayList };
+      }
+      if (method === 'work' && workHandler) return workHandler(args[0] ?? {});
+      if (method === 'workPolicy' && workPolicyHandler) return workPolicyHandler(args[0] ?? {});
+      if (method === 'fillFree' && fillFreeHandler) return fillFreeHandler(args[0] ?? []);
+      if (method === 'plan' && args[0]?.retry) return { ok: true };
+      if (['thread', 'recovery'].includes(method)) return { ok: true };
+    }
+    return decl.invoke(panelId, method, args);
+  }
+
+  async function mount(panelId, { freshBundle = false } = {}) {
+    panels.lastHandle?.dispose?.();
+    configureStorage();
     root.replaceChildren();
-    document.activeElement = null; // 上一个用例留在输入框里的焦点别漏过来
+    root.scrollTop = 0;
+    document.activeElement = null;
     invocations.length = 0;
-    panels.lastHandle = (await bundle.default.panels[id].mount(ctx)) ?? null;
+    const unsubscribed = new AbortController();
+    const ctx = {
+      pageId: 'world:feast', panelId, language, root, signal: unsubscribed.signal,
+      timeout(fn, ms) {
+        const entry = () => { if (!entry.disposed) { entry.disposed = true; return fn(); } };
+        Object.assign(entry, { ms, disposed: false });
+        timeouts.push(entry);
+        return { dispose() { entry.disposed = true; } };
+      },
+      interval(fn, ms) {
+        const entry = { fn, ms, disposed: false };
+        intervals.push(entry);
+        return { dispose() { entry.disposed = true; } };
+      },
+      async invoke(method, args = []) {
+        const record = { panelId, method, args };
+        invocations.push(record);
+        const next = () => defaultInvoke(panelId, method, args);
+        try {
+          record.result = await (invokeHook ? invokeHook(record, next) : next());
+          return record.result;
+        } catch (error) {
+          record.error = error;
+          throw error;
+        }
+      },
+    };
+    const module = freshBundle ? await importBundle() : bundle;
+    const handle = await module.default.panels[panelId].mount(ctx);
+    const tracked = { dispose() {
+      if (!activePanels.delete(tracked)) return;
+      // 先调用面板自己的 dispose，随后才模拟宿主发出的 abort。
+      try { handle?.dispose?.(); } finally { unsubscribed.abort(); }
+    } };
+    activePanels.add(tracked);
+    panels.lastHandle = tracked;
     return root;
   }
 
-  return { world, bundle, decl, mount, root, invocations, timeouts, intervals: intervalBox.list, panels };
+  return { world, bundle, decl, mount, root, invocations, timeouts, intervals, panels };
+}
+
+function comboChips(root) {
+  for (let guard = 0; guard < 40; guard += 1) {
+    const more = root.querySelector('.feast-build')?.findAll((node) => node.tagName === 'BUTTON' && /再看 \d+ 道/.test(node.textContent))[0];
+    if (!more) return root.querySelectorAll('.feast-chip');
+    assert.equal(more.disabled, false, '分页入口应可点击');
+    more.click();
+  }
+  throw new Error('套餐分页未能到达末页');
+}
+
+function changeFormOf(root) {
+  const form = root.querySelector('.feast-today-controls')?.querySelectorAll('.feast-form')
+    .find((node) => node.querySelectorAll('.feast-time').length === 2);
+  assert.ok(form, '缺包含起止时间的改主意表单');
+  return form;
+}
+
+function threadInputOf(root) {
+  const block = root.querySelectorAll('.feast-block')
+    .find((node) => node.querySelector('.feast-block-t')?.textContent === '她留下的线索');
+  const input = block?.querySelector('input.feast-activity');
+  assert.ok(input, '缺线索区的想法输入框');
+  return input;
 }
 
 // --------------------------------------------------------------------------
@@ -318,7 +488,7 @@ test('bundle 形状对：面板 id 与服务端声明一一对上，mount 都是
 test('菜单面板：挂载后拉到菜、画出首屏卡片、注入了样式', async () => {
   const { mount, invocations, world } = await mountPanels();
   const root = await mount('menu');
-  assert.equal(invocations[0].method, 'list');
+  assert.ok(invocations.some((call) => call.method === 'list' && call.result), '挂载后应读取列表并收到回执');
   assert.ok(root.querySelector('style'), '没注入样式');
   const cards = root.querySelectorAll('.feast-card');
   // 0.7.2 起首屏只画 MENU_PAGE 张，剩下的按「再看 N 道」加——
@@ -438,8 +608,8 @@ test('菜单面板：先选类别，菜系下拉跟着收窄，换类别会清�
   assert.equal(last.args[0].category, '汤羹');
 
   // 再选一个菜系，两个条件一起带上
-  // 重拉期间面板会先清成"载入中"，那儿没有下拉——要等它画回来再取。
-  await waitFor(() => root.findAll((n) => n.tagName === 'SELECT').length === 2, '下拉画回来');
+  // 后续读取保留旧控件；要等新回执和菜系同步，不是只等下拉存在。
+  await waitFor(() => last.result && root.findAll((n) => n.tagName === 'SELECT')[1]?.childNodes.filter((n) => n.tagName === 'OPTION' && n.value).length === soupCuisines.size, '最终筛选回执和菜系同步');
   const after = root.findAll((n) => n.tagName === 'SELECT')[1];
   const opts = after.childNodes.filter((n) => n.tagName === 'OPTION').map((n) => n.value).filter(Boolean);
   assert.equal(opts.length, soupCuisines.size,
@@ -547,7 +717,7 @@ test('英文界面：文案切过去，数据还是同一份', async () => {
 test('面板只往 ctx.root 里写，没碰 document.body', async () => {
   const { mount, world } = await mountPanels();
   const root = await mount('menu');
-  assert.equal(root.childNodes.length, 2, '应该是 <style> + 容器');
+  assert.ok(root.childNodes.some((node) => node.tagName !== 'STYLE'), '应该有内容容器');
   assert.equal(root.childNodes[0].tagName, 'STYLE');
   await world.stop();
 });
@@ -787,7 +957,7 @@ test('套餐面板：挂载后画出预设，每张卡带着现配出来的菜�
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('combo');
-    assert.equal(invocations[0].method, 'list', '一挂载就该拉数据');
+    assert.ok(invocations.some((call) => call.method === 'list' && call.result), '挂载后应收到列表回执');
     const cards = root.querySelectorAll('.feast-set');
     assert.ok(cards.length >= 8, `预设该画出 8 张：${cards.length}`);
     const text = cards.map((c) => c.textContent).join('\n');
@@ -862,8 +1032,14 @@ test('套餐面板：点过「看这一桌」之后再端，端的是重配后�
     const before = withSeeds();
     assert.ok(before > 0, '一挂载就该带种子拉过一次数据');
 
-    card().findAll((n) => n.tagName === 'BUTTON').find((b) => b.textContent.includes('看这一桌')).fire('click');
-    await waitFor(() => withSeeds() > before, '预览后带新种子重拉数据');
+    card().findByText('看这一桌').click();
+    await waitFor(() => {
+      const latest = latestCall(invocations, 'list')?.result;
+      const expected = latest?.presets?.find((entry) => entry.id === 'light-meal')?.dishes?.map((dish) => dish.name);
+      const rendered = card()?.querySelector('.feast-set-dishes')?.querySelectorAll('span').map((node) => node.textContent);
+      return withSeeds() > before && expected?.length && JSON.stringify(rendered) === JSON.stringify(expected)
+        && card().findByText('看这一桌')?.disabled === false;
+    }, '按新种子画出预览后的卡');
 
     const shown = card().querySelectorAll('.feast-set-dishes')[0].querySelectorAll('span').map((n) => n.textContent);
     // 这一张卡这次画用好的是哪颗种子——端的时候必须还是它。
@@ -893,7 +1069,7 @@ test('套餐面板：勾几道 → 直接端，勾的那几道就是端过去的
     // 勾三道
     const want = ['麻婆豆腐', '东坡肉', '腌笃鲜'];
     for (const name of want) {
-      const chip = root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes(name));
+      const chip = comboChips(root).find((c) => c.textContent.includes(name));
       assert.ok(chip, `勾选区里没找到${name}`);
       chip.fire('click');
       await new Promise((r) => setTimeout(r, 0));
@@ -923,7 +1099,7 @@ test('套餐面板：攒一桌存下来，重开面板还在', async () => {
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     let root = await mount('combo');
-    const chips = () => root.querySelectorAll('.feast-chip');
+    const chips = () => comboChips(root);
     chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
     await new Promise((r) => setTimeout(r, 0));
     root = root; // 重绘后 root 还在
@@ -1042,7 +1218,7 @@ test('套餐面板：攒桌搜索打字不丢焦点，点靠下的 chip 后滚�
     const pick = root.querySelector('.feast-pick');
     assert.ok(pick, '缺勾选区');
     pick.scrollTop = 250;
-    const chip = root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes('麻婆豆腐'));
+    const chip = comboChips(root).find((c) => c.textContent.includes('麻婆豆腐'));
     assert.ok(chip, '全量列表里该有麻婆豆腐');
     chip.fire('click');
     const nextPick = root.querySelector('.feast-pick');
@@ -1059,7 +1235,7 @@ test('套餐面板：攒的桌能改（名字和勾选带进攒桌区，保存�
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('combo');
-    const chips = () => root.querySelectorAll('.feast-chip');
+    const chips = () => comboChips(root);
     chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
     await new Promise((r) => setTimeout(r, 0));
     chips().find((c) => c.textContent.includes('东坡肉')).fire('click');
@@ -1081,7 +1257,7 @@ test('套餐面板：攒的桌能改（名字和勾选带进攒桌区，保存�
       && c.textContent.includes('麻婆豆腐')), '原来勾的菜还亮着');
 
     // 加一道再存：这次 save 要带 id，改的是同一张桌
-    root.querySelectorAll('.feast-chip').find((c) => c.textContent.includes('腌笃鲜')).fire('click');
+    comboChips(root).find((c) => c.textContent.includes('腌笃鲜')).fire('click');
     await new Promise((r) => setTimeout(r, 0));
     root.querySelectorAll('.feast-set-acts').at(-1).findAll((n) => n.tagName === 'BUTTON')
       .find((b) => b.textContent.trim() === '改').fire('click');
@@ -1100,7 +1276,7 @@ test('套餐面板：删要按两次（第一次只亮确认话术，第二次�
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('combo');
-    const chips = () => root.querySelectorAll('.feast-chip');
+    const chips = () => comboChips(root);
     chips().find((c) => c.textContent.includes('麻婆豆腐')).fire('click');
     await new Promise((r) => setTimeout(r, 0));
     const input = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.placeholder.includes('名字'));
@@ -1171,16 +1347,19 @@ test('今天首页：摘要区分计划与事实，线程和存储操作调用�
     assert.ok(root.textContent.includes('这是计划，不代表事情已经发生'));
     assert.ok(root.textContent.includes('水果') || root.textContent.includes('有一份餐点'));
     assert.ok(root.textContent.includes('她留下: 买花'));
-    const threadInput = root.findAll((n) => n.tagName === 'INPUT').find((i) => i.maxLength === 120);
-    assert.ok(threadInput, '缺有 120 字上限的想法输入框');
+    const threadInput = threadInputOf(root);
+    assert.ok(threadInput && threadInput.tagName === 'INPUT', '缺想法输入框');
+    assert.equal(threadInput.maxLength, 120, '想法输入框仍须保留 120 字上限');
     threadInput.value = '周末买花'; threadInput.fire('input');
     root.findByText('记下想法').fire('click');
     await waitFor(() => invocations.some((i) => i.method === 'thread'), '新增 thread 调用');
     assert.deepEqual(invocations.find((i) => i.method === 'thread').args, [{ text: '周末买花' }]);
-    await waitFor(() => invocations.filter((i) => i.method === 'list').length >= 2, '新增 thread 后刷新完成');
+    await waitFor(() => invocations.filter((i) => i.method === 'list').length >= 2 && latestCall(invocations, 'list')?.result, '新增 thread 后刷新回执');
+    await endTurn();
     const reload = root.findByText('重新读取');
     reload.fire('click');
-    await waitFor(() => invocations.some((i) => i.method === 'recovery'), '重新读取调用');
+    await waitFor(() => latestCall(invocations, 'recovery')?.result?.ok && invocations.filter((i) => i.method === 'list').length >= 3 && latestCall(invocations, 'list')?.result, '重新读取最终回执');
+    await endTurn();
     assert.deepEqual(invocations.find((i) => i.method === 'recovery').args, [{ key: 'state', action: 'reload' }]);
     const restore = root.findByText('从备份恢复');
     assert.ok(restore, '有备份时应显示恢复按钮');
@@ -1210,10 +1389,14 @@ test('今天面板：thread 完成与搁下、pending 重发走正确动作', as
     assert.ok(root.findAll((n) => n.tagName === 'BUTTON' && n.textContent.includes('已经跟她说了')).length, '空 items 的 pending 仍应被识别');
     assert.ok(root.findByText('重新发送'), '10 分钟后才有的重发动作应显示');
     root.findByText('重新发送').fire('click');
-    await waitFor(() => invocations.some((i) => i.method === 'plan' && i.args[0]?.retry), 'plan retry 调用');
+    await waitFor(() => invocations.find((i) => i.method === 'plan' && i.args[0]?.retry)?.result?.ok
+      && invocations.filter((i) => i.method === 'list').length >= 2 && latestCall(invocations, 'list')?.result, 'plan retry 和刷新回执');
+    await endTurn();
     assert.deepEqual(invocations.find((i) => i.method === 'plan' && i.args[0]?.retry).args, [{ retry: true }]);
     root.findByText('完成').fire('click');
-    await waitFor(() => invocations.some((i) => i.method === 'thread' && i.args[0]?.status === 'done'), 'thread done 调用');
+    await waitFor(() => invocations.find((i) => i.method === 'thread' && i.args[0]?.status === 'done')?.result?.ok
+      && invocations.filter((i) => i.method === 'list').length >= 3 && latestCall(invocations, 'list')?.result, 'thread done 与刷新回执');
+    await endTurn();
     const drop = root.findByText('搁下');
     assert.ok(drop, '第二条活跃 thread 应仍可操作');
     drop.fire('click');
@@ -1233,17 +1416,18 @@ test('今天面板：画出今天的时间线和「此刻」，此刻那一段�
     assert.ok(invocations.some((i) => i.method === 'list'), '没拉 list');
     assert.ok(root.querySelector('style'), '没注入样式');
 
-    // 时间线画出来了，且覆盖到 00:00 和 24:00（模板一天的首尾）。
+    // 时间线展开后覆盖到 00:00 和 24:00（模板一天的首尾）。
+    expandTimeline(root);
     const rows = root.querySelectorAll('.feast-tl-row');
     assert.ok(rows.length > 2, `时间线只有 ${rows.length} 段`);
     assert.ok(rows.some((r) => r.textContent.includes('00:00')));
     assert.ok(rows.some((r) => r.textContent.includes('24:00')));
 
     // 「此刻」那一条：12:05 落在吃午饭（模板上班日 12:00–13:00）。
-    const strip = root.querySelector('.feast-strip');
-    assert.ok(strip, '缺「此刻」那条');
-    assert.ok(strip.textContent.includes('12:05'), `此刻条没报当前时刻：${strip.textContent}`);
-    assert.ok(strip.textContent.includes('吃午饭'), `此刻条没落到午饭那段：${strip.textContent}`);
+    const current = root.querySelectorAll('.feast-stat-v')[0];
+    assert.ok(current, '缺「此刻」摘要');
+    assert.ok(current.textContent.includes('12:05'), `此刻摘要没报当前时刻：${current.textContent}`);
+    assert.ok(current.textContent.includes('吃午饭'), `此刻摘要没落到午饭那段：${current.textContent}`);
 
     // 点亮的是那一段，且只有一段。
     const lit = root.querySelectorAll('.feast-tl-row.is-now');
@@ -1252,9 +1436,9 @@ test('今天面板：画出今天的时间线和「此刻」，此刻那一段�
     // 早于此刻的段被压暗。
     assert.ok(root.querySelectorAll('.feast-tl-row.is-past').length > 0, '过去的段没压暗');
 
-    // 今天和明天两段都在
-    assert.ok(root.texts('feast-day').some((s) => s.includes('今天')));
-    assert.ok(root.texts('feast-day').some((s) => s.includes('明天')));
+    // 今天和明天各有独立标题；标题不依赖折叠时间线内的日程详情。
+    assert.equal(root.querySelector('[data-ux-island="timeline"]').querySelector('.feast-combo-h').textContent, '今天');
+    assert.equal(root.querySelector('[data-ux-island="tomorrow"]').querySelector('.feast-combo-h').textContent, '明天');
   } finally {
     panels.lastHandle?.dispose?.();
   }
@@ -1309,6 +1493,7 @@ test('今天面板：点时间线某一段，起止和活动名自动填进改�
   const { mount, world, panels } = await mountPanels({ clock });
   try {
     const root = await mount('today');
+    expandTimeline(root);
     const rows = root.querySelectorAll('.feast-tl-row');
     assert.ok(rows.length > 0, '缺时间线');
     // 找一行不是「此刻」的，免得和点亮那条混在一起
@@ -1317,7 +1502,7 @@ test('今天面板：点时间线某一段，起止和活动名自动填进改�
     const activity = row.querySelector('.feast-tl-a').textContent;
     row.fire('click');
 
-    const form = root.querySelector('.feast-form');
+    const form = changeFormOf(root);
     const inputs = form.findAll((n) => n.tagName === 'INPUT');
     const [startIn, endIn] = inputs;
     const actIn = inputs.at(-1);
@@ -1331,11 +1516,39 @@ test('今天面板：点时间线某一段，起止和活动名自动填进改�
   await world.stop();
 });
 
+test('今天面板：时间线使用 displayCategory，调整表单可清除分类且不推断分类', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels, invocations } = await mountPanels({ clock, todayList: (base) => ({
+    ...base,
+    today: { ...base.today, items: base.today.items.map((item, i) => ({ ...item, category: i === 0 ? 'manual-original' : undefined, displayCategory: i === 0 ? 'work' : undefined })) },
+  }) });
+  try {
+    const root = await mount('today');
+    expandTimeline(root);
+    const row = root.querySelectorAll('.feast-tl-row').find((r) => r.getAttribute('data-category') === 'work');
+    assert.ok(row, '应从服务端 displayCategory 标记分类');
+    assert.ok(row.querySelector('.feast-category')?.textContent.includes('工作'));
+    assert.equal(root.querySelectorAll('.feast-tl-row').some((r) => r.attributes['data-category'] === 'sleep'), false,
+      'displayCategory 缺失时不应从 activity/category 推断');
+    row.fire('click');
+    const form = changeFormOf(root);
+    const select = form.findAll((n) => n.tagName === 'SELECT')[0];
+    assert.ok(select, '编辑表单缺分类选择');
+    assert.equal(select.value, 'manual-original', '编辑仍使用原 category 而不是 displayCategory');
+    select.value = '';
+    form.findAll((n) => n.tagName === 'BUTTON')[0].fire('click');
+    await waitFor(() => invocations.some((i) => i.method === 'adjust'), 'adjust 调用');
+    assert.equal(invocations.filter((i) => i.method === 'adjust').at(-1).args[0].category, '', '空分类应传空值清除');
+  } finally { panels.lastHandle?.dispose?.(); }
+  await world.stop();
+});
+
 test('今天面板：饭点画进了时间线（到点的段上挂着「饭点 HH:MM」）', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, world, panels } = await mountPanels({ clock });
   try {
     const root = await mount('today');
+    expandTimeline(root);
     const marks = root.texts('feast-meal');
     const slots = parseSlots(DEFAULTS.mealSlots).map((s) => s.hm);
     assert.ok(marks.length >= slots.length,
@@ -1347,6 +1560,48 @@ test('今天面板：饭点画进了时间线（到点的段上挂着「饭点 H
     panels.lastHandle?.dispose?.();
   }
   await world.stop();
+});
+
+test('今天面板：明天标题始终在状态之前，折叠、刷新和中英文都不混入今天', async () => {
+  for (const language of ['zh', 'en']) {
+    let tomorrow = null;
+    const setup = await mountPanels({ language, todayList: (base) => ({ ...base, tomorrow }) });
+    const label = language === 'en' ? 'Tomorrow' : '明天';
+    const expand = language === 'en' ? 'Expand full timeline' : '展开完整时间线';
+    const collapse = language === 'en' ? 'Collapse full timeline' : '收起完整时间线';
+    try {
+      const root = await setup.mount('today');
+      const verify = () => {
+        const section = root.querySelector('[data-ux-island="tomorrow"]');
+        const heading = section.firstChild;
+        const status = section.querySelector('.feast-tomorrow-state');
+        const body = section.childNodes.at(-1);
+        assert.equal(heading.textContent, label, '状态前应有独立的明天标题');
+        assert.ok(section.childNodes.indexOf(heading) < section.childNodes.indexOf(status));
+        assert.equal(body.hidden, true, '时间线默认折叠');
+        assert.equal(body.contains(heading), false, '折叠不能把明天标题藏起来');
+        section.findByText(expand).click();
+        assert.equal(body.hidden, false);
+        assert.equal(section.findAll((node) => node.textContent === label).length, 1, '展开后不重复明天标题');
+        section.findByText(collapse).click();
+        assert.equal(body.hidden, true);
+        assert.equal(section.firstChild, heading);
+        return status.querySelector('.feast-flag').textContent;
+      };
+      assert.equal(verify(), language === 'en' ? 'Not generated yet' : '尚未生成');
+      for (const next of [
+        { ...templateDay('2026-11-06'), source: 'pending', items: [] },
+        templateDay('2026-11-06'),
+      ]) {
+        tomorrow = next;
+        const previous = root.querySelector('[data-ux-island="tomorrow"]');
+        setup.intervals.find(({ ms }) => ms === 60_000).fn();
+        await waitFor(() => root.querySelector('[data-ux-island="tomorrow"]') !== previous, '明天来源变化后局部刷新');
+        verify();
+      }
+      assert.equal(setup.invocations.some(({ method }) => method === 'plan'), false, '展开与收起不触发写计划');
+    } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+  }
 });
 
 test('今天面板：点「请她写明天」会调 plan，并把明天的来源变成「等她写」', async () => {
@@ -1377,7 +1632,7 @@ test('今天面板：临时改主意会带上日期和时间段调 adjust，改�
   const { mount, invocations, world, panels } = await mountPanels({ clock });
   try {
     const root = await mount('today');
-    const form = root.querySelector('.feast-form');
+    const form = changeFormOf(root);
     assert.ok(form, '缺改主意表单');
     const [startIn, endIn] = form.findAll((n) => n.tagName === 'INPUT');
     const actIn = form.findAll((n) => n.tagName === 'INPUT').at(-1);
@@ -1393,6 +1648,7 @@ test('今天面板：临时改主意会带上日期和时间段调 adjust，改�
     assert.equal(call.args[0].activity, '下楼买布丁');
     assert.equal(call.args[0].date, '2026-11-05', '得带上改的是哪一天');
 
+    expandTimeline(root);
     // 「下楼买布丁」这句话在 toast 里就已经有了，等它等于测了个假的——
     // 要等的是**时间线里**多出这一段。
     await waitFor(() => root.querySelectorAll('.feast-tl-row')
@@ -1409,12 +1665,13 @@ test('今天面板：「做什么」留空 = 不做了，真的会把那一段�
   const { mount, invocations, world, panels } = await mountPanels({ clock });
   try {
     const root = await mount('today');
+    expandTimeline(root);
     // 取消 20:00–23:00：「自己的时间」那一段被吃掉，时间线里不该再有一个横跨 20 点后的它。
     const before = root.querySelectorAll('.feast-tl-row')
       .filter((r) => r.textContent.includes('自己的时间'));
     assert.ok(before.length, '模板上班日里没有「自己的时间」，这条测试的前提变了');
 
-    const form = root.querySelector('.feast-form');
+    const form = changeFormOf(root);
     const inputs = form.findAll((n) => n.tagName === 'INPUT');
     inputs[0].value = '20:00';
     inputs[1].value = '23:00';
@@ -1457,28 +1714,35 @@ test('今天面板：关掉 lifeEnabled 时给一句说明，不硬画时间线'
   await world.stop();
 });
 
-test('今天面板：点往期某一天会拉那一天的 day，并给出收起', async () => {
+test('今天面板：往期调用 review，计划与实际记录分区展示，收起可用', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, invocations, world, panels } = await mountPanels({ clock });
   try {
-    // 先手造一天往期：面板的「往期」读的是 list 里的 recent。
-    await writeDay(world.dataDir, templateDay('2026-11-03', { now: clock.now, dayTypeId: 'restday' }));
+    const day = templateDay('2026-11-03', { now: clock.now, dayTypeId: 'restday' });
+    day.title = '往期计划标题';
+    day.items[0].activity = '计划去看海';
+    await writeDay(world.dataDir, day);
+    await writePlay(world.dataDir, { ...newPlay(day.date), done: [
+      { at: Date.parse('2026-11-03T10:00:00+08:00'), activity: '实际在窗边读书', note: '读到第三章' },
+    ] });
     const root = await mount('today');
     const past = root.querySelectorAll('.feast-item.is-click');
-    if (!past.length) {
-      // 没有往期也要能挂住，不算失败——但下面那段就跳过，别把它测成假通过。
-      assert.ok(root.textContent.includes('还没有往期'),
-        '既没有往期条目，也没有「还没有往期」的说明');
-      return;
-    }
+    assert.equal(past.length, 1, '独立夹具中写入的往期必须出现，不能跳过断言');
     past[0].fire('click');
-    await waitFor(() => invocations.some((i) => i.method === 'day'), '调了 day');
-    assert.equal(invocations.filter((i) => i.method === 'day').pop().args[0], '2026-11-03');
-    await waitFor(() => root.findByText('← 收起'), '往期展开后给出收起');
-  } finally {
-    panels.lastHandle?.dispose?.();
-  }
-  await world.stop();
+    await waitFor(() => root.querySelector('.feast-seen')?.querySelector('.feast-journal'), '往期回顾展开');
+    assert.deepEqual(invocations.find((i) => i.method === 'review').args, ['2026-11-03']);
+    assert.ok(!invocations.some((i) => i.method === 'day'), '新回顾不应调用旧 day 接口');
+    const seen = root.querySelector('.feast-seen');
+    const actual = seen.querySelector('.feast-journal');
+    assert.ok(seen.querySelectorAll('.feast-tl-row').some((row) => row.textContent.includes('计划去看海')));
+    assert.ok(seen.querySelector('.feast-day').textContent.includes('往期计划标题'));
+    assert.equal(actual.querySelectorAll('.feast-actual-row').length, 1);
+    assert.ok(actual.textContent.includes('实际在窗边读书') && actual.textContent.includes('读到第三章'));
+    assert.ok(!actual.textContent.includes('计划去看海'), '不能把日程安排冒充实际记录');
+    assert.ok(actual.textContent.includes('日程仍然只是打算'));
+    returnToday(root);
+    await waitFor(() => root.querySelector('.feast-seen') === null && root.querySelector('.feast-current-plan'), '收起历史并回今天');
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
 });
 
 test('今天面板：画出「她自己的时间」那一块（记了几件、下一档、做过什么）', async () => {
@@ -1507,6 +1771,35 @@ test('今天面板：画出「她自己的时间」那一块（记了几件、�
   await world.stop();
 });
 
+test('今天面板：只在有可填空档时显示主动补充，点击仅调用 fillFree', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  let requestCount = 0;
+  const { mount, world, panels, invocations } = await mountPanels({ clock,
+    todayList: { freePlanSlots: [], fillFreeAvailable: false, fillFreePending: false },
+    fillFreeHandler: async (args) => { requestCount += 1; return { ok: true }; },
+  });
+  try {
+    let root = await mount('today');
+    assert.ok(!root.findByText('请她想想空出来的时间'), '无时段时不要显示误导按钮');
+    await mount('today');
+  } finally { panels.lastHandle?.dispose?.(); }
+  await world.stop();
+
+  const available = await mountPanels({ clock,
+    todayList: { freePlanSlots: [{ start: '13:00', end: '14:00' }], fillFreeAvailable: true, fillFreePending: false },
+    fillFreeHandler: async (args) => { requestCount += 1; assert.deepEqual(args, []); return { ok: true }; },
+  });
+  try {
+    const root = await available.mount('today');
+    const button = root.findByText('请她想想空出来的时间');
+    assert.ok(button, '有可填时段应显示主动补充');
+    button.fire('click');
+    await waitFor(() => available.invocations.some((i) => i.method === 'fillFree'), '调用 fillFree');
+    assert.deepEqual(available.invocations.filter((i) => i.method === 'fillFree')[0].args, []);
+    assert.equal(requestCount, 1, '只有用户点击后才能请求');
+  } finally { available.panels.lastHandle?.dispose?.(); await available.world.stop(); }
+});
+
 test('今天面板：自由时间关着时只说一句，不硬画进度', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, world, panels } = await mountPanels({ clock, cfg: { lifeFreeEnabled: false } });
@@ -1521,35 +1814,71 @@ test('今天面板：自由时间关着时只说一句，不硬画进度', async
   await world.stop();
 });
 
-test('今天面板：关闭上班先预览确认，再提交版本并支持撤销', async () => {
-  const savedWindow = globalThis.window;
-  const confirmations = [];
-  globalThis.window = { ...(savedWindow ?? {}), confirm: (message) => { confirmations.push(message); return true; } };
+test('今天面板：关闭上班先显示对照，确认时提交预览版本并支持撤销', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, world, panels, invocations } = await mountPanels({ clock });
   try {
     const root = await mount('today');
-    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
-    assert.ok(block, '没有「今天上不上班」那一块');
-    // 周四模板是上班日：上班那个键是当前项（被禁用），不上班那个键可点。
-    const onBtn = block.findByText('上班');
-    const offBtn = block.findByText('不上班');
-    assert.ok(onBtn && offBtn, `两个键没画全：${block.textContent.slice(0, 120)}`);
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班（持续生效）'));
+    assert.ok(block, '没有长期工作排程那一块');
+    // 长期控制与日期作用域不同：今天的调整藏在 details 中。
+    const daily = block.querySelector('.feast-work-daily');
+    assert.ok(daily, '缺「仅修改今天的安排」折叠区');
+    daily.open = true; // 简易 DOM 不模拟原生 details 展开，测试显式打开
+    daily.fire('toggle');
+    const onBtn = daily.findByText('今天照原安排上班');
+    const offBtn = daily.findByText('今天不上班（仅今天）');
+    assert.ok(onBtn && offBtn, `两个按日按钮没画全：${daily.textContent.slice(0, 120)}`);
     assert.equal(onBtn.disabled, true, '当前状态那个键该是禁用的（不然点了没变化，像没反应）');
     offBtn.fire('click');
-    await waitFor(() => invocations.filter((i) => i.method === 'work').length >= 2, '预览后提交');
+    await waitFor(() => root.querySelector('.feast-work-preview'), '面板内显示预览对照');
+    assert.ok(root.querySelector('.feast-work-preview').textContent.includes('当前安排'));
+    assert.ok(root.querySelector('.feast-work-preview').textContent.includes('家'), '自由安排应显示居家地点而不是公司');
+    assert.equal(invocations.filter((i) => i.method === 'work').length, 1, '预览阶段不应提交修改');
+    root.findByText('取消').fire('click');
+    assert.ok(!root.querySelector('.feast-work-preview'), '取消应关闭预览');
+    const reopenedDaily = root.querySelector('.feast-work-daily');
+    assert.ok(reopenedDaily?.open, '预览取消后按日详情仍应展开');
+    reopenedDaily.findByText('今天不上班（仅今天）').fire('click');
+    await waitFor(() => root.querySelector('.feast-work-preview'), '重新打开预览');
+    root.findByText('确认今天不上班').fire('click');
+    await waitFor(() => invocations.filter((i) => i.method === 'work').length >= 2, '确认后提交');
     const calls = invocations.filter((i) => i.method === 'work');
-    assert.equal(calls[0].args[0].action, 'preview');
-    assert.equal(typeof calls[1].args[0].revision, 'string');
-    assert.ok(confirmations[0].includes('通勤'));
+    const previews = calls.filter((i) => i.args[0].action === 'preview');
+    const submit = calls.find((i) => i.args[0].action !== 'preview' && i.args[0].action !== 'undo');
+    assert.equal(previews.length, 2, '取消后重开应重新预览');
+    assert.equal(submit.args[0].revision, previews.at(-1).result.revision, '提交必须携带最近预览返回的 revision');
     await waitFor(() => Boolean(root.findByText('撤销关闭上班')), '显示撤销');
     root.findByText('撤销关闭上班').fire('click');
     await waitFor(() => invocations.some((i) => i.method === 'work' && i.args[0].action === 'undo'), '执行撤销');
   } finally {
     panels.lastHandle?.dispose?.();
-    if (savedWindow) globalThis.window = savedWindow; else delete globalThis.window;
     await world.stop();
   }
+});
+
+test('今天面板：预览后日程变化时 revision 拒绝关闭并清除旧预览', async () => {
+  const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
+  const { mount, world, panels, invocations } = await mountPanels({ clock });
+  try {
+    const root = await mount('today');
+    const ui = world.webUi('zh');
+    const daily = root.querySelector('.feast-work-daily'); daily.open = true; daily.fire('toggle');
+    daily.findByText('今天不上班（仅今天）').fire('click');
+    await waitFor(() => root.querySelector('.feast-work-preview'), '预览显示');
+    await ui.invoke('today', 'adjust', [{ date: '2026-11-05', start: '19:00', end: '20:00', activity: '后来新增' }]);
+    root.findByText('确认今天不上班').fire('click');
+    await waitFor(() => invocations.filter((i) => i.method === 'work').some((i) => i.args[0].action !== 'preview' && i.args[0].action !== 'undo'), '过期 revision 提交被拒绝');
+    await waitFor(() => !root.querySelector('.feast-work-preview'), '过期预览清除');
+    const calls = invocations.filter((i) => i.method === 'work');
+    const preview = calls.find((i) => i.args[0].action === 'preview');
+    const submit = calls.find((i) => i.args[0].action !== 'preview' && i.args[0].action !== 'undo');
+    assert.equal(calls.length, 2);
+    assert.equal(submit.args[0].revision, preview.result.revision);
+    assert.ok(root.querySelector('.feast-toast')?.textContent.includes('日程已经变化'));
+    const latest = await (await world.webUi('zh')).invoke('today', 'list', []);
+    assert.equal(latest.work, true, '并发修改后仍保持上班状态');
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
 });
 
 test('今天面板：不上班的日子，按钮翻到「不上班」那一侧', async () => {
@@ -1558,10 +1887,13 @@ test('今天面板：不上班的日子，按钮翻到「不上班」那一侧',
   try {
     await writeDay(world.dataDir, templateDay('2026-11-05', { now: clock.now, work: false, dayTypeId: 'restday' }));
     const root = await mount('today');
-    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班（持续生效）'));
     assert.ok(block, '没有「今天上不上班」那一块');
-    assert.equal(block.findByText('不上班').disabled, true, '不上班那天该把「不上班」标成当前');
-    assert.equal(block.findByText('上班').disabled, false, '上班那个键该能点');
+    const daily = block.querySelector('.feast-work-daily');
+    assert.equal(daily.findByText('今天不上班（仅今天）').disabled, true);
+    assert.equal(daily.findByText('今天照原安排上班').disabled, false);
+    assert.equal(block.findByText('开启长期工作排程').disabled, true, '单日不上班不改变长期排程规则');
+    assert.equal(block.findByText('关闭长期工作排程').disabled, false);
   } finally {
     panels.lastHandle?.dispose?.();
   }
@@ -1576,7 +1908,7 @@ test('今天面板：说明今天是「她定的饭点」还是「配置的饭�
       now: clock.now, dayTypeId: 'workday', mealSlots: ['12:30', '19:40'],
     }));
     const root = await first.mount('today');
-    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班（持续生效）'));
     assert.ok(block, '没有那一块');
     assert.ok(block.textContent.includes('饭点由她定'), `没说她定过饭点：${block.textContent.slice(0, 160)}`);
     assert.ok(block.textContent.includes('12:30'), '没把她定的档位写出来');
@@ -1590,7 +1922,7 @@ test('今天面板：说明今天是「她定的饭点」还是「配置的饭�
   const second = await mountPanels({ clock });
   try {
     const root = await second.mount('today');
-    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班（持续生效）'));
     assert.ok(block.textContent.includes('饭点走配置'), `没说清这组是配置来的：${block.textContent.slice(0, 160)}`);
   } finally {
     second.panels.lastHandle?.dispose?.();
@@ -1598,7 +1930,7 @@ test('今天面板：说明今天是「她定的饭点」还是「配置的饭�
   await second.world.stop();
 });
 
-test('今天面板：日程还没写时，上班开关给一句说明而不是两个点了没用的键', async () => {
+test('今天面板：无当天日程也可保存长期工作设置，重开面板保留', async () => {
   const clock = { now: Date.parse('2026-11-05T12:05:00+08:00') };
   const { mount, world, panels } = await mountPanels({ clock });
   try {
@@ -1607,14 +1939,1052 @@ test('今天面板：日程还没写时，上班开关给一句说明而不是�
     const { join } = await import('node:path');
     await rm(join(world.dataDir, 'feast', 'life', '2026-11-05.json'), { force: true });
     const root = await mount('today');
-    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班'));
+    const block = root.querySelectorAll('.feast-block').find((b) => b.textContent.includes('上不上班（持续生效）'));
     assert.ok(block, '没有那一块');
-    assert.ok(block.textContent.includes('还没有日程'), `该给一句说明：${block.textContent.slice(0, 140)}`);
-    assert.ok(!block.findByText('上班'), '没有日程时不该给一个点不动的键');
+    assert.ok(block.textContent.includes('还没有可修改的日程'));
+    assert.equal(root.querySelector('.feast-work-pill').textContent, '还没安排');
+    assert.ok(block.textContent.includes('权重都会变为 0'));
+    assert.equal(block.findByText('关闭长期工作排程').disabled, false);
+    block.findByText('关闭长期工作排程').fire('click');
+    await waitFor(() => root.findByText('关闭长期工作排程')?.disabled === true, '关闭长期工作');
+    const again = await mount('today');
+    assert.equal(again.findByText('关闭长期工作排程').disabled, true, '重开面板仍为关闭');
+    assert.equal(again.findByText('开启长期工作排程').disabled, false);
+    again.findByText('开启长期工作排程').fire('click');
+    await waitFor(() => again.findByText('开启长期工作排程')?.disabled === true, '恢复长期工作');
   } finally {
     panels.lastHandle?.dispose?.();
   }
   await world.stop();
 });
 
-await report();
+test('长期排程开关：关闭不触碰当日日程，仍可单独清理今天；失败不伪装成功', async () => {
+  const { mount, world, panels, invocations } = await mountPanels();
+  try {
+    const date = '2026-11-06';
+    await writeDay(world.dataDir, templateDay(date, { dayTypeId: 'workday', work: true }));
+    const root = await mount('today');
+    assert.equal(root.querySelectorAll('.feast-work-retained').length, 0);
+    root.findByText('关闭长期工作排程').fire('click');
+    await waitFor(() => root.findByText('开启长期工作排程')?.disabled === false, '长期关闭完成');
+    assert.equal(invocations.filter((i) => i.method === 'workPolicy').length, 1);
+    assert.equal(invocations.filter((i) => i.method === 'work').length, 0);
+    assert.equal(invocations.filter((i) => i.method === 'plan').length, 0);
+    assert.equal(root.querySelector('.feast-work-pill').textContent, '今天上班');
+    const tomorrowNotice = root.querySelectorAll('.feast-work-retained')
+      .find((notice) => notice.textContent === '已关闭后续排班，明天的工作安排仍保留。');
+    assert.ok(tomorrowNotice, '显示明天保留的工作安排');
+    assert.ok(tomorrowNotice.parentNode.findByText('请她重新想想'));
+    const daily = root.querySelector('.feast-work-daily');
+    assert.equal(daily.findByText('今天不上班（仅今天）').disabled, false, '已有工作仍可清理');
+    root.findByText('调整今天').fire('click');
+    assert.equal(daily.open, true);
+    assert.equal(document.activeElement.textContent, '仅修改今天的安排');
+    daily.findByText('今天不上班（仅今天）').fire('click');
+    await waitFor(() => root.querySelector('.feast-work-preview'), '保留单日清理');
+    assert.equal(root.querySelector('.feast-work-daily').open, true);
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
+  const failed = await mountPanels({ workPolicyHandler: async () => ({ok:false,message:'保存失败'}) });
+  try {
+    const root = await failed.mount('today');
+    root.findByText('关闭长期工作排程').fire('click');
+    await waitFor(() => latestCall(failed.invocations, 'workPolicy')?.result?.ok === false && toastMatching(root, /保存失败/), '失败回执与提示');
+    await waitFor(() => root.findByText('关闭长期工作排程')?.disabled === false, '失败后可重试');
+    assert.equal(root.findByText('开启长期工作排程').disabled, true);
+    assert.ok(root.querySelector('.feast-toast')?.textContent.includes('保存失败'));
+  } finally { failed.panels.lastHandle?.dispose?.(); await failed.world.stop(); }
+});
+
+test('长期工作规则读取失败时两个主按钮禁用并显示原因', async () => {
+  const { mount, world, panels } = await mountPanels({ todayList: { workSchedulingError:true } });
+  try {
+    const root = await mount('today');
+    assert.equal(root.findByText('开启长期工作排程').disabled, true);
+    assert.equal(root.findByText('关闭长期工作排程').disabled, true);
+    assert.ok(root.textContent.includes('工作排程规则读取或保存失败'));
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
+});
+
+test('今天面板在接下来显示提醒时间和来源，同一分钟暂停后刷新说明', async () => {
+  const { mount, world, panels, intervals } = await mountPanels({ cfg: { lifeFreeSlots: '17:00', mealSlots: '18:00' } });
+  try {
+    const root = await mount('today');
+    const reminderText = () => root.querySelector('.feast-reminders').textContent;
+    assert.match(reminderText(), /饭点提醒 18:00 · 来自设置/);
+    assert.match(reminderText(), /自由时间提醒 17:00 · 按当前安排，这一档忙时不提醒/);
+    const tools = Object.fromEntries(world.tools().map(({ name, handler }) => [name, handler]));
+    await tools.feast_skip({});
+    await tools.feast_life_skip({});
+    intervals.find(({ ms }) => ms === 60_000).fn();
+    await waitFor(() => reminderText().includes('今天先别叫了'), '刷新反映暂停');
+    assert.match(reminderText(), /饭点提醒 18:00 · 她说今天不吃了/);
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
+});
+
+test('英文首页也显示待补提醒及饭点来源，不把补档当作时间', async () => {
+  const setup = await mountPanels({ language: 'en', clock: { now: Date.parse('2026-11-05T12:25:00+08:00') },
+    cfg: { lifeDayType: 'restday', mealSlots: '11:30', lifeFreeSlots: '11:30,13:00' } });
+  try {
+    const root = await setup.mount('today');
+    const text = root.querySelector('.feast-reminders').textContent;
+    assert.match(text, /Meal reminder 11:30 · Catch-up reminder due · From settings/);
+    assert.match(text, /Free-time reminder catch-up · Catch-up reminder due/);
+    assert.ok(!text.includes('补'));
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+// --------------------------------------------------------------------------
+// 本轮 UI 回归：真实后端 + 极简 DOM 行为冒烟，不代表浏览器渲染验收。
+// --------------------------------------------------------------------------
+
+const latestCall = (calls, method) => calls.filter((call) => call.method === method).at(-1);
+const setInput = (node, value) => { assert.ok(node, '缺输入控件'); node.value = value; node.fire('input'); };
+const selectActual = (root, index, checked = true) => {
+  const check = root.querySelectorAll('.feast-actual-row')[index]?.querySelector('input');
+  assert.ok(check && !check.disabled, '只选择可用的实际记录');
+  check.checked = checked; check.fire('change'); return check;
+};
+
+async function seedActual(world) {
+  await world.tools().find((tool) => tool.name === 'feast_eat').handler({ dish: '麻婆豆腐' });
+  await writePlay(world.dataDir, { ...newPlay('2026-11-05'), done: [
+    { at: Date.parse('2026-11-05T10:00:00+08:00'), activity: '读了一章书', note: '窗边读完' },
+    { at: Date.parse('2026-11-05T11:00:00+08:00'), activity: '散步回来', note: '看见小猫' },
+    { at: Date.parse('2026-11-05T23:00:00+08:00'), activity: '未来记录不得选择', note: '' },
+  ] });
+}
+
+async function saveFirstCard(setup) {
+  await seedActual(setup.world);
+  const root = await setup.mount('today');
+  selectActual(root, 0);
+  setInput(root.querySelector('.feast-card-title'), '窗边的一天');
+  root.findByText('保存纪念卡').click();
+  await waitFor(() => root.querySelector('.feast-memory-card'), '真实保存纪念卡');
+  return root;
+}
+
+function presetChoice(root, id) {
+  const select = root.querySelector('.feast-today-controls').querySelectorAll('select')
+    .find((node) => node.getAttribute('aria-label') === '生活提醒预设');
+  assert.ok(select, '缺预设选择'); select.value = id; select.fire('change');
+}
+
+function draftInputs(root) {
+  setInput(root.querySelector('.feast-journal-title'), '还没保存的小标题');
+  setInput(root.querySelector('.feast-card-title'), '还没保存的卡标题');
+  setInput(threadInputOf(root), '周末买花的想法');
+  const form = changeFormOf(root);
+  const [start, end] = form.querySelectorAll('.feast-time');
+  setInput(start, '20:00'); setInput(end, '21:00');
+  setInput(form.querySelector('input.feast-activity'), '尚未提交的调整');
+}
+
+function assertDrafts(root) {
+  assert.equal(root.querySelector('.feast-journal-title').value, '还没保存的小标题');
+  assert.equal(root.querySelector('.feast-card-title').value, '还没保存的卡标题');
+  assert.equal(threadInputOf(root).value, '周末买花的想法');
+  const form = changeFormOf(root);
+  assert.deepEqual(form.querySelectorAll('.feast-time').map((node) => node.value), ['20:00', '21:00']);
+  assert.equal(form.querySelector('input.feast-activity').value, '尚未提交的调整');
+}
+
+test('菜单快捷：liked/untried/recent 与类别、菜系、搜索求交并保留其他 filter', async () => {
+  const setup = await mountPanels();
+  const { world, panels, invocations } = setup;
+  try {
+    await world.tools().find((tool) => tool.name === 'feast_eat').handler({ dish: '麻婆豆腐' });
+    await world.tools().find((tool) => tool.name === 'feast_reaction').handler({ action: 'like', note: '喜欢' });
+    const root = await setup.mount('menu');
+    const dish = lib.dishes.find((entry) => entry.id === 'mapo-tofu');
+    for (const [index, value] of [[0, dish.category], [1, dish.cuisine]]) {
+      const before = invocations.length;
+      const select = root.querySelectorAll('select')[index]; select.value = value; select.fire('change');
+      await waitFor(() => invocations.length > before && latestCall(invocations, 'list')?.result, '筛选刷新');
+    }
+    setInput(root.querySelector('.feast-search'), '豆腐');
+    await waitFor(() => latestCall(invocations, 'list')?.result && latestCall(invocations, 'list').args[0].query === '豆腐', '搜索刷新');
+    for (const [label, quick] of [['她喜欢的', 'liked'], ['还没尝过', 'untried'], ['最近吃过', 'recent']]) {
+      root.findByText(label).click();
+      const call = await waitFor(() => {
+        const call = latestCall(invocations, 'list'); return call?.result && call.args[0].quick === quick && call;
+      }, `${quick} 筛选刷新`);
+      assert.deepEqual(call.args[0], { category: dish.category, cuisine: dish.cuisine, query: '豆腐', quick });
+      assert.equal(root.findByText(label).getAttribute('aria-pressed'), 'true');
+      assert.ok(call.result.items.every((entry) => entry.category === dish.category && entry.cuisine === dish.cuisine));
+      const ids = call.result.items.map((entry) => entry.id);
+      assert.equal(ids.includes(dish.id), quick !== 'untried', '喜欢/最近应保留吃过喜欢的菜，未尝应排除');
+      assert.equal(root.querySelectorAll('.feast-card').length, call.result.items.length);
+    }
+  } finally { panels.lastHandle?.dispose?.(); await world.stop(); }
+});
+
+test('菜单换口味：最多三道可开详情，推荐和查看都不 feed、不记吃', async () => {
+  const setup = await mountPanels();
+  try {
+    const root = await setup.mount('menu');
+    const before = await setup.decl.invoke('history', 'list', []);
+    root.findByText('今天换换口味').click();
+    await waitFor(() => root.querySelector('.feast-discovery'), '候选出现');
+    const picks = root.querySelector('.feast-discovery').querySelectorAll('.feast-chip');
+    const call = latestCall(setup.invocations, 'recommend');
+    assert.equal(picks.length, 3, '整库足够时展示三道，且不得超过三道');
+    assert.equal(new Set(call.result.items.map((item) => item.id)).size, 3);
+    assert.deepEqual(picks.map((node) => node.textContent), call.result.items.map((item) => `${item.name} · ${item.cuisine}`));
+    picks[0].click();
+    await waitFor(() => root.querySelector('.feast-detail'), '候选详情');
+    assert.deepEqual(latestCall(setup.invocations, 'dish').args, [call.result.items[0].id]);
+    assert.ok(!setup.invocations.some((entry) => ['feed', 'bite', 'take'].includes(entry.method)));
+    assert.deepEqual(await setup.decl.invoke('history', 'list', []), before, '推荐和详情不能变更吃过历史');
+    assert.equal(root.querySelector('.feast-strip'), null);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('真实回顾：60 Unicode 字标题独立保存，纪念卡限选1–2条，计划和未来不混入', async () => {
+  const setup = await mountPanels();
+  try {
+    await seedActual(setup.world);
+    const before = await readDay(setup.world.dataDir, '2026-11-05');
+    const root = await setup.mount('today');
+    assert.equal(root.querySelectorAll('.feast-actual-row').length, 3, '两件活动和一口饭是真实记录，未来活动不出现');
+    assert.ok(!root.querySelector('.feast-journal').textContent.includes('未来记录不得选择'));
+    assert.ok(!root.querySelector('.feast-journal').textContent.includes('吃午饭'), '模板日程不能成为实际记录');
+    const title = root.querySelector('.feast-journal-title');
+    const cardTitle = root.querySelector('.feast-card-title');
+    assert.equal(title.maxLength, 120, '60个增补平面Unicode字需要120个UTF-16码元');
+    assert.equal(cardTitle.maxLength, 120);
+    const journalCalls = setup.invocations.filter((entry) => entry.method === 'journal').length;
+    root.querySelectorAll('.feast-actual-row')[0].findByText('用作小标题').click();
+    assert.equal(title.value, '读了一章书', '用真实记录正文预填标题');
+    assert.equal(title.parentNode.parentNode.open, true, '预填时展开标题工具');
+    assert.equal(document.activeElement, title);
+    assert.equal(root.querySelectorAll('.feast-actual-row')[0].querySelector('input').checked, false, '预填不勾选纪念卡记录');
+    assert.equal(setup.invocations.filter((entry) => entry.method === 'journal').length, journalCalls, '预填后仍须明确保存');
+    assert.equal((await setup.decl.invoke('today', 'review', ['2026-11-05'])).journal.title, '');
+    const unicode = '🐟'.repeat(60);
+    setInput(title, unicode); root.findByText('保存小标题').click();
+    await waitFor(() => latestCall(setup.invocations, 'journal')?.result?.ok && root.querySelector('.feast-journal').textContent.includes(unicode), '小标题真实保存');
+    assert.equal((await setup.decl.invoke('today', 'review', ['2026-11-05'])).journal.title, unicode);
+    assert.deepEqual(await readDay(setup.world.dataDir, '2026-11-05'), before, '手动标题不改日程标题或计划');
+    const count = setup.invocations.filter((entry) => entry.method === 'journal').length;
+    root.findByText('保存纪念卡').click();
+    assert.equal(setup.invocations.filter((entry) => entry.method === 'journal').length, count, '空选时应在界面拦下');
+    assert.match(root.querySelector('.feast-journal').querySelector('.feast-feedback').textContent, /请选择1–2条/);
+    selectActual(root, 0); selectActual(root, 1);
+    assert.equal(selectActual(root, 2).checked, false, '第三条必须拒绝，保留前两条选择');
+    setInput(root.querySelector('.feast-card-title'), unicode);
+    root.findByText('保存纪念卡').click();
+    await waitFor(() => root.querySelector('.feast-memory-card'), '两条纪念卡保存');
+    const saved = latestCall(setup.invocations, 'journal');
+    assert.equal(saved.args[0].action, 'card'); assert.equal(saved.args[0].selectedIds.length, 2);
+    assert.equal(saved.result.card.title, unicode);
+    const review = await setup.decl.invoke('today', 'review', ['2026-11-05']);
+    assert.deepEqual(review.journal.cards[0].entries, review.actual.slice(0, 2));
+    assert.equal(root.querySelectorAll('.feast-actual-row').filter((row) => row.querySelector('input').checked).length, 0);
+    selectActual(root, 2); root.findByText('保存纪念卡').click();
+    await waitFor(() => root.querySelectorAll('.feast-memory-card').length === 2, '单条纪念卡保存');
+    assert.equal(latestCall(setup.invocations, 'journal').result.card.entries.length, 1);
+    assert.deepEqual(await readDay(setup.world.dataDir, '2026-11-05'), before);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('回顾保存失败：真实后端拒绝超长标题，输入与选择可继续重试', async () => {
+  const setup = await mountPanels();
+  try {
+    await seedActual(setup.world); const root = await setup.mount('today');
+    setInput(root.querySelector('.feast-journal-title'), '字'.repeat(61));
+    root.findByText('保存小标题').click();
+    await waitFor(() => root.querySelector('.feast-feedback.is-bad'), '标题错误明确显示');
+    assert.match(root.querySelector('.feast-journal').querySelector('.feast-feedback').textContent, /最多 60 字/);
+    assert.equal(root.querySelector('.feast-journal-title').value, '字'.repeat(61));
+    selectActual(root, 0); selectActual(root, 1);
+    setInput(root.querySelector('.feast-card-title'), '卡'.repeat(61));
+    root.findByText('保存纪念卡').click();
+    await waitFor(() => latestCall(setup.invocations, 'journal')?.args[0].action === 'card'
+      && latestCall(setup.invocations, 'journal').result?.ok === false && !root.findByText('保存纪念卡').disabled, '纪念卡失败可重试');
+    assert.equal(root.querySelector('.feast-card-title').value, '卡'.repeat(61));
+    assert.equal(root.querySelectorAll('.feast-actual-row').filter((row) => row.querySelector('input').checked).length, 2);
+    assert.equal((await setup.decl.invoke('today', 'review', ['2026-11-05'])).journal.cards.length, 0);
+    setInput(root.querySelector('.feast-card-title'), '重试保留的两件事'); root.findByText('保存纪念卡').click();
+    await waitFor(() => root.querySelector('.feast-memory-card'), '原选择重试成功');
+    assert.equal(latestCall(setup.invocations, 'journal').result.card.entries.length, 2);
+    assert.equal(root.querySelector('.feast-journal-title').value, '字'.repeat(61), '另一份尚未保存的输入也保留');
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('未来回顾：能看计划但无实际记录可选，伪造计划ID由真实后端拒绝', async () => {
+  const setup = await mountPanels();
+  try {
+    await writeDay(setup.world.dataDir, templateDay('2026-11-06', { dayTypeId: 'restday' }));
+    await writePlay(setup.world.dataDir, { ...newPlay('2026-11-06'), done: [
+      { at: Date.parse('2026-11-06T10:00:00+08:00'), activity: '未来活动', note: '' },
+    ] });
+    const root = await setup.mount('today');
+    const next = labeledButton(root, /下一[日天]|后一[日天]/);
+    assert.ok(next && next.disabled, '今天之后的日期不能从事实工作台打开');
+    const before = setup.invocations.filter((call) => call.method === 'review').length;
+    next.click();
+    assert.equal(setup.invocations.filter((call) => call.method === 'review').length, before);
+    // 未来计划仍由真实 review 接口提供；UI 不把它混入已发生的日期工作台。
+    const review = await setup.decl.invoke('today', 'review', ['2026-11-06']);
+    assert.equal(review.ok, true);
+    assert.ok(review.day.items.length > 0, '未来计划仍可读取');
+    assert.deepEqual(review.actual, [], '未来计划或未来来源记录都不能当作已发生');
+    for (const date of ['2026-11-05', '2026-11-06']) {
+      const result = await setup.decl.invoke('today', 'journal', [{ action: 'card', date, selectedIds: ['plan-00:00'] }]);
+      assert.equal(result.ok, false); assert.match(result.message, /实际记录为空|今天或过去/);
+    }
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('纪念卡原生导出：真实文本进入Blob，文件名正确，临时链接与URL均清理', async () => {
+  const setup = await mountPanels();
+  const create = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  const revoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+  const originalClick = Node.prototype.click;
+  const blobs = []; const clicks = []; const revoked = [];
+  URL.createObjectURL = (blob) => { blobs.push(blob); return `blob:panel-test-${blobs.length}`; };
+  URL.revokeObjectURL = (url) => { revoked.push(url); };
+  Node.prototype.click = function () { if (this.tagName === 'A') clicks.push({ href: this.href, download: this.download }); else originalClick.call(this); };
+  try {
+    const root = await saveFirstCard(setup);
+    const card = latestCall(setup.invocations, 'journal').result.card;
+    const timeoutCount = setup.timeouts.length;
+    root.findByText('下载文字卡').click();
+    await waitFor(() => clicks.length === 1 && setup.timeouts.length > timeoutCount, '原生下载完成');
+    const exported = latestCall(setup.invocations, 'journal');
+    assert.deepEqual(exported.args, [{ action: 'export', date: '2026-11-05', cardId: card.id }]);
+    assert.equal(exported.result.ok, true);
+    assert.deepEqual(clicks[0], { href: 'blob:panel-test-1', download: `fish-day-2026-11-05-${card.id.slice(0, 8)}.txt` });
+    assert.ok(blobs[0] instanceof Blob); assert.equal(blobs[0].type, 'text/plain;charset=utf-8');
+    assert.equal(Buffer.from(await blobs[0].arrayBuffer()).toString('utf8'), '\ufeff' + exported.result.text);
+    assert.match(exported.result.text, /窗边的一天/); assert.match(exported.result.text, /读了一章书/);
+    assert.equal(root.querySelector('textarea').value, exported.result.text);
+    assert.equal(root.querySelector('textarea').readOnly, true);
+    assert.equal(root.querySelectorAll('a').length, 0, '临时a标签已移除');
+    setup.timeouts.slice(timeoutCount).forEach((fn) => fn());
+    assert.deepEqual(revoked, ['blob:panel-test-1'], '延迟清理URL');
+    root.findByText('下载文字卡').click();
+    await waitFor(() => clicks.length === 2, '第二次导出');
+    setup.panels.lastHandle.dispose();
+    assert.deepEqual(revoked, ['blob:panel-test-1', 'blob:panel-test-2'], '卸载清理尚未回收URL');
+  } finally {
+    setup.panels.lastHandle?.dispose?.(); await setup.world.stop();
+    Node.prototype.click = originalClick;
+    if (create) Object.defineProperty(URL, 'createObjectURL', create); else delete URL.createObjectURL;
+    if (revoke) Object.defineProperty(URL, 'revokeObjectURL', revoke); else delete URL.revokeObjectURL;
+  }
+});
+
+test('纪念卡不能下载时：仍展开真实只读文本供手动复制', async () => {
+  const setup = await mountPanels();
+  const original = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  URL.createObjectURL = undefined;
+  try {
+    const root = await saveFirstCard(setup); root.findByText('下载文字卡').click();
+    await waitFor(() => root.querySelector('.feast-memory-card').textContent.includes('请复制下方文字'), '下载不可用提示');
+    const output = root.querySelector('textarea');
+    assert.equal(output.readOnly, true); assert.equal(output.value, latestCall(setup.invocations, 'journal').result.text);
+    assert.match(output.value, /读了一章书/); assert.equal(root.querySelectorAll('a').length, 0);
+    assert.equal(root.findByText('下载文字卡').disabled, false);
+  } finally {
+    setup.panels.lastHandle?.dispose?.(); await setup.world.stop();
+    if (original) Object.defineProperty(URL, 'createObjectURL', original); else delete URL.createObjectURL;
+  }
+});
+
+test('预设无persist：只能预览逐项差异，确认禁用，取消不改且草稿保留', async () => {
+  const setup = await mountPanels({ cfg: { mealReminder: false, mealMaxRetries: 3, lifeFreeSlots: '' } });
+  try {
+    const root = await setup.mount('today'); const before = structuredClone(setup.world.cfg);
+    draftInputs(root); presetChoice(root, 'lively'); assertDrafts(root);
+    root.findByText('预览修改').click();
+    await waitFor(() => root.querySelector('.feast-preset-preview'), '只读预览');
+    assert.equal(root.findByText('确认应用这套设置').disabled, true);
+    assert.match(root.textContent, /未提供保存配置接口，只能预览/);
+    const preview = latestCall(setup.invocations, 'style');
+    assert.deepEqual(preview.args, [{ action: 'preview', preset: 'lively' }]); assert.equal(preview.result.canApply, false);
+    assert.equal(root.querySelector('.feast-preset-preview').querySelectorAll('.feast-note').length, preview.result.changes.length);
+    assert.match(root.querySelector('.feast-preset-preview').textContent, /当前 关闭 → 应用后 开启/);
+    assert.match(root.querySelector('.feast-preset-preview').textContent, /当前 3 → 应用后 0/);
+    assert.match(root.querySelector('.feast-preset-preview').textContent, /当前 未设置 → 应用后 10:00,14:00,21:00/);
+    root.findByText('确认应用这套设置').click();
+    assert.equal(setup.invocations.filter((call) => call.method === 'style').length, 1, '禁用确认不得调用apply');
+    root.findByText('取消预览').click(); assert.equal(root.querySelector('.feast-preset-preview'), null);
+    assert.deepEqual(setup.world.cfg, before); assertDrafts(root);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('预设确认：先逐项预览和取消，确认携带revision后才persist真实差量', async () => {
+  const patches = [];
+  const setup = await mountPanels({ persist: async (patch) => { patches.push(structuredClone(patch)); },
+    cfg: { mealReminder: false, mealMaxRetries: 3, lifeFreeEnabled: false, lifeFreeSlots: '', lifeFreeBusyCall: true, lifeMomentEvents: true, lifeFreeAskReport: true } });
+  try {
+    await seedActual(setup.world);
+    const plan = await readDay(setup.world.dataDir, '2026-11-05');
+    const root = await setup.mount('today'); patches.length = 0;
+    const before = structuredClone(setup.world.cfg); draftInputs(root); selectActual(root, 0);
+    presetChoice(root, 'lively'); root.findByText('预览修改').click();
+    await waitFor(() => root.querySelector('.feast-preset-preview'), '七项预览');
+    const preview = latestCall(setup.invocations, 'style').result;
+    const expected = [
+      '饭点提醒: 当前 关闭 → 应用后 开启', '每顿最多再催几次: 当前 3 → 应用后 0',
+      '自由时间提醒: 当前 关闭 → 应用后 开启', '自由时间档位: 当前 未设置 → 应用后 10:00,14:00,21:00',
+      '忙着的时候也叫: 当前 开启 → 应用后 关闭', '时段切换事件: 当前 开启 → 应用后 关闭', '提醒她报备: 当前 开启 → 应用后 关闭',
+    ];
+    assert.deepEqual(root.querySelector('.feast-preset-preview').texts('feast-note'), expected);
+    assert.equal(preview.changes.length, 7); assert.equal(patches.length, 0); assert.deepEqual(setup.world.cfg, before);
+    root.findByText('取消预览').click(); assert.equal(patches.length, 0); assert.deepEqual(setup.world.cfg, before); assertDrafts(root);
+    root.findByText('预览修改').click(); await waitFor(() => root.querySelector('.feast-preset-preview'), '重新预览');
+    const confirmed = latestCall(setup.invocations, 'style').result;
+    root.findByText('确认应用这套设置').click();
+    await waitFor(() => !root.querySelector('.feast-preset-preview') && latestCall(setup.invocations, 'style')?.result?.ok && toastMatching(root, /(?:应用|保存)/), '预设确认成功回执');
+    assert.deepEqual(latestCall(setup.invocations, 'style').args, [{ action: 'apply', preset: 'lively', revision: confirmed.revision }]);
+    assert.deepEqual(patches, [confirmed.patch]);
+    for (const [key, value] of Object.entries(confirmed.patch)) assert.equal(setup.world.cfg[key], value);
+    assert.deepEqual(await readDay(setup.world.dataDir, '2026-11-05'), plan);
+    assertDrafts(root); assert.equal(root.querySelectorAll('.feast-actual-row')[0].querySelector('input').checked, true);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('预设保存错误与过期显式提示，失败不改配置、草稿与选择仍保留', async () => {
+  let fail = true; const patches = [];
+  const setup = await mountPanels({ persist: async (patch) => { patches.push(patch); if (fail) throw new Error('磁盘写入失败'); } });
+  try {
+    await seedActual(setup.world); const root = await setup.mount('today'); patches.length = 0;
+    draftInputs(root); selectActual(root, 1); presetChoice(root, 'quiet');
+    const preview = async () => { root.findByText('预览修改').click(); await waitFor(() => root.querySelector('.feast-preset-preview'), '准备预览'); };
+    await preview(); const before = structuredClone(setup.world.cfg);
+    root.findByText('确认应用这套设置').click();
+    await waitFor(() => root.querySelectorAll('.feast-feedback.is-bad').some((node) => node.textContent.includes('磁盘写入失败')), '持久化失败提示');
+    assert.deepEqual(setup.world.cfg, before); assert.equal(patches.length, 1); assertDrafts(root);
+    assert.equal(root.querySelectorAll('.feast-actual-row')[1].querySelector('input').checked, true);
+    assert.equal(root.findByText('确认应用这套设置').disabled, false, '失败可重试');
+    root.findByText('取消预览').click(); fail = false; await preview();
+    setup.world.cfg.mealMaxRetries = 2; // 模拟预览后宿主配置变化，apply仍走真实revision检查。
+    root.findByText('确认应用这套设置').click();
+    await waitFor(() => !root.querySelector('.feast-preset-preview') && root.querySelectorAll('.feast-feedback.is-bad').some((node) => /stale|过期/i.test(node.textContent)), '过期提示');
+    assert.equal(latestCall(setup.invocations, 'style').result.stale, true);
+    assert.equal(patches.length, 1, '过期不得调用persist'); assert.equal(setup.world.cfg.lifeFreeEnabled, true);
+    assertDrafts(root); assert.equal(root.querySelectorAll('.feast-actual-row')[1].querySelector('input').checked, true);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('关闭日程仍可保存真实回顾和查看往期，首页不硬画当日时间线', async () => {
+  const setup = await mountPanels({ cfg: { lifeEnabled: false } });
+  try {
+    await seedActual(setup.world);
+    await writeDay(setup.world.dataDir, templateDay('2026-11-03', { dayTypeId: 'restday' }));
+    await writePlay(setup.world.dataDir, { ...newPlay('2026-11-03'), done: [
+      { at: Date.parse('2026-11-03T10:00:00+08:00'), activity: '关闭前留下的散步', note: '' },
+    ] });
+    const root = await setup.mount('today');
+    assert.match(root.textContent, /关着/); assert.equal(root.querySelectorAll('.feast-tl-row').length, 0);
+    assert.equal(root.querySelectorAll('.feast-actual-row').length, 3);
+    selectActual(root, 0); root.findByText('保存纪念卡').click();
+    await waitFor(() => root.querySelector('.feast-memory-card'), '关闭日程时保存真实纪念卡');
+    root.querySelector('.feast-item.is-click').click();
+    await waitFor(() => root.querySelector('.feast-seen')?.querySelector('.feast-actual-row'), '关闭日程仍能往期review');
+    assert.match(root.querySelector('.feast-seen').querySelector('.feast-journal').textContent, /关闭前留下的散步/);
+    assert.deepEqual(latestCall(setup.invocations, 'review').args, ['2026-11-03']);
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+test('首页顺序与样式静态契约：当前计划在长期控制之前，焦点及减弱动画规则存在', async () => {
+  const setup = await mountPanels();
+  try {
+    const root = await setup.mount('today'); const nodes = [...root.walk()];
+    const current = root.querySelector('.feast-current-plan'); const controls = root.querySelector('.feast-today-controls');
+    const work = root.querySelector('.feast-today-status');
+    assert.ok(current && controls && work); assert.ok(nodes.indexOf(current) < nodes.indexOf(controls));
+    assert.ok(nodes.indexOf(current) < nodes.indexOf(work)); assert.ok([...controls.walk()].includes(work));
+    assert.equal(controls.tagName, 'DETAILS'); assert.equal(controls.open, false);
+    assert.match(current.textContent, /这是计划，不代表事情已经发生/);
+    const css = root.querySelector('style').textContent;
+    assert.match(css, /:is\(button,input,select,summary,textarea,\[role="button"\],a\[href\]\):focus-visible\{[^}]*outline:2px solid/);
+    assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+    assert.match(css, /animation:none!important;transition:none!important;transform:none!important;scroll-behavior:auto!important/);
+    // 仅静态CSS与节点顺序断言；这个Node桩没有布局、原生焦点环或动画渲染能力。
+  } finally { setup.panels.lastHandle?.dispose?.(); await setup.world.stop(); }
+});
+
+// --------------------------------------------------------------------------
+// 本轮日期工作台、浏览/草稿分离与异步行为。所有时间都使用明确的测试时区。
+// --------------------------------------------------------------------------
+
+const todayDate = '2026-11-05';
+const day3 = '2026-11-03';
+const day4 = '2026-11-04';
+const testClock = () => ({ now: Date.parse('2026-11-05T12:05:00+08:00') });
+const labeledButton = (root, label) => root.findAll((n) => n.tagName === 'BUTTON')
+  .find((node) => [node.textContent.trim(), node.getAttribute('aria-label'), node.title].some((text) => label.test(text ?? '')));
+function clickButton(root, label) {
+  const node = labeledButton(root, label);
+  assert.ok(node && !node.disabled, `缺可点击按钮 ${label}`);
+  node.click();
+  return node;
+}
+const previousDay = (root) => clickButton(root, /上一日|前一[日天]|上一天/);
+const nextDay = (root) => clickButton(root, /下一[日天]|后一[日天]/);
+const returnToday = (root) => clickButton(root, /回到今天|返回今天|回今天/);
+const dateControl = (root, date) => {
+  const bar = root.querySelector('.feast-date-navigation') ?? root.querySelector('.feast-datebar');
+  const node = bar?.querySelector('button[aria-label="选择日期"]');
+  return node && (!date || node.title === date || bar.textContent.includes(date)) ? node : null;
+};
+const calendarCell = (root, date) => root.querySelector(`button[data-date="${date}"]`)
+  ?? labeledButton(root, new RegExp(`^${date}`));
+const toastMatching = (root, pattern) => root.findAll((node) => node !== root
+  && (node.classList.contains('feast-feedback') || node.classList.contains('feast-toast')
+    || ['status', 'alert'].includes(node.getAttribute('role')))
+  && pattern.test(node.textContent)).find((node) => !node.children.some((child) => pattern.test(child.textContent)
+    && ['status', 'alert'].includes(child.getAttribute('role'))));
+const readPosition = (node, y) => { node.scrollTop = y; node.fire('scroll'); };
+const nodeSnapshot = (root) => ({ nodes: [...root.walk()], text: root.textContent });
+function assertUnchanged(root, before, reason) {
+  assert.equal(root.textContent, before.text, reason);
+  const nodes = [...root.walk()];
+  assert.equal(nodes.length, before.nodes.length, reason);
+  assert.ok(nodes.every((node, i) => node === before.nodes[i]), reason);
+}
+
+async function seedPast(setup, date, text, makeCard = false) {
+  const day = templateDay(date, { dayTypeId: 'restday' });
+  day.title = `${text}的计划`;
+  day.items[0].activity = `${text}的安排`;
+  await writeDay(setup.world.dataDir, day);
+  await writePlay(setup.world.dataDir, { ...newPlay(date), done: [
+    { at: Date.parse(`${date}T10:00:00+08:00`), activity: `${text}的实录`, note: `${text}的备注` },
+  ] });
+  if (makeCard) {
+    const review = await setup.decl.invoke('today', 'review', [date]);
+    const result = await setup.decl.invoke('today', 'journal', [{ action: 'card', date, title: `${text}纪念卡`, selectedIds: [review.actual[0].id] }]);
+    assert.equal(result.ok, true, '准备真实的历史纪念卡');
+  }
+}
+
+function expandTimeline(root) {
+  const toggle = root.querySelector('.feast-timeline-toggle');
+  assert.ok(toggle, '缺完整时间线开关');
+  if (/展开/.test(toggle.textContent)) toggle.click();
+}
+
+function openCalendar(root, date = todayDate) {
+  const control = dateControl(root, date);
+  assert.ok(control && !control.disabled, '日期条应可展开月历');
+  control.click();
+  return control;
+}
+
+test('所有面板读 viewState：同数据目录跨挂载稳定，换目录隔离，日期取服务端时区', async () => {
+  const clock = { now: Date.parse('2026-11-04T16:01:00Z') };
+  const a = await mountPanels({ clock });
+  const b = await mountPanels({ clock });
+  let scope;
+  for (const { id } of a.decl.panels) {
+    await a.mount(id);
+    const call = latestCall(a.invocations, 'viewState');
+    assert.ok(call, `${id} 挂载没有请求 viewState`);
+    assert.deepEqual(call.args, []);
+    scope ??= call.result.scope;
+    assert.equal(typeof scope, 'string');
+    assert.ok(scope && !scope.includes(a.world.dataDir), 'scope 不暴露数据目录');
+    for (const key of ['ok', 'scope', 'date', 'timezone']) assert.ok(Object.hasOwn(call.result, key), `viewState 缺 ${key}`);
+    assert.deepEqual([call.result.ok, call.result.scope, call.result.date, call.result.timezone], [true, scope, todayDate, 'Asia/Shanghai']);
+  }
+  assert.equal((await a.world.webUi('en').invoke('menu', 'viewState', [])).scope, scope);
+  assert.notEqual((await b.decl.invoke('menu', 'viewState', [])).scope, scope, '不同 dataDir 的 scope 不能串');
+  clock.now += 86_400_000;
+  const tomorrow = await a.decl.invoke('today', 'viewState', []);
+  assert.equal(tomorrow.date, '2026-11-06');
+  assert.equal(tomorrow.scope, scope, '跨天不应丢失同一数据目录的身份');
+});
+
+test('菜单链：按搜索及分类浏览→进详情→返回→跨面板回来，恢复过滤、滚动和卡片焦点', async () => {
+  const setup = await mountPanels();
+  const root = await setup.mount('menu');
+  const dishButton = () => root.querySelector('[data-dish-id="mapo-tofu"]');
+  const select = root.querySelectorAll('select')[1];
+  select.value = '川菜'; select.fire('change');
+  await waitFor(() => root.querySelectorAll('.feast-card').length === lib.dishes.filter((d) => d.cuisine === '川菜').length, '川菜列表落地');
+  setInput(root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名')), '麻婆豆腐');
+  await waitFor(() => latestCall(setup.invocations, 'list')?.result && root.querySelectorAll('.feast-card').length === 1 && dishButton(), '搜出目标菜');
+  root.clientHeight = 400; root.scrollHeight = 1000;
+  readPosition(root, 136);
+  dishButton().focus(); dishButton().click();
+  await waitFor(() => root.querySelector('.feast-detail-n')?.textContent === '麻婆豆腐', '指定详情');
+  root.scrollTop = 0; // 详情与列表的阅读位置不同。
+  clickButton(root, /回菜单|返回菜单/);
+  await waitFor(() => dishButton() && !root.querySelector('.feast-detail'), '回到来时的搜索列表');
+  assert.equal(root.scrollTop, 136);
+  assert.equal(document.activeElement, dishButton(), '详情回到原菜卡，而不是页顶或搜索框');
+  await setup.mount('history');
+  await setup.mount('menu');
+  assert.equal(latestCall(setup.invocations, 'list').args[0].query, '麻婆豆腐');
+  assert.equal(latestCall(setup.invocations, 'list').args[0].cuisine, '川菜');
+  assert.equal(root.scrollTop, 136);
+  assert.ok(document.activeElement === dishButton(), '跨面板回来仍落在原卡片锚点');
+});
+
+test('仅浏览状态可落盘：fresh bundle 恢复同 scope 菜单筛选，不串他人；草稿、确认、回执和 revision 不落盘', async () => {
+  const storage = memoryStorage();
+  const setup = await mountPanels({ storage, persist: async () => {} });
+  const second = await mountPanels({ storage });
+  await setup.decl.invoke('combo', 'save', [{ name: '确认状态测试桌', dishes: ['mapo-tofu'] }]);
+  const root = await setup.mount('menu');
+  setInput(root.querySelector('.feast-invite-note'), '私人邀请草稿！');
+  setInput(root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名')), '豆腐');
+  await waitFor(() => latestCall(setup.invocations, 'list')?.args[0]?.query === '豆腐' && latestCall(setup.invocations, 'list').result, '菜单浏览状态已更新');
+  await setup.mount('combo');
+  comboChips(root).find((node) => node.textContent.includes('麻婆豆腐')).click();
+  setInput(root.findAll((n) => n.tagName === 'INPUT').find((n) => n.placeholder.includes('名字')), '私人套餐草稿！');
+  const ownTable = () => root.querySelectorAll('.feast-set').find((node) => node.textContent.includes('确认状态测试桌'));
+  ownTable().findByText('删').click();
+  assert.ok(ownTable().findByText('再点一次就删掉'));
+  await setup.mount('today');
+  draftInputs(root); presetChoice(root, 'quiet');
+  root.findByText('预览修改').click();
+  const preview = await waitFor(() => latestCall(setup.invocations, 'style')?.result?.revision && root.querySelector('.feast-preset-preview')
+    && latestCall(setup.invocations, 'style').result, '生成真实预览 revision');
+  const persisted = JSON.stringify(storage.writes);
+  assert.ok(storage.writes.length && persisted.includes('豆腐'), '菜单浏览 filter 应写 localStorage');
+  for (const marker of ['私人邀请草稿！', '私人套餐草稿！', '还没保存的小标题', '还没保存的卡标题', '周末买花的想法', '尚未提交的调整', preview.revision]) {
+    assert.equal(persisted.includes(marker), false, `操作内容不应进入 localStorage: ${marker}`);
+  }
+  for (const [, value] of storage.writes) {
+    assert.doesNotMatch(value, /"(?:revision|confirmId|receipt|feedback|drafts|presetPreview)"/i);
+  }
+  await setup.mount('combo');
+  assert.equal(root.findAll((n) => n.tagName === 'INPUT').find((n) => n.placeholder.includes('名字')).value, '私人套餐草稿！', '同会话重挂保留套餐编辑');
+  assert.ok(ownTable().findByText('删'), '未确认删除不能跨 mount 恢复');
+  await setup.mount('menu');
+  assert.equal(root.querySelector('.feast-invite-note').value, '私人邀请草稿！');
+  await setup.mount('today');
+  assertDrafts(root);
+  assert.equal(root.querySelector('.feast-preset-preview'), null, '提交确认与 revision 不跨 mount 恢复');
+  await setup.mount('menu', { freshBundle: true });
+  assert.equal(latestCall(setup.invocations, 'list').args[0].query, '豆腐', '仅凭落盘状态可恢复浏览');
+  assert.equal(root.querySelector('.feast-invite-note').value, '', '新入口不得从 localStorage 恢复私人草稿');
+  const otherRoot = await second.mount('menu');
+  assert.ok(!latestCall(second.invocations, 'list').args[0].query, '不同 scope 不共享筛选');
+  assert.equal(otherRoot.querySelector('.feast-invite-note').value, '');
+});
+
+test('菜单后续列表更新保留旧 DOM；快速切筛选、IME 与卸载后的旧响应不得覆盖', async () => {
+  const read = deferInvocations((call) => call.method === 'list' && Boolean(call.args[0]?.cuisine));
+  const setup = await mountPanels({ invokeHook: read.hook });
+  const root = await setup.mount('menu');
+  const sentinel = root.querySelector('.feast-card');
+  const changeCuisine = (value) => { const n = root.querySelectorAll('select')[1]; n.value = value; n.fire('change'); };
+  changeCuisine('川菜');
+  const older = await read.take((call) => call.args[0]?.cuisine === '川菜', '旧筛选正在等响应');
+  assert.equal(root.querySelector('.feast-card'), sentinel, '不是首次加载，不应拆掉旧列表');
+  changeCuisine('粤菜');
+  const newer = await read.take((call) => call.args[0]?.cuisine === '粤菜', '新筛选已发出');
+  const oldResult = await older.next();
+  const newResult = await newer.next();
+  newer.resolve(newResult);
+  await waitFor(() => root.querySelector('.feast-card') !== sentinel && root.querySelectorAll('select')[1]?.value === '粤菜', '新筛选已渲染');
+  const shown = nodeSnapshot(root);
+  older.resolve(oldResult);
+  await endTurn();
+  assertUnchanged(root, shown, '晚到的旧列表不能回写 DOM');
+  const search = root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名'));
+  changeCuisine('北京菜');
+  const pending = await read.take((call) => call.args[0]?.cuisine === '北京菜', '开始输入前已有后台列表请求');
+  search.focus(); search.value = '豆'; search.setSelectionRange(1, 1);
+  search.fire('compositionstart'); search.fire('input', { isComposing: true });
+  pending.resolve(await pending.next());
+  await endTurn();
+  assert.ok(root.contains(search)); assert.equal(document.activeElement, search); assert.equal(search.value, '豆');
+  assert.equal(search.selectionStart, 1);
+  assert.ok(!setup.invocations.some((call) => call.args[0]?.query === '豆'), '组词中的输入不能发搜索请求');
+  search.value = '豆腐'; search.fire('compositionend');
+  const requestPending = await read.take((call) => call.args[0]?.query === '豆腐', '组词结束才有搜索请求');
+  const timer = setup.intervals.at(-1);
+  setup.panels.lastHandle.dispose();
+  assert.equal(timer.disposed, true, '卸载必须取消轮询');
+  const detached = nodeSnapshot(root);
+  requestPending.resolve(await requestPending.next());
+  await endTurn();
+  assertUnchanged(root, detached, '卸载后晚到的列表不能回写 DOM');
+});
+
+test('套餐重配保留旧 DOM 且防重复操作；跨面板较新读取与卸载不受旧响应污染', async () => {
+  let delay = false;
+  const requests = deferInvocations((call) => delay && call.panelId === 'combo' && call.method === 'list' && Boolean(call.args[0]?.seeds));
+  const setup = await mountPanels({ invokeHook: requests.hook });
+  const root = await setup.mount('combo');
+  const cards = () => root.querySelectorAll('.feast-set');
+  const snapshot = cards();
+  delay = true;
+  cards()[0].findByText('看这一桌').click();
+  const older = await waitFor(() => requests.queue[0], '第一桌重配请求');
+  assert.equal(cards()[0], snapshot[0], '后续 loading 不摘除旧套餐卡');
+  assert.equal(cards()[1].findByText('看这一桌').disabled, true, '读取期间不能重复操作另一桌');
+  cards()[1].findByText('看这一桌').click();
+  assert.equal(requests.queue.length, 1, '禁用入口不得产生额外重配');
+  const oldResult = await older.next();
+  delay = false;
+  await setup.mount('history');
+  await setup.mount('combo');
+  const shown = nodeSnapshot(root);
+  older.resolve({ ...oldResult, presets: oldResult.presets.map((entry) => ({ ...entry, name: '过期预览结果' })) });
+  await endTurn();
+  assertUnchanged(root, shown, '旧挂载的预览不能覆盖当前套餐');
+  delay = true;
+  cards()[0].findByText('看这一桌').click();
+  const pending = await waitFor(() => requests.queue[1], '卸载前的套餐读取');
+  const snapshotResult = await pending.next();
+  setup.panels.lastHandle.dispose();
+  assert.ok(setup.intervals.length && setup.intervals.every((timer) => timer.disposed));
+  const detached = nodeSnapshot(root);
+  pending.resolve(snapshotResult);
+  await endTurn();
+  assertUnchanged(root, detached, '卸载后的套餐回执不得写入页面');
+});
+
+test('日期月历：按需读取、实际/卡片是两个标记、未知不当作无、未来不可选、关闭后不轮询', async () => {
+  const setup = await mountPanels();
+  await seedPast(setup, day3, '只有实录');
+  await seedPast(setup, day4, '实录及卡片', true);
+  const { writeFile } = await import('node:fs/promises');
+  const { playPath } = await import('../src/life/store.js');
+  const { journalPath } = await import('../src/life/journal.js');
+  const unknown = '2026-11-02';
+  const future = '2026-11-06';
+  // 同样的损坏，历史应暴露为未知，未来应跳过读文件、不报告损坏。
+  for (const date of [unknown, future]) {
+    await writePlay(setup.world.dataDir, newPlay(date));
+    await writeFile(playPath(setup.world.dataDir, date), '{损坏');
+    await writeFile(journalPath(setup.world.dataDir, date), '{损坏');
+  }
+  const root = await setup.mount('today');
+  assert.ok(dateControl(root, todayDate), '默认浏览今天');
+  assert.ok(!setup.invocations.some((call) => call.method === 'calendar'), '日期未展开时不取整月数据');
+  const toggle = root.querySelector('.feast-timeline-toggle');
+  assert.ok(toggle && /展开/.test(toggle.textContent), '完整时间线初始折叠');
+  openCalendar(root);
+  const cardCell = await waitFor(() => latestCall(setup.invocations, 'calendar')?.result
+    && calendarCell(root, day4)?.getAttribute('aria-label')?.includes('有纪念卡') && calendarCell(root, day4), '月历当前月标记就绪');
+  assert.ok(root.querySelector('.feast-calendar')?.querySelector('.feast-calendar-grid'), '日期条展开真实月历网格');
+  assert.equal(calendarCell(root, todayDate).getAttribute('aria-pressed'), 'true', '初次打开月历选中今天');
+  assert.equal(cardCell.getAttribute('aria-pressed'), 'false');
+  const call = latestCall(setup.invocations, 'calendar');
+  assert.deepEqual(call.args, ['2026-11']);
+  assert.equal(call.result.ok, true); assert.equal(call.result.month, '2026-11'); assert.equal(call.result.today, todayDate);
+  const [calendarYear, calendarMonth] = call.args[0].split('-').map(Number);
+  const expectedMonthDays = new Date(Date.UTC(calendarYear, calendarMonth, 0)).getUTCDate();
+  assert.equal(call.result.days.length, expectedMonthDays);
+  const day = (date) => call.result.days.find((item) => item.date === date);
+  assert.deepEqual([day(day3).hasActual, day(day3).hasCards], [true, false]);
+  assert.deepEqual([day(day4).hasActual, day(day4).hasCards], [true, true]);
+  assert.deepEqual([day(unknown).hasActual, day(unknown).hasCards], [null, null]);
+  assert.ok(day(unknown).issues.length >= 2);
+  assert.deepEqual(day(future), { date: future, hasActual: null, hasCards: null, issues: [] });
+  const cellCopy = (cell) => cell.findAll(() => true).map((n) => `${n.textContent} ${n.title ?? ''} ${n.getAttribute('aria-label') ?? ''}`).join(' ');
+  assert.match(cellCopy(calendarCell(root, day3)), /实际|实录/);
+  assert.doesNotMatch(cellCopy(calendarCell(root, day3)), /有纪念卡|已有纪念卡/);
+  assert.match(cellCopy(cardCell), /实际|实录/); assert.match(cellCopy(cardCell), /纪念卡/);
+  assert.match(cellCopy(calendarCell(root, unknown)), /未知|不可读|读取失败|损坏|部分记录暂时无法读取/);
+  const disabled = calendarCell(root, future);
+  assert.equal(disabled.disabled, true); disabled.click();
+  assert.ok(!setup.invocations.some((call) => call.method === 'review' && call.args[0] === future));
+  openCalendar(root);
+  const requests = setup.invocations.filter((entry) => entry.method === 'calendar').length;
+  const timer = setup.intervals.find((entry) => entry.ms === 60_000);
+  assert.ok(timer); timer.fn();
+  await waitFor(() => setup.invocations.filter((entry) => entry.method === 'list').length >= 2 && latestCall(setup.invocations, 'list')?.result, '关闭月历后今天快照走一拍');
+  await endTurn();
+  assert.equal(setup.invocations.filter((entry) => entry.method === 'calendar').length, requests, '关闭后不轮询月历');
+});
+
+test('历史阅读链：计划、实际与纪念卡独立，失败保留旧日期，快照、刷新和跨面板还原阅读位置', async () => {
+  const clock = testClock();
+  let fail = false;
+  const setup = await mountPanels({ clock, storage: memoryStorage(), invokeHook: (call, next) => {
+    if (fail && call.method === 'review' && call.args[0] === day3) return { ok: false, message: '目标日期读取暂时失败' };
+    return next();
+  } });
+  await seedPast(setup, day4, '历史星期三', true);
+  const root = await setup.mount('today');
+  assert.ok(root.querySelector('.feast-current-plan'));
+  previousDay(root);
+  const card = await waitFor(() => root.querySelector('.feast-memory-card'), '昨日的纪念卡');
+  assert.match(card.textContent, /历史星期三纪念卡/);
+  card.open = true; card.fire('toggle');
+  assert.match(root.querySelector('.feast-journal').textContent, /历史星期三的实录/);
+  assert.ok(root.querySelectorAll('.feast-tl-row').some((row) => row.textContent.includes('历史星期三的安排')));
+  assert.equal(root.querySelector('.feast-current-plan'), null, '历史日期不能混今天的此刻');
+  assert.equal(root.querySelector('.feast-reminders'), null, '历史日期不能混今天的接下来');
+  assert.equal(root.querySelector('.feast-tl-row.is-now'), null);
+  const scroll = root.querySelector('.feast-seen')?.parentNode ?? root;
+  readPosition(root, 175);
+  if (scroll !== root) readPosition(scroll, 120);
+  fail = true; previousDay(root);
+  await waitFor(() => latestCall(setup.invocations, 'review')?.result?.ok === false && toastMatching(root, /暂未刷新.*原内容已保留/), '局部历史读取明确失败');
+  assert.equal(root.querySelector('.feast-memory-card'), card, '失败留在今日之前的已读日期，不替换旧内容');
+  clock.now += 86_400_000;
+  setup.intervals.find((entry) => entry.ms === 60_000)?.fn();
+  await endTurn();
+  assert.equal(root.querySelector('.feast-memory-card'), card, '跨天后台更新不应挤掉正在看的历史');
+  assert.equal(root.scrollTop, 175);
+  await setup.mount('history');
+  await setup.mount('today', { freshBundle: true });
+  assert.match(root.querySelector('.feast-memory-card')?.textContent ?? '', /历史星期三纪念卡/);
+  assert.equal(root.querySelector('.feast-memory-card').open, true, '刷新后保留正在展开阅读的纪念卡');
+  assert.equal(latestCall(setup.invocations, 'review').args[0], day4);
+  assert.equal(root.scrollTop, 175, '刷新或跨面板后还原历史阅读位置');
+  nextDay(root);
+  await waitFor(() => latestCall(setup.invocations, 'review')?.args[0] === todayDate && latestCall(setup.invocations, 'review')?.result, '从历史日期走下一天');
+  returnToday(root);
+  await waitFor(() => dateControl(root, '2026-11-06') && root.querySelector('.feast-seen') === null, '回到服务端今天');
+});
+
+test('日期快速切换：晚到的 review、list、calendar 不能覆盖较新的日期选择', async () => {
+  let delay = false;
+  const reads = deferInvocations((call) => delay && ['review', 'list', 'calendar'].includes(call.method));
+  const setup = await mountPanels({ invokeHook: reads.hook });
+  await seedPast(setup, day3, '第三天'); await seedPast(setup, day4, '第四天');
+  const root = await setup.mount('today');
+  delay = true;
+  const timer = setup.intervals.find((entry) => entry.ms === 60_000);
+  timer.fn();
+  const background = await reads.take((call) => call.method === 'list', '今天后台读正在等待');
+  openCalendar(root);
+  const november = await reads.take((call) => call.method === 'calendar' && call.args[0] === '2026-11', '11 月月历正在等待');
+  clickButton(root, /上一月|上一个月|上个月/);
+  const october = await reads.take((call) => call.method === 'calendar' && call.args[0] === '2026-10', '已切至 10 月');
+  october.resolve(await october.next());
+  await waitFor(() => calendarCell(root, '2026-10-31'), '最新月历显示');
+  november.resolve(await november.next());
+  await endTurn();
+  assert.ok(calendarCell(root, '2026-10-31'), '晚到的 11 月月历不能覆盖 10 月');
+  assert.ok(!calendarCell(root, day3));
+  openCalendar(root);
+  // calendar 关上后用日期条启动旧 review，再用日历点选另一日，以免依赖相对日期计算的实现。
+  previousDay(root);
+  const older = await reads.take((call) => call.method === 'review' && call.args[0] === day4, '旧日期 review 正在等待');
+  delay = false;
+  openCalendar(root);
+  if (!calendarCell(root, day3)) clickButton(root, /下一月|下一个月|下个月/);
+  const cell = await waitFor(() => calendarCell(root, day3), '切换到包含目标日期的月历');
+  cell.click();
+  await waitFor(() => root.querySelector('.feast-journal')?.textContent.includes('第三天的实录'), '新日期 review 显示');
+  const shown = nodeSnapshot(root);
+  older.resolve(await older.next()); background.resolve(await background.next());
+  await endTurn();
+  assertUnchanged(root, shown, '旧 review/list 都不能覆盖新选中的历史日期');
+});
+
+test('局部快照：更新此刻、提醒和实际时不换输入节点，保护焦点、IME 和跨天未提交草稿', async () => {
+  const clock = testClock();
+  const setup = await mountPanels({ clock, cfg: { mealSlots: '18:00' } });
+  await seedActual(setup.world);
+  const root = await setup.mount('today');
+  draftInputs(root); selectActual(root, 0);
+  const title = root.querySelector('.feast-journal-title');
+  const card = root.querySelector('.feast-card-title');
+  const thread = threadInputOf(root);
+  const form = changeFormOf(root);
+  title.focus(); title.fire('compositionstart'); title.value = '正在组词的未定稿';
+  title.setSelectionRange(2, 3); title.fire('input', { isComposing: true });
+  clock.now += 2 * 60_000;
+  await setup.world.tools().find(({ name }) => name === 'feast_skip').handler({});
+  await setup.world.tools().find(({ name }) => name === 'feast_eat').handler({ dish: '东坡肉' });
+  const timer = setup.intervals.find((entry) => entry.ms === 60_000);
+  timer.fn();
+  await waitFor(() => root.querySelector('.feast-current-plan')?.textContent.includes('12:07')
+    && root.querySelector('.feast-reminders')?.textContent.includes('她说今天不吃了')
+    && root.querySelector('.feast-journal')?.textContent.includes('东坡肉'), '草稿期间三块快照都局部更新');
+  assert.equal(root.querySelector('.feast-journal-title'), title);
+  assert.equal(root.querySelector('.feast-card-title'), card);
+  assert.equal(threadInputOf(root), thread); assert.equal(changeFormOf(root), form);
+  assert.equal(document.activeElement, title); assert.deepEqual([title.selectionStart, title.selectionEnd], [2, 3]);
+  assert.equal(title.value, '正在组词的未定稿');
+  const selected = root.querySelectorAll('.feast-actual-row').filter((row) => row.querySelector('input')?.checked);
+  assert.equal(selected.length, 1);
+  assert.match(selected[0].textContent, /读了一章书/, '更新实际流后仍保留原记录的选择');
+  title.fire('compositionend');
+  clock.now += 86_400_000; timer.fn();
+  await waitFor(() => latestCall(setup.invocations, 'list')?.result?.date === '2026-11-06', '跨日快照返回');
+  await endTurn();
+  assert.ok(root.contains(title), '跨天有未提交草稿时不能切走整页');
+  assert.equal(title.value, '正在组词的未定稿');
+  assert.equal(card.value, '还没保存的卡标题');
+});
+
+test('Today 卸载时取消定时器，晚到的日期响应与快照不再写回 DOM', async () => {
+  let delay = false;
+  const reads = deferInvocations((call) => delay && ['list', 'review'].includes(call.method));
+  const setup = await mountPanels({ invokeHook: reads.hook });
+  await seedPast(setup, day4, '卸载前的历史');
+  const root = await setup.mount('today');
+  delay = true;
+  setup.intervals.find((entry) => entry.ms === 60_000).fn();
+  previousDay(root);
+  const snapshot = await reads.take((call) => call.method === 'list', '卸载前 list 信号');
+  const review = await reads.take((call) => call.method === 'review', '卸载前 review 信号');
+  setup.panels.lastHandle.dispose();
+  assert.ok(setup.intervals.every((entry) => entry.disposed));
+  const detached = nodeSnapshot(root);
+  snapshot.resolve(await snapshot.next()); review.resolve(await review.next());
+  await endTurn();
+  assertUnchanged(root, detached, '卸载后的 list/review 不能改写宿主树');
+});
+
+test('动作回执链：端菜、纪念卡和预设各有具体反馈，不能统一报「已保存」', async () => {
+  const setup = await mountPanels({ persist: async () => {} });
+  const root = await setup.mount('menu');
+  await openDishCard(root, '麻婆豆腐');
+  await waitFor(() => root.findByText('端给她'), '端菜按钮');
+  root.findByText('端给她').click();
+  await waitFor(() => latestCall(setup.invocations, 'feed')?.result?.ok && toastMatching(root, /端.*麻婆豆腐|麻婆豆腐.*(?:端|上桌)/), '端菜反馈点名菜品');
+  await seedActual(setup.world);
+  await setup.mount('today');
+  selectActual(root, 0);
+  setInput(root.querySelector('.feast-card-title'), '可核对的纪念卡');
+  root.findByText('保存纪念卡').click();
+  await waitFor(() => latestCall(setup.invocations, 'journal')?.result?.ok && root.querySelector('.feast-memory-card')
+    && toastMatching(root, /纪念卡.*(?:保存|已)|保存.*纪念卡/), '明确反馈保存的是纪念卡');
+  presetChoice(root, 'quiet'); root.findByText('预览修改').click();
+  await waitFor(() => root.findByText('确认应用这套设置'), '预设预览');
+  root.findByText('确认应用这套设置').click();
+  await waitFor(() => latestCall(setup.invocations, 'style')?.args[0]?.action === 'apply' && latestCall(setup.invocations, 'style').result?.ok
+    && toastMatching(root, /已应用安静陪伴|安静陪伴.*(?:已应用|已保存)/), '明确反馈应用的是预设');
+});
+
+test('写入成功但读取失败：纪念卡明确已完成且暂未更新，恢复读取不能重发写入', async () => {
+  let rejectRead = false;
+  const setup = await mountPanels({ invokeHook: async (call, next) => {
+    if (rejectRead && ['list', 'review'].includes(call.method)) throw new Error('刷新期间断线');
+    const result = await next();
+    if (call.method === 'journal' && call.args[0]?.action === 'card' && result.ok) rejectRead = true;
+    return result;
+  } });
+  await seedActual(setup.world);
+  const root = await setup.mount('today');
+  selectActual(root, 0); setInput(root.querySelector('.feast-card-title'), '已经写入的一张卡');
+  const originalJournal = root.querySelector('.feast-journal');
+  root.findByText('保存纪念卡').click();
+  const status = await waitFor(() => toastMatching(root, /已完成.*(?:显示)?暂未更新|已保存.*(?:显示)?暂未更新/), '区分写入成功与读取失败');
+  assert.doesNotMatch(status.textContent, /保存失败|写入失败/);
+  assert.equal(root.querySelector('.feast-journal'), originalJournal, '刷新失败保留原内容和恢复入口');
+  let stored = await setup.decl.invoke('today', 'review', [todayDate]);
+  assert.equal(stored.journal.cards.length, 1); assert.equal(stored.journal.cards[0].title, '已经写入的一张卡');
+  rejectRead = false;
+  const retry = labeledButton(status, /重试|重新读取|刷新/);
+  if (retry) retry.click();
+  else setup.intervals.find((entry) => entry.ms === 60_000).fn();
+  await waitFor(() => root.querySelector('.feast-memory-card')?.textContent.includes('已经写入的一张卡'), '只重读即可显示已完成的写入');
+  assert.equal(setup.invocations.filter((entry) => entry.method === 'journal' && entry.args[0].action === 'card').length, 1);
+  stored = await setup.decl.invoke('today', 'review', [todayDate]);
+  assert.equal(stored.journal.cards.length, 1, '重试刷新不能产生第二张卡');
+});
+
+test('菜单端菜已完成但列表读取失败：明确显示暂未更新，重试只能读取不能重复投喂', async () => {
+  let rejectRead = false;
+  const setup = await mountPanels({ invokeHook: async (call, next) => {
+    if (rejectRead && call.method === 'list') throw new Error('列表暂不可读');
+    const result = await next();
+    if (call.method === 'feed' && result.ok) rejectRead = true;
+    return result;
+  } });
+  const root = await setup.mount('menu');
+  await openDishCard(root, '麻婆豆腐');
+  await waitFor(() => root.findByText('端给她'), '详情可端菜');
+  root.findByText('端给她').click();
+  const receipt = await waitFor(() => toastMatching(root, /已完成.*暂未更新/), '端菜完成且显示暂未更新');
+  assert.doesNotMatch(receipt.textContent, /端菜失败|保存失败/);
+  assert.equal((await setup.decl.invoke('menu', 'list', [{}])).pending.name, '麻婆豆腐');
+  rejectRead = false;
+  clickButton(receipt, /重试|刷新|重新读取/);
+  await waitFor(() => root.querySelector('.feast-strip')?.textContent.includes('麻婆豆腐'), '只重读出已端菜品');
+  assert.equal(setup.invocations.filter((call) => call.method === 'feed').length, 1);
+});
+
+test('套餐保存失败保留名字与勾选；成功后读失败明确已完成且仅重试读取', async () => {
+  let failure = 'write';
+  const setup = await mountPanels({ invokeHook: async (call, next) => {
+    if (call.method === 'save' && failure === 'write') return { ok: false, message: '套餐写入失败，请保留草稿' };
+    if (call.method === 'list' && failure === 'read') throw new Error('套餐列表暂不可读');
+    const result = await next();
+    if (call.method === 'save' && result.ok) failure = 'read';
+    return result;
+  } });
+  const root = await setup.mount('combo');
+  comboChips(root).find((chip) => chip.textContent.includes('麻婆豆腐')).click();
+  const nameInput = () => root.findAll((n) => n.tagName === 'INPUT').find((n) => n.placeholder.includes('名字'));
+  const save = () => root.querySelector('.feast-build').findByText('攒一桌');
+  setInput(nameInput(), '失败也留住的一桌');
+  save().click();
+  await waitFor(() => latestCall(setup.invocations, 'save')?.result?.ok === false && toastMatching(root, /套餐写入失败/), '真实失败反馈');
+  assert.equal(nameInput().value, '失败也留住的一桌');
+  assert.ok(root.querySelectorAll('.feast-chip.is-on').some((chip) => chip.textContent.includes('麻婆豆腐')));
+  failure = null;
+  save().click();
+  const receipt = await waitFor(() => toastMatching(root, /已完成.*暂未更新/), '写入已完成但显示暂未更新');
+  assert.doesNotMatch(receipt.textContent, /保存失败|写入失败/);
+  const stored = await setup.decl.invoke('combo', 'list', [{ resolve: false }]);
+  assert.equal(stored.custom.filter((card) => card.name === '失败也留住的一桌').length, 1);
+  failure = null;
+  clickButton(receipt, /重试|刷新|重新读取/);
+  await waitFor(() => root.querySelectorAll('.feast-set').some((card) => card.textContent.includes('失败也留住的一桌')), '刷新显示保存完成的套餐');
+  assert.equal(setup.invocations.filter((call) => call.method === 'save').length, 2, '一次失败、一次成功，后续刷新不得重复写入');
+});
+
+test('菜单详情读取失败：保留原 grid、筛选与滚动，重试读取成功才切换详情', async () => {
+  let failDish = true;
+  const setup = await mountPanels({ invokeHook: (call, next) => {
+    if (call.method === 'dish' && failDish) throw new Error('详情服务暂时不可用');
+    return next();
+  } });
+  const root = await setup.mount('menu');
+  const cuisine = root.querySelectorAll('select')[1];
+  cuisine.value = '川菜'; cuisine.fire('change');
+  await waitFor(() => latestCall(setup.invocations, 'list')?.result
+    && root.querySelectorAll('.feast-card').length === lib.dishes.filter((dish) => dish.cuisine === '川菜').length, '分类列表就绪');
+  setInput(root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名')), '麻婆豆腐');
+  await waitFor(() => latestCall(setup.invocations, 'list')?.args[0]?.query === '麻婆豆腐'
+    && latestCall(setup.invocations, 'list')?.result && root.querySelectorAll('.feast-card').length === 1, '搜索最终结果就绪');
+  const grid = root.querySelector('.feast-grid');
+  const originalCards = nodeSnapshot(grid);
+  const search = root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名'));
+  const selectedCuisine = root.querySelectorAll('select')[1];
+  readPosition(root, 118);
+  grid.querySelector('.feast-card').click();
+  const failure = await waitFor(() => latestCall(setup.invocations, 'dish')?.error
+    && toastMatching(root, /详情服务暂时不可用/), '详情读取失败反馈');
+  assert.ok(root.querySelector('.feast-grid') === grid, '读取失败不摘除正在浏览的 grid');
+  assertUnchanged(grid, originalCards, '原菜卡节点与内容均保留');
+  assert.ok(root.contains(search) && root.contains(selectedCuisine), '失败后保留原筛选节点');
+  assert.equal(search.value, '麻婆豆腐'); assert.equal(selectedCuisine.value, '川菜');
+  assert.equal(root.scrollTop, 118); assert.equal(root.querySelector('.feast-detail'), null);
+  const lists = setup.invocations.filter((call) => call.method === 'list').length;
+  failDish = false;
+  clickButton(failure, /重试|重新读取/);
+  await waitFor(() => latestCall(setup.invocations, 'dish')?.result?.ok
+    && root.querySelector('.feast-detail-n')?.textContent === '麻婆豆腐', '只读重试成功后打开详情');
+  assert.equal(setup.invocations.filter((call) => call.method === 'dish').length, 2);
+  assert.equal(setup.invocations.filter((call) => call.method === 'list').length, lists, '重试详情不重拉和重置列表');
+  assert.ok(!setup.invocations.some((call) => ['feed', 'bite', 'take'].includes(call.method)), '读取失败或重试不触发投喂');
+  clickButton(root, /回菜单|返回菜单/);
+  await waitFor(() => root.querySelector('.feast-grid') && !root.querySelector('.feast-detail'), '详情返回原筛选');
+  assert.equal(root.querySelectorAll('select')[1].value, '川菜');
+  assert.equal(root.findAll((node) => node.tagName === 'INPUT').find((node) => node.placeholder.includes('搜菜名')).value, '麻婆豆腐');
+  assert.equal(root.scrollTop, 118);
+});
+
+try {
+  await report();
+} finally {
+  for (const panel of activePanels) panel.dispose();
+  await Promise.allSettled(panelWorlds.map((world) => world.stop()));
+  // panelRun只来自本次mkdtemp，清理范围不触碰其他测试或用户数据。
+  await rm(panelRun, { recursive: true, force: true });
+  Date.now = realTime;
+  if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument); else delete globalThis.document;
+  if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow); else delete globalThis.window;
+  restoreGlobal('localStorage', originalStorage);
+  restoreGlobal('getComputedStyle', originalComputedStyle);
+}

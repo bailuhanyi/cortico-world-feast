@@ -12,7 +12,7 @@ import { mkdir, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readStoredJson, writeStoredJson } from '../storage.js';
 
-import { addDays, isDateKey } from './time.js';
+import { addDays, isDateKey, parseClock } from './time.js';
 import {
   cleanMealSlots, DEFAULT_DAY_TYPES, isWorkDayType, normalizeDayTypes, normalizeItems, pickDayType, templateItems,
 } from './schedule.js';
@@ -67,6 +67,16 @@ export function cleanDay(raw, date, opts = {}) {
     mood: str(src.mood, 40),
     items: source === 'pending' ? [] : normalizeItems(src.items, opts.maxItems ?? 40),
     mealSlots: cleanMealSlots(src.mealSlots),
+    ...(src.freePlanRequest && typeof src.freePlanRequest.id === 'string'
+      && Number.isFinite(src.freePlanRequest.at) && Array.isArray(src.freePlanRequest.slots) ? {
+        freePlanRequest: {
+          id: str(src.freePlanRequest.id, 64), at: src.freePlanRequest.at,
+          slots: src.freePlanRequest.slots.slice(0, 40).filter((slot) => slot
+            && parseClock(slot.start) !== null && parseClock(slot.end) !== null
+            && parseClock(slot.end) > parseClock(slot.start))
+            .map((slot) => ({ start: slot.start, end: slot.end })),
+        },
+      } : {}),
     ...(src.workUndo && typeof src.workUndo === 'object' && Array.isArray(src.workUndo.items)
       && typeof src.workUndo.expected === 'string' ? {
         workUndo: {

@@ -78,6 +78,14 @@ const TOOL_SUMMARIES = {
     zh: '不用等叫醒：现在就想干点什么时，用它拿一份例子和记账办法。',
     en: 'Start without waiting for a wake-up: hands her example ideas and how to log it.',
   },
+  feast_life_journal: {
+    zh: '回看一天的计划与实际，手动写小标题，从真实记录保存文字纪念卡。',
+    en: 'Review plans and actual records, set a manual title, and save selected real moments as text keepsakes.',
+  },
+  feast_life_style: {
+    zh: '预览并按用户要求应用安静、日常或多一点互动的生活提醒设置。',
+    en: 'Preview and apply quiet, daily or livelier reminders at the user’s request.',
+  },
   feast_life_day: {
     zh: '定今天上不上班、几点吃饭；不上班会把工作事件改成自由安排，其余日程保留。',
     en: 'Settle whether she works and when she eats. Turning work off replaces work events with free time and keeps the rest of the schedule.',
@@ -149,8 +157,8 @@ export const feastDefinition = {
       {
         type: EVENT_LIFE_PLAN,
         description: {
-          zh: '每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天、饭点，以及主人给她备的「能做的事」（配了这一项才有），请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。',
-          en: 'Nightly ask for the day she wants to have tomorrow: date, day type, recent days, meal slots, and the "things she can actually do" list the owner prepared (when configured), then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks.',
+          zh: '每晚到点请她自己写明天怎么过：正文给出日期、日型、最近几天、饭点，以及主人给她备的「能做的事」（配了这一项才有），请她用 feast_life_plan 交回一份从 00:00 到 24:00 的 JSON。origin 是 internal，是她自己的日子，不是主人交代的事；在配置里可以整个关掉。先落占位再推，不会重复叫。主人主动点击补充空闲时，meta.reason=fill-free；只邀请用 feast_life_adjust 携请求编号补充指定时段，可不回应。',
+          en: 'Nightly ask for the day she wants to have tomorrow: date, day type, recent days, meal slots, and the "things she can actually do" list the owner prepared (when configured), then she replies with feast_life_plan and a 00:00–24:00 JSON. Internal origin — her own day, not a task from the owner. Can be switched off entirely in config; a placeholder prevents duplicate asks. An owner-requested fill-free invitation uses meta.reason=fill-free and asks for optional feast_life_adjust replies limited to listed slots with the request id.',
         },
         trigger: 'flush',
       },

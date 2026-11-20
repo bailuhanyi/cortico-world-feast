@@ -28,7 +28,7 @@ import { doingsLines } from './doings.js';
  */
 export function planEventText({
   date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', doings = [],
-  rewrite = false, mealByHer = false,
+  rewrite = false, mealByHer = false, mapOn = false, funOn = false, noWork = false,
 } = {}) {
   const name = who.name || '她';
   const lines = [
@@ -37,17 +37,25 @@ export function planEventText({
       : `【鱼的每一天 · 她的一天】想想 ${dateLabel(date)}（${date}）怎么过：这是你自己的日子，不是待办。`,
     `这一天按「${type?.name || '普通的一天'}」来：${type?.guide || '照你平常的样子过一天。'}`,
   ];
+  if (noWork) lines.push('主人已持续关闭工作排程：上班日、加班日、摸鱼日的权重为 0。不要安排上班、加班或工作通勤；work 写 false。此规则持续到主人重新开启，不能用单日决定绕过。');
   if (rewrite) {
     lines.push('（之前那一版已经收了；不想改就用 feast_life_view 看一眼再照着交回一遍，改主意也完全可以。）');
   }
   // 主人备的「能做的事」：紧跟在日型后面，让她写每一段时手边有具体的事可选。
   lines.push(...doingsLines(doings));
+  if (mapOn || funOn) {
+    lines.push('如果想安排外出，交回日程前先按需查一下要去的地方：');
+    if (mapOn) lines.push('- 附近散步、去常去的地方或回家：用 map_places 找登记地点，需要详情时用 map_look，location 用地图正名。');
+    if (funOn) lines.push('- 想安排一趟娱乐出游：用 fun_places 查场所和可逛项目，按计划时段参考营业时间，location 写实际打算去的场所正名，activity / detail 写想做的事。现在只做计划，到了那天真要出发时再用 fun_go。');
+    if (mapOn && funOn) lines.push('- 如果 map_look 提到娱乐时间里相近的场所，先用 fun_places 核对。选定去哪儿，location 就写哪一处的正名。');
+    lines.push('没有合适的地点，或想在家休息，就照自己的想法排。');
+  }
   if (recent) lines.push(`最近几天：\n${recent}`);
   if (wardrobe) lines.push(wardrobe);
   lines.push(mealByHer
     ? `几点吃由你定：交回时带上 mealSlots（HH:MM，1–4 档，例如 ["12:10","19:00"]），那一天就按你定的叫；不写就用默认的 ${mealSlots}。吃饭那几段可以写去哪儿吃、和谁一起。`
     : `饭点照旧是 ${mealSlots}，别把这两段排成别的事；吃饭那几段可以写去哪儿吃、和谁一起。`);
-  lines.push('想好后用 feast_life_plan 交回：date、dayType、title、mood 和从 00:00 连到 24:00 的 items；每段写 start/end/activity/location/detail，可加 outfit/props/scene。');
+  lines.push('想好后用 feast_life_plan 交回：date、dayType、title、mood 和从 00:00 连到 24:00 的 items；每段写 start/end/activity/location/detail，可加 outfit/props/scene/category（sleep/work/commute/meal/personal），不确定分类就省略。');
   lines.push('这是想法，不是任务或完成证明；交回后不用解释。');
   lines.push('（改主意用 feast_life_adjust；忘了此刻用 feast_life_now。想发图时沿用其中的穿着和地点。）');
   if (mealByHer) lines.push('（上不上班、几点吃这两件事，白天想改就说一句，用 feast_life_day——不用重写一整天。）');

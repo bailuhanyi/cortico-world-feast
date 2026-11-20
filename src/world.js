@@ -15,10 +15,14 @@
  * 状态是纯 JSON，落在 <dataDir>/feast/state.json。
  */
 import { readdirSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { readStoredJson, writeStoredJson, inspectStoredJson, restoreStoredJson } from './storage.js';
 import { readThreads, writeThreads, addThread, updateThread, threadHint } from './life/threads.js';
+import { actualForDate, cleanJournal, journalPath, readJournal, writeJournal, withJournalTitle, withMemoryCard, memoryCardText } from './life/journal.js';
+import { readCalendarMonth, isValidCalendarMonth } from './life/calendar.js';
+import { LIFE_PRESETS, lifePresetPreview, assertLifePresetRevision } from './life/presets.js';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -31,7 +35,7 @@ import {
   LIFE_KEEP_DAYS, lifeDir, listDays, MAX_OWN_MEAL_SLOTS, mapMenuLine, markFreeNudged, markFreeSkipped,
   momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseDoings, parseSlots, pendingDay,
   pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readMapEnabled, readPlay,
-  removeWorkEvents, isWorkEvent, workScheduleKey,
+  removeWorkEvents, isWorkEvent, workScheduleKey, categoryOf, validCategory, ACTIVITY_CATEGORIES, clock,
   recentSummary, recordPlay, segmentKey, skipFreeToday, templateDay, withFunLine, withMapLine, writeDay, writePlay,
   zonedNow,
 } from './life/index.js';
@@ -39,7 +43,7 @@ import {
   autoOutfit, clearWardrobeCache, emptyWardrobe, enrichItems, loadWardrobe,
   wardrobeHintLine, wardrobeText,
 } from './life/wardrobe.js';
-import { briefLine, filterDishes, findDish, findDishExact, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
+import { briefLine, filterDishes, filterMenuDishes, recommendMenuDishes, findDish, findDishExact, loadDishes, pickFew, pickOne, tasteProfile } from './dishes.js';
 import {
   MAX_TABLE, PRESETS, adhocCombo, comboIdFrom, comboProblem, comboSize, findCombo, findPreset,
   normalizeCombo, resolveCombo, tableLine, tableTaste,
@@ -93,6 +97,8 @@ export const FEAST_TOOL_DECLS = [
         category: { type: 'string', description: '类别，例如 热菜 / 汤羹 / 甜品 / 饮品。' },
         keyword: { type: 'string', description: '标签，例如 下饭 / 解腻 / 滚烫 / 夏天。' },
         query: { type: 'string', description: '自由搜：菜名、产地、食材都行，例如 花椒 / 潮汕 / 芝士。' },
+        quick: { type: 'string', enum: ['all', 'liked', 'untried', 'recent'], description: '快捷看全部/明确喜欢/未尝过/近7天吃过。' },
+        recommend: { type: 'boolean', description: '换口味：在筛选内推荐最多3道，避开明确讨厌，降低近期重复。' },
       },
       additionalProperties: false,
     },
@@ -245,6 +251,7 @@ export const FEAST_TOOL_DECLS = [
               start: { type: 'string', description: 'HH:MM，例如 09:30。' },
               end: { type: 'string', description: 'HH:MM；最后一段写 24:00。' },
               activity: { type: 'string', description: '这会儿在做什么，一句短的。' },
+              category: { type: 'string', enum: ACTIVITY_CATEGORIES, description: '可选分类：sleep睡眠/work工作/commute通勤/meal用餐/personal个人安排；不填自动判断，个人活动也可能忙碌。' },
               location: { type: 'string', description: '在哪儿，可选。' },
               detail: { type: 'string', description: '一个小细节，可选。' },
               outfit: { type: 'string', description: '穿着，纯文本，可选。' },
@@ -270,6 +277,8 @@ export const FEAST_TOOL_DECLS = [
         start: { type: 'string', description: '从几点开始，HH:MM。' },
         end: { type: 'string', description: '到几点结束，HH:MM，要晚于 start。' },
         activity: { type: 'string', description: '改成做什么。留空 = 不做了（取消这一段），不是必填。' },
+        category: { type: 'string', enum: ['', ...ACTIVITY_CATEGORIES], description: '可选分类；空字符串清除分类并自动判断。分类只用于活动分组，不保证空闲。' },
+        fillRequest: { type: 'string', description: '仅回应补充空闲安排邀请时，原样带回邀请中的请求编号；只允许修改邀请列出的时段。' },
         location: { type: 'string', description: '在哪儿，可选。' },
         detail: { type: 'string', description: '一个小细节，可选。' },
       },
@@ -347,6 +356,27 @@ export const FEAST_TOOL_DECLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'feast_life_journal', tags: ['read', 'write'],
+    description: '回看计划与实际记录；手动设标题，或从实际记录ID保存1–2条为文字纪念卡。卡不会自动生成。',
+    parameters: { type: 'object', properties: {
+      action: { type: 'string', enum: ['view', 'title', 'card', 'export'] },
+      date: { type: 'string', description: 'today / YYYY-MM-DD，默认今天。' },
+      title: { type: 'string', maxLength: 60, description: '手动标题，title动作可用空串清除。' },
+      selectedIds: { type: 'array', minItems: 1, maxItems: 2, uniqueItems: true, items: { type: 'string' }, description: 'card动作填view返回的实际记录ID。' },
+      cardId: { type: 'string', description: 'export动作填已有纪念卡ID。' },
+      offset: { type: 'integer', minimum: 0, description: 'view的实际记录起始位置，默认0。' },
+    }, required: ['action'], additionalProperties: false },
+  },
+  {
+    name: 'feast_life_style', tags: ['read', 'write'],
+    description: '生活提醒预设：list查询，preview查看差异；仅按用户明确要求apply并带回预览revision。保留工作规则与日程。',
+    parameters: { type: 'object', properties: {
+      action: { type: 'string', enum: ['list', 'preview', 'apply'] },
+      preset: { type: 'string', enum: ['quiet', 'daily', 'lively'], description: '安静/日常/多一点互动。' },
+      revision: { type: 'string', description: 'apply时填最近preview返回的revision。' },
+    }, required: ['action'], additionalProperties: false },
+  },
 ];
 
 export class FeastWorld {
@@ -393,6 +423,10 @@ export class FeastWorld {
   #weatherFetch = null;
   /** 宿主传入的配置段，可能已合并默认值。 */
   #inputCfg = null;
+  /** UI 只读上下文隔离标识：只返回 hash，不把 dataDir 暴露给前端。 */
+  #uiScope;
+  /** 月历摘要按月缓存 30 秒；写入相关日期时精准失效。 */
+  #calendarCache = new Map();
 
   constructor(opts = {}) {
     this.id = ID;
@@ -401,6 +435,7 @@ export class FeastWorld {
     this.#inputCfg = opts.cfg ?? {};
     this.cfg = { ...DEFAULTS, ...this.#inputCfg };
     this.dataDir = opts.dataDir ?? process.cwd();
+    this.#uiScope = createHash('sha256').update(`${resolve(this.dataDir)}\u0000${this.id}`).digest('hex');
     this.language = 'zh';
     this.timezone = opts.timezone || 'Asia/Shanghai';
     this.#now = typeof opts.now === 'function' ? opts.now : () => Date.now();
@@ -509,6 +544,37 @@ export class FeastWorld {
 
   #lifeDayType() {
     return typeof this.cfg?.lifeDayType === 'string' ? this.cfg.lifeDayType.trim() : '';
+  }
+
+  #workPolicyFile() {
+    return join(this.dataDir, 'feast', 'work-policy.json');
+  }
+
+  async #workSchedulingEnabled() {
+    const policy = await readStoredJson(this.#workPolicyFile());
+    if (policy === null) return true;
+    if (typeof policy.enabled !== 'boolean') throw new Error('工作排程设置损坏。');
+    return policy.enabled;
+  }
+
+  async #workBlocked(date, now) {
+    return date >= dayIn(this.timezone, now) && !(await this.#workSchedulingEnabled());
+  }
+
+  #isScheduledWork(item) {
+    return isWorkEvent(item) || isWorkEvent({ ...item, category: undefined });
+  }
+
+  #workBlockedResult() {
+    return { text: '主人已关闭工作排程。请从日程中去掉上班、加班和工作通勤，再提交。', failed: true };
+  }
+
+  #pickLifeDayType(date, noWork) {
+    const forced = this.#lifeDayType();
+    const type = pickDayType(DEFAULT_DAY_TYPES, date, forced, this.#random, noWork ? false : null);
+    return noWork && isWorkDayType(type)
+      ? pickDayType(DEFAULT_DAY_TYPES, date, '', this.#random, false)
+      : type;
   }
 
   #lifeOn() {
@@ -738,6 +804,22 @@ export class FeastWorld {
       case 'feast_life_skip': return await this.#lifeFreeSkipTool(args);
       case 'feast_life_start': return await this.#lifeFreeStartTool(args);
       case 'feast_life_day': return await this.#lifeDayTool(args);
+      case 'feast_life_journal': {
+        const out = await this.#journalAction(args);
+        if (!out.ok) return { failed: true, text: out.message };
+        if (args.action === 'view') {
+          const offset = clampInt(args.offset, 0, 250, 0);
+          return { text: JSON.stringify({ date: out.date, plan: out.day, actual: out.actual.slice(offset, offset + 20),
+            actualTotal: out.actual.length, nextOffset: offset + 20 < out.actual.length ? offset + 20 : null,
+            title: out.journal?.title ?? '', cards: out.journal?.cards.map(({ id, title, createdAt }) => ({ id, title, createdAt })) ?? [],
+            issues: out.issues, note: '计划不是事实；实际仅为当前仍保存的记录。' }) };
+        }
+        return { text: out.text ?? JSON.stringify({ message: out.message, card: out.card }) };
+      }
+      case 'feast_life_style': {
+        const out = await this.#styleAction(args);
+        return { text: JSON.stringify(out), ...(out.ok ? {} : { failed: true }) };
+      }
       default: return { text: `[${name} 失败] 不认识这个工具。`, failed: true };
     }
   }
@@ -746,8 +828,12 @@ export class FeastWorld {
     const lib = this.#lib;
     if (!lib.dishes.length) return { text: '菜品库是空的（src/data 下没有可读的菜品）。' };
 
-    const filtered = filterDishes(lib, args);
-    const filteredOut = Boolean(args.cuisine || args.category || args.keyword || args.query);
+    if (args.recommend === true) {
+      const picks = recommendMenuDishes(lib, this.#state, { ...args, nowMs: this.#now(), rng: this.#random });
+      return { text: picks.length ? ['换换口味，可以从这些里挑（挑选不等于吃过）：', ...picks.map((dish) => '- ' + briefLine(dish))].join('\n') : '当前筛选下没有可推荐的菜。' };
+    }
+    const filtered = filterMenuDishes(lib, this.#state, args, this.#now());
+    const filteredOut = Boolean(args.cuisine || args.category || args.keyword || args.query || (args.quick && args.quick !== 'all'));
     const pool = filteredOut ? filtered : lib.dishes;
 
     const lines = [];
@@ -838,6 +924,7 @@ export class FeastWorld {
     const tableBefore = currentTable?.ids.length > 1 ? currentTable : null;
     if (by === 'self' && this.#cfgBool('selfCooked')) why = '你亲手做的';
     const entry = recordEat(this.#state, { nowMs: now, dish, by, miss });
+    this.#invalidateCalendar(day);
     await this.#save();
 
     const body = renderBite(dish, { nth, day, miss, compact: true });
@@ -1331,6 +1418,7 @@ export class FeastWorld {
     const nth = eatCount(this.#state, dish.id);
     const miss = this.#rollMiss();
     recordEat(this.#state, { nowMs: now, dish, by: 'owner', miss, bite: true });
+    this.#invalidateCalendar(day);
     addBite(t, { nowMs: now, dish, nth });
     await this.#save();
 
@@ -1620,11 +1708,63 @@ export class FeastWorld {
     return raw === null ? newState(day) : normalizeState(raw, day);
   }
 
+  #invalidateCalendar(date = null) {
+    if (!date) {
+      this.#calendarCache.clear();
+      return;
+    }
+    this.#calendarCache.delete(String(date).slice(0, 7));
+  }
+
+  async #calendarState() {
+    try {
+      const raw = await readStoredJson(this.stateFile());
+      const validEntry = (entry) => entry && typeof entry.id === 'string' && entry.id.trim()
+        && Number.isSafeInteger(entry.at) && Math.abs(entry.at) <= 8_640_000_000_000_000;
+      const recordsAvailable = raw === null || (Array.isArray(raw.eaten) && raw.eaten.every(validEntry));
+      return { eaten: raw === null ? [] : normalizeState({ ...raw,
+        eaten: Array.isArray(raw.eaten) ? raw.eaten.filter(validEntry) : [],
+      }, dayIn(this.timezone, this.#now())).eaten, recordsAvailable };
+    } catch {
+      return { eaten: [], recordsAvailable: false };
+    }
+  }
+
+  #calendarMealKey(eaten, month) {
+    return JSON.stringify(eaten.filter((entry) => Number.isSafeInteger(entry.at)
+      && Math.abs(entry.at) <= 8_640_000_000_000_000
+      && dayIn(this.timezone, entry.at).startsWith(`${month}-`)));
+  }
+
+  async #calendarMonth(rawMonth) {
+    const nowMs = this.#now();
+    const today = dayIn(this.timezone, nowMs);
+    const month = rawMonth === undefined ? today.slice(0, 7) : rawMonth;
+    if (!isValidCalendarMonth(month)) throw new Error('月份必须是严格合法的 YYYY-MM。');
+    const cached = this.#calendarCache.get(month);
+    if (cached && cached.today === today && cached.timezone === this.timezone
+      && nowMs >= cached.at && nowMs - cached.at < 30_000) return structuredClone(cached.value);
+    const records = await this.#calendarState();
+    const value = await readCalendarMonth(this.dataDir, month, {
+      ...records, nowMs, timezone: this.timezone,
+    });
+    // Bound memory while keeping the common adjacent-month navigation warm.
+    if (this.#calendarCache.size >= 12) this.#calendarCache.delete(this.#calendarCache.keys().next().value);
+    this.#calendarCache.set(month, { at: nowMs, today, timezone: this.timezone,
+      meals: this.#calendarMealKey(records.eaten, month), recordsAvailable: records.recordsAvailable, value });
+    return structuredClone(value);
+  }
+
   async #save() {
     if (!this.#state || !this.#stateLoaded) return;
     const file = this.stateFile();
     await mkdir(dirname(file), { recursive: true });
     await writeStoredJson(file, this.#state);
+    for (const [month, cached] of this.#calendarCache) {
+      if (!cached.recordsAvailable || cached.meals !== this.#calendarMealKey(this.#state.eaten, month)) {
+        this.#calendarCache.delete(month);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1773,7 +1913,7 @@ export class FeastWorld {
     const today = await readDay(this.dataDir, z.date);
     if (!today || today.source === 'pending' || !today.items.length) {
       let filled = templateDay(z.date, {
-        dayTypeId: this.#lifeDayType(), rand: this.#random, now,
+        dayTypeId: this.#pickLifeDayType(z.date, await this.#workBlocked(z.date, now)).id, now,
         by: 'catch-up', maxItems: this.#lifeMaxItems(),
       });
       // 模板日程也补 outfit（库非空时）——否则模板兜底的日子永远没穿着，联动断在兜底上。
@@ -1793,11 +1933,12 @@ export class FeastWorld {
     const at = parseClock(this.cfg?.lifeGenerateAt ?? DEFAULTS.lifeGenerateAt);
     if (at === null || z.minute < at || tomorrow) return;
     // 先落占位再推：重启、tick 重入都不会重复叫她写同一天。
-    const type = pickDayType(DEFAULT_DAY_TYPES, tomorrowDate, this.#lifeDayType(), this.#random);
+    const noWork = await this.#workBlocked(tomorrowDate, now);
+    const type = this.#pickLifeDayType(tomorrowDate, noWork);
     try {
       await writeDay(this.dataDir, pendingDay(tomorrowDate, type, now));
       this.#lifeTomorrow = await readDay(this.dataDir, tomorrowDate);
-      await this.#pushLifePlan(tomorrowDate, type, z.date, now);
+      await this.#pushLifePlan(tomorrowDate, type, z.date, now, { noWork });
     } catch (err) {
       // 发不出去就撤掉占位，下一拍再试；不然这一天会永远停在「等她写」。
       this.#lifeTomorrow = null;
@@ -1806,7 +1947,7 @@ export class FeastWorld {
     }
   }
 
-  async #pushLifePlan(date, type, fromDate, now, { rewrite = false } = {}) {
+  async #pushLifePlan(date, type, fromDate, now, { rewrite = false, noWork = false } = {}) {
     const host = this.#host;
     if (!host?.pushEvent) throw new Error('宿主没有 pushEvent');
     const recent = await recentSummary(this.dataDir, fromDate, 3);
@@ -1814,6 +1955,11 @@ export class FeastWorld {
     const wardrobe = this.#wardrobeOn() ? wardrobeText(this.#wardrobe) : '';
     // 主人按日型备的「能做的事」：留空就是空数组，那段整段不出现。
     const doings = doingsFor(parseDoings(this.cfg?.lifeDoings), type);
+    // 写日程的地点联动不依赖自由时间提醒。
+    const [mapOn, funOn] = await Promise.all([
+      this.cfg?.lifeFreeMapOn !== false && readMapEnabled(this.dataDir),
+      this.cfg?.lifeFreeFunOn !== false && readFunEnabled(this.dataDir),
+    ]);
     let continuation = '';
     try { continuation = threadHint(await readThreads(this.dataDir)); }
     catch (err) { host.log?.warn?.('鱼的每一天：小事记录未读到，邀请仍正常发送', { err: msg(err) }); }
@@ -1824,7 +1970,7 @@ export class FeastWorld {
       origin: 'internal',
       ts: new Date(now).toISOString(),
       text: [planEventText({
-        date, type, recent, mealSlots: slots, wardrobe, doings, rewrite,
+        date, type, recent, mealSlots: slots, wardrobe, doings, rewrite, noWork, mapOn, funOn,
         mealByHer: this.cfg?.mealSlotsByHer !== false && this.#lifeOn(),
       }), continuation].filter(Boolean).join('\n\n'),
       meta: { date, dayType: type.id, ...(rewrite ? { rewrite: true } : {}) },
@@ -1847,18 +1993,21 @@ export class FeastWorld {
     const date = addDays(z.date, 1);
     const existing = await readDay(this.dataDir, date);
     const written = Boolean(existing?.items?.length) && existing.source !== 'pending';
+    const noWork = await this.#workBlocked(date, now);
 
     if (existing?.source === 'pending') {
       const last = Math.max(existing.generatedAt || 0, this.#lifeRewriteAt[date] || 0);
       if (!retry || now - last < REWRITE_COOLDOWN_MS) {
         return `已经在等她想 ${dateLabel(date)} 了；十分钟后可以手动重新发送，她不写时仍用模板兜底。`;
       }
-      await this.#pushLifePlan(date, existing.dayType, z.date, now);
+      const type = noWork && isWorkDayType(existing.dayType)
+        ? this.#pickLifeDayType(date, true) : existing.dayType;
+      await this.#pushLifePlan(date, type, z.date, now, { noWork });
       this.#lifeRewriteAt[date] = now;
       return `已重新发送 ${dateLabel(date)} 的邀请，原来的记录已保留。`;
     }
 
-    const type = pickDayType(DEFAULT_DAY_TYPES, date, this.#lifeDayType(), this.#random);
+    const type = this.#pickLifeDayType(date, noWork);
     let placeholder = false;
     if (!written) {
       // 没东西可覆盖才落占位：占位是为了防重复叫她，不是用来抹掉她已经写好的。
@@ -1874,7 +2023,7 @@ export class FeastWorld {
       this.#lifeRewriteAt[date] = now;
     }
     try {
-      await this.#pushLifePlan(date, type, z.date, now, { rewrite: written });
+      await this.#pushLifePlan(date, type, z.date, now, { rewrite: written, noWork });
     } catch (err) {
       if (placeholder) {
         this.#lifeTomorrow = null;
@@ -1936,6 +2085,53 @@ export class FeastWorld {
     return isDateKey(key) ? key : null;
   }
 
+  #presentDay(day) {
+    if (!day) return null;
+    return { ...day, items: day.items.map((item) => ({ ...item, displayCategory: categoryOf(item) })) };
+  }
+
+  #freePlanSlots(day, now) {
+    const z = zonedNow(this.timezone, now);
+    if (!day || day.date !== z.date || day.source === 'pending') return [];
+    return day.items.filter((item) => item.workFreed === true && !isWorkEvent(item)
+      && item.activity === '自由安排' && parseClock(item.end) > z.minute)
+      .map((item) => ({ start: clock(Math.max(parseClock(item.start), z.minute)), end: item.end }));
+  }
+
+  async #lifeFillFree() {
+    if (!this.#lifeOn()) return { ok: false, message: '「她的一天」现在关着。' };
+    const now = this.#now();
+    const date = zonedNow(this.timezone, now).date;
+    const day = await readDay(this.dataDir, date);
+    const slots = this.#freePlanSlots(day, now);
+    if (!slots.length) return { ok: false, message: '今天没有因关闭上班而腾出的未来时段。' };
+    if (day.freePlanRequest && now - day.freePlanRequest.at < REWRITE_COOLDOWN_MS) {
+      return { ok: false, message: '已经请她想想了，十分钟内不重复发送。她也可以选择不补充。' };
+    }
+    const request = { id: randomUUID(), at: now, slots };
+    const next = { ...day, freePlanRequest: request };
+    await writeDay(this.dataDir, next);
+    try {
+      if (!this.#host?.pushEvent) throw new Error('宿主没有 pushEvent');
+      await this.#host.pushEvent({
+        type: EVENT_LIFE_PLAN, source: this.id, senderKey: 'feast-life-fill-free', origin: 'internal',
+        ts: new Date(now).toISOString(),
+        text: [
+          `【鱼的每一天 · 空出来的时间】主人请你想想 ${date} 空出来的时段，想补充就补，不想也可以。`,
+          `可调整的区间：${slots.map((slot) => `${slot.start}–${slot.end}`).join('、')}。`,
+          `用 feast_life_adjust 逐段交回，date="${date}"，fillRequest="${request.id}"，并写 start/end/activity，可加 category。`,
+          '只改上述区间内尚未过去的部分，不改其他计划，不重写整天。只是安排，不表示已经做过；不需要汇报或解释。',
+        ].join('\n'),
+        meta: { date, reason: 'fill-free', requestId: request.id },
+      }, { deliver: true, trigger: 'flush' });
+    } catch (err) {
+      await writeDay(this.dataDir, day);
+      return { ok: false, message: `邀请未发送：${msg(err)}。可以重新尝试。` };
+    }
+    this.#cacheLifeDay(next, now);
+    return { ok: true, message: '已请她想想空出来的时间；她想好了才会修改，也可以保留自由安排。' };
+  }
+
   async #lifeViewTool(args) {
     if (!this.#lifeOn()) return { text: '「她的一天」现在关着。' };
     const date = this.#lifeDate(args?.date, this.#now());
@@ -1953,9 +2149,21 @@ export class FeastWorld {
     if (typeof args?.items === 'string') {
       try { raw = { ...args, items: JSON.parse(args.items) }; } catch { /* 下面会给出清楚的报错 */ }
     }
+    if (Array.isArray(raw?.items) && raw.items.some((item) => item?.category !== undefined && !validCategory(item.category))) {
+      return { text: '[记日程失败] category 用 sleep/work/commute/meal/personal，不确定就省略。原日程没动。', failed: true };
+    }
     let day;
     try {
-      day = normalizePlan(raw, date, { maxItems: this.#lifeMaxItems(), rand: this.#random });
+      const noWork = await this.#workBlocked(date, now);
+      const requestedType = raw?.dayType?.id ?? raw?.dayType ?? raw?.dayTypeId;
+      const requestsWork = DEFAULT_DAY_TYPES.some((type) => isWorkDayType(type)
+        && (type.id === requestedType || type.name === requestedType));
+      if (noWork && (raw?.work === true || requestsWork
+        || (Array.isArray(raw?.items) && raw.items.some((item) => this.#isScheduledWork(item))))) {
+        return this.#workBlockedResult();
+      }
+      day = normalizePlan(noWork ? { ...raw, work: false } : raw, date,
+        { maxItems: this.#lifeMaxItems(), rand: this.#random });
     } catch (err) {
       return { text: `[记日程失败] ${msg(err)}`, failed: true };
     }
@@ -1999,8 +2207,8 @@ export class FeastWorld {
    * 临时改主意。
    *
    * `activity` 留空 = 不做了（取消这一段），由 applyChange 挖洞。
-   * `fromOwner` 是面板那条路：主人可以改过去（他是在补记事实），她自己不行——
-   * 日程是计划，已经过去的应该是事实。她回头篡改就等于在编自己做过什么。
+   * `fromOwner` 是面板那条路：主人可修正过去的计划；日程仍是计划，不作为实际记录。
+   * 模型默认不能改已经结束的时段；补空闲邀请另有更严格的范围和时效限制。
    */
   async #lifeAdjustTool(args, { fromOwner = false } = {}) {
     if (!this.#lifeOn()) return { text: '「她的一天」现在关着。', failed: true };
@@ -2012,6 +2220,21 @@ export class FeastWorld {
 
     const z = zonedNow(this.timezone, now);
     const cancel = !String(args?.activity ?? '').trim();
+    if (args?.category !== undefined && args.category !== '' && !validCategory(args.category)) {
+      return { text: 'category 用 sleep/work/commute/meal/personal，或空字符串自动判断。', failed: true };
+    }
+    if (args?.fillRequest !== undefined) {
+      const request = day.freePlanRequest;
+      const s = parseClock(args.start), e = parseClock(args.end);
+      const coverage = this.#freePlanSlots(day, now);
+      const contained = (list) => list.some((slot) => parseClock(slot.start) <= s && e <= parseClock(slot.end));
+      if (!request || args.fillRequest !== request.id || date !== z.date
+        || now - request.at > 24 * 60 * 60_000 || s === null || e === null || e <= s
+        || !contained(request.slots) || !contained(coverage) || cancel
+        || (day.work === false && (isWorkEvent(args) || isWorkEvent({ ...args, category: undefined })))) {
+        return { text: '这次补充只能修改邀请中仍空着、尚未过去的时段；原日程没动。请重新查看日程。', failed: true };
+      }
+    }
     // 锁过去：只锁「今天且这一段已经过完」。明天的、往期的（她自己回看补记）不管。
     if (!fromOwner && this.cfg?.lifeAdjustPast !== true && date === z.date) {
       const endMin = parseClock(args?.end);
@@ -2023,9 +2246,17 @@ export class FeastWorld {
       }
     }
 
+    // 同一时段同一活动只修正分类时，保留地点、穿着、备注等原信息。
+    const categoryOnly = args?.category !== undefined && !cancel
+      ? day.items.find((item) => item.start === args.start && item.end === args.end
+        && item.activity === String(args.activity).trim()) : null;
+    const change = categoryOnly ? { ...categoryOnly, ...args } : args;
+    if (!cancel && this.#isScheduledWork(change) && await this.#workBlocked(date, now)) {
+      return this.#workBlockedResult();
+    }
     let items;
     try {
-      items = applyChange(day.items, args);
+      items = applyChange(day.items, change);
     } catch (err) {
       return { text: `[改主意失败] ${msg(err)}`, failed: true };
     }
@@ -2129,6 +2360,7 @@ export class FeastWorld {
     if (!this.#freePendingSave) return true;
     try {
       await writePlay(this.dataDir, this.#freePendingSave);
+      this.#invalidateCalendar(this.#freePendingSave.date);
       this.#freePendingSave = null;
       return true;
     } catch (err) {
@@ -2234,6 +2466,7 @@ export class FeastWorld {
       return { text: `[记账失败] ${msg(err)}`, failed: true };
     }
     await writePlay(this.dataDir, play);
+    this.#invalidateCalendar(z.date);
     return { text: playDoneText({ entry, play, cfg: this.cfg, nowHm: z.hm }) };
   }
 
@@ -2244,6 +2477,7 @@ export class FeastWorld {
     const play = await this.#freePlay(now);
     skipFreeToday(play);
     await writePlay(this.dataDir, play);
+    this.#invalidateCalendar(play.date);
     const reason = typeof args?.reason === 'string' && args.reason.trim()
       ? `（${args.reason.trim().slice(0, 80)}）` : '';
     this.#host?.log?.info?.('鱼的每一天：今天不玩了', { reason });
@@ -2314,6 +2548,7 @@ export class FeastWorld {
     if (!date) return { text: 'date 要用 today / tomorrow 或 YYYY-MM-DD。', failed: true };
 
     const wantWork = typeof args?.work === 'boolean' ? args.work : null;
+    if (wantWork === true && await this.#workBlocked(date, now)) return this.#workBlockedResult();
     const rawSlots = args?.mealSlots;
     const touched = wantWork !== null || rawSlots !== undefined;
     if (!touched) {
@@ -2419,10 +2654,10 @@ export class FeastWorld {
         { label: t.badgeNext, value: nextMealText(state, this.cfg, now, this.timezone, this.#ownMealSlots()), tone: 'plain' },
       ],
       panels: [
-        { id: 'today', title: p.today.title, description: p.today.description, getMethods: ['list', 'day', 'work'] },
-        { id: 'menu', title: p.menu.title, description: p.menu.description, getMethods: ['list', 'dish', 'random', 'pending', 'together'] },
-        { id: 'combo', title: p.combo.title, description: p.combo.description, getMethods: ['list'] },
-        { id: 'history', title: p.history.title, description: p.history.description, getMethods: ['list'] },
+        { id: 'today', title: p.today.title, description: p.today.description, getMethods: ['list', 'day', 'work', 'workPolicy', 'review', 'calendar', 'viewState'] },
+        { id: 'menu', title: p.menu.title, description: p.menu.description, getMethods: ['list', 'dish', 'random', 'recommend', 'pending', 'together', 'viewState'] },
+        { id: 'combo', title: p.combo.title, description: p.combo.description, getMethods: ['list', 'viewState'] },
+        { id: 'history', title: p.history.title, description: p.history.description, getMethods: ['list', 'viewState'] },
       ],
       invoke: (panel, method, args) => this.#serial(() => this.#invoke(panel, method, args ?? [])),
       config: configGroups(this.language),
@@ -2478,6 +2713,7 @@ export class FeastWorld {
   async #clearLife() {
     const n = await clearDays(this.dataDir);
     const p = await clearPlays(this.dataDir);
+    this.#invalidateCalendar();
     this.#lifeToday = null;
     this.#lifeTomorrow = null;
     this.#lifeSegment = null;
@@ -2503,6 +2739,7 @@ export class FeastWorld {
     fresh.skippedDay = this.#state?.skippedDay ?? '';
     this.#state = fresh;
     await this.#save();
+    this.#invalidateCalendar();
     await unlink(`${this.stateFile()}.bak`).catch((err) => { if (err?.code !== 'ENOENT') throw err; });
     this.#host?.log?.info?.('鱼的每一天：吃过的记录已清空');
     return '吃过的记录清了；菜单、菜品库和主人攒的套餐都没动。';
@@ -2513,10 +2750,12 @@ export class FeastWorld {
     return [
       { key: 'state', label: '吃过的记录', file: this.stateFile() },
       { key: 'combos', label: '保存的套餐', file: this.combosFile() },
+      { key: 'workPolicy', label: '工作排程设置', file: this.#workPolicyFile() },
       { key: 'today', label: '今天的安排', file: join(this.lifeDirectory(), `${date}.json`) },
       { key: 'tomorrow', label: '明天的安排', file: join(this.lifeDirectory(), `${addDays(date, 1)}.json`) },
       { key: 'play', label: '今天留下的事', file: join(this.lifeDirectory(), `play-${date}.json`) },
       { key: 'threads', label: '还想继续的小事', file: join(this.dataDir, 'feast', 'threads.json') },
+      { key: 'journal', label: '今天的生活回顾', file: journalPath(this.dataDir, date) },
     ];
   }
 
@@ -2524,11 +2763,21 @@ export class FeastWorld {
     const target = this.#recordTargets().find((item) => item.key === opts?.key);
     if (!target || !['reload', 'restore'].includes(opts?.action)) return { ok: false, message: '请选择可恢复的记录和操作。' };
     try {
-      if (opts.action === 'restore') await restoreStoredJson(target.file);
+      if (opts.action === 'restore') {
+        if (target.key === 'journal') {
+          const date = zonedNow(this.timezone, this.#now()).date;
+          cleanJournal(await readStoredJson(target.file + '.bak'), date);
+        }
+        await restoreStoredJson(target.file);
+        if (['state', 'play', 'journal'].includes(target.key)) {
+          this.#invalidateCalendar(target.key === 'state' ? null : zonedNow(this.timezone, this.#now()).date);
+        }
+      }
       if (target.key === 'state') {
         const loaded = await this.#load();
         this.#state = loaded;
         this.#stateLoaded = true;
+        this.#invalidateCalendar();
       } else if (target.key === 'combos') {
         this.#combos = null;
         await this.#loadCombos();
@@ -2537,13 +2786,20 @@ export class FeastWorld {
         this.#play = loaded ?? newPlay(zonedNow(this.timezone, this.#now()).date);
         if (opts.action === 'restore') this.#freePendingSave = null;
         else await this.#flushFreeReminder();
+      } else if (target.key === 'workPolicy') {
+        await this.#workSchedulingEnabled();
       } else if (target.key === 'threads') {
         await readThreads(this.dataDir);
+      } else if (target.key === 'journal') {
+        await readJournal(this.dataDir, zonedNow(this.timezone, this.#now()).date);
       } else {
         const date = zonedNow(this.timezone, this.#now()).date;
         const day = await readDay(this.dataDir, target.key === 'today' ? date : addDays(date, 1));
         if (target.key === 'today') this.#lifeToday = day;
         else this.#lifeTomorrow = day;
+      }
+      if (opts.action === 'reload' && ['state', 'play', 'journal'].includes(target.key)) {
+        this.#invalidateCalendar(target.key === 'state' ? null : zonedNow(this.timezone, this.#now()).date);
       }
       return { ok: true, message: opts.action === 'restore' ? '已从备份恢复，原文件已另存保留。' : '已重新读取记录。' };
     } catch (err) {
@@ -2566,6 +2822,67 @@ export class FeastWorld {
     return { ok: true, message: opts?.id ? '已记下这件小事的新状态。' : '已留下这件小事；是否安排、什么时候继续都可以再决定。', threads: next };
   }
 
+  async #reviewDay(date) {
+    journalPath(this.dataDir, date); // 严格日期校验，绝不接受路径。
+    const issues = [];
+    const read = async (key, task, fallback) => {
+      try { return await task(); } catch (err) { issues.push({ key, message: msg(err) }); return fallback; }
+    };
+    const day = await read('plan', () => readDay(this.dataDir, date), null);
+    const play = await read('play', () => readPlay(this.dataDir, date), newPlay(date));
+    const journal = await read('journal', () => readJournal(this.dataDir, date), null);
+    if (!this.#stateLoaded) issues.push({ key: 'meals', message: '饮食记录读取失败；请到首页恢复。' });
+    const actual = actualForDate(this.#stateLoaded ? this.#state.eaten : [], play, date, this.timezone)
+      .filter((entry) => entry.at <= this.#now());
+    return { date, day: this.#presentDay(day), actual, journal, issues };
+  }
+
+  async #journalAction(opts = {}) {
+    try {
+      const date = this.#lifeDate(opts.date ?? 'today', this.#now());
+      if (!date) throw new Error('日期用 today / YYYY-MM-DD。');
+      journalPath(this.dataDir, date);
+      if (Object.hasOwn(opts, 'actual') || Object.hasOwn(opts, 'entries')) throw new Error('只能选择已有实际记录的ID。');
+      if (opts.action === 'view') return { ok: true, ...await this.#reviewDay(date) };
+      const journal = await readJournal(this.dataDir, date);
+      if (opts.action === 'export') {
+        const card = journal.cards.find((item) => item.id === opts.cardId);
+        if (!card) throw new Error('找不到这张纪念卡。');
+        return { ok: true, date, card, text: memoryCardText(date, card) };
+      }
+      if (date > dayIn(this.timezone, this.#now())) throw new Error('请为今天或过去的一天留下回顾。');
+      let next;
+      if (opts.action === 'title') next = withJournalTitle(journal, { title: opts.title });
+      else if (opts.action === 'card') {
+        const review = await this.#reviewDay(date);
+        next = withMemoryCard(journal, { title: opts.title, selectedIds: opts.selectedIds,
+          actual: review.actual, nowMs: this.#now(), timezone: this.timezone });
+      } else throw new Error('action 用 view/title/card/export。');
+      await writeJournal(this.dataDir, next);
+      this.#invalidateCalendar(date);
+      return { ok: true, date, journal: next, card: opts.action === 'card' ? next.cards.at(-1) : null,
+        message: opts.action === 'title' ? '当天的小标题已保存。' : '文字纪念卡已保存。' };
+    } catch (err) { return { ok: false, message: msg(err) }; }
+  }
+
+  async #styleAction(opts = {}) {
+    try {
+      if (opts.action === 'list') return { ok: true, presets: LIFE_PRESETS, canApply: Boolean(this.#persist) };
+      const preview = lifePresetPreview(this.cfg, opts.preset);
+      if (opts.action === 'preview') return { ok: true, ...preview, canApply: Boolean(this.#persist) };
+      if (opts.action !== 'apply') throw new Error('action 用 list/preview/apply。');
+      if (!this.#persist) throw new Error('当前宿主没有提供保存配置的接口，预设尚未应用。');
+      const patch = assertLifePresetRevision(this.cfg, opts.preset, opts.revision);
+      if (Object.keys(patch).length) {
+        const result = await this.#persist({ ...patch });
+        if (result === false || result?.ok === false) throw new Error(result?.message || '宿主未能保存生活设置。');
+        Object.assign(this.cfg, patch);
+        if (this.#inputCfg && typeof this.#inputCfg === 'object') Object.assign(this.#inputCfg, patch);
+      }
+      return { ok: true, preset: opts.preset, changed: Object.keys(patch), message: '生活设置已保存。已有日程和工作规则保持原样。' };
+    } catch (err) { return { ok: false, message: msg(err), stale: err.code === 'LIFE_PRESET_REVISION_MISMATCH' }; }
+  }
+
   async #todayData() {
     const now = this.#now();
     const z = zonedNow(this.timezone, now);
@@ -2579,6 +2896,7 @@ export class FeastWorld {
         return fallback;
       }
     };
+    const workSchedulingEnabled = await safeRead('workPolicy', () => this.#workSchedulingEnabled(), false);
     const today = await safeRead('today', () => readDay(this.dataDir, z.date), null);
     const tomorrow = await safeRead('tomorrow', () => readDay(this.dataDir, addDays(z.date, 1)), null);
     const play = await safeRead('play', async () => {
@@ -2586,6 +2904,7 @@ export class FeastWorld {
       return this.#freePendingSave?.date === z.date ? this.#freePendingSave : value ?? newPlay(z.date);
     }, newPlay(z.date));
     const threads = await safeRead('threads', () => readThreads(this.dataDir), { items: [] });
+    const journal = await safeRead('journal', () => readJournal(this.dataDir, z.date), null);
     for (const target of this.#recordTargets().filter((item) => ['state', 'combos'].includes(item.key))) {
       const status = await inspectStoredJson(target.file);
       if (status.status === 'error' || (target.key === 'state' && !this.#stateLoaded)) {
@@ -2607,24 +2926,79 @@ export class FeastWorld {
     // 用刚读到的 today，不用 #lifeToday 快照：面板这条路上日程可能刚被改过，
     // 拿旧快照会把「她刚定的饭点」显示成配置那组。
     const ownMeal = this.cfg?.mealSlotsByHer === false || !today?.mealSlots?.length ? null : today.mealSlots;
+    const mealSlots = this.cfg?.mealReminder === false ? [] : effectiveMealSlots(this.cfg, ownMeal);
+    const skippedSlots = Object.entries(play.skippedSlots ?? {});
+    const freeEnabled = this.#freeOn() && !issues.some((issue) => issue.key === 'play');
+    const todayWorkEvents = today?.items.filter(isWorkEvent) ?? [];
+    // 复用调度判据，只在快照上试算：读首页既不消耗档位，也不清除真实 pending。
+    const mealSnapshot = { ...this.#state, fired: { ...this.#state.fired }, pending: this.#state.pending ? { ...this.#state.pending } : null };
+    const mealPlan = planTick(mealSnapshot, this.cfg, now, this.timezone, ownMeal);
+    const nextMealSlot = parseSlots(mealSlots.join(',')).find(({ hm, min }) => min > z.minute && !mealSnapshot.fired[hm]);
+    const mealSlot = ['fire', 'retry'].includes(mealPlan.action) ? mealPlan.slot
+      : mealSnapshot.pending?.slot ?? nextMealSlot?.hm ?? '';
+    // 先找仍可处理的档位，再用这一刻/那一档的日程解释睡眠或忙碌。
+    const freePlan = planFreeTick(play, this.cfg, { nowMin: z.minute, kind: 'free' });
+    const freeSlot = freePlan.action === 'fire' ? { hm: freePlan.slot, min: z.minute }
+      : slots.find(({ hm, min }) => min > z.minute && !(hm in play.fired));
+    const freeItem = freeSlot ? today?.items[findItem(today, freeSlot.min)] : null;
+    const freeKind = classifyItem(freeItem);
+    const latestFreeSkip = skippedSlots.reduce((latest, entry) =>
+      !latest || entry[1].at >= latest[1].at ? entry : latest, null);
+    const mealStatus = this.cfg?.mealReminder === false ? 'off'
+      : !this.#stateLoaded ? 'unavailable'
+      : this.#state.skippedDay === z.date ? 'paused'
+      : !mealSlots.length ? 'unconfigured'
+      : mealPlan.action === 'fire' ? (mealPlan.catchup ? 'catchUp' : 'due')
+      : mealPlan.action === 'retry' ? 'retry'
+      : mealSnapshot.pending ? 'waiting'
+      : mealSlot ? 'scheduled' : 'finished';
+    const freeStatus = !this.#freeOn() ? 'off'
+      : !freeEnabled ? 'unavailable'
+      : play.skipped ? 'paused'
+      : !slots.length ? 'unconfigured'
+      : !freeSlot ? 'finished'
+      : freeKind === 'asleep' ? 'asleep'
+      : freeKind === 'busy' ? (this.cfg?.lifeFreeBusyCall === true ? 'checkIn' : 'busy')
+      : freePlan.action === 'fire' ? (freePlan.slot === '补' ? 'catchUp' : 'due')
+      : 'scheduled';
     const eaten = this.#stateLoaded ? this.#state.eaten.filter((e) => dayIn(this.timezone, e.at) === z.date) : [];
-    const actual = [
-      ...eaten.map((e) => ({ at: e.at, hm: hmIn(this.timezone, e.at), kind: 'meal', text: e.name || e.id, note: e.bite ? '尝了一口' : '吃过' })),
-      ...play.done.map((d) => ({ at: d.at, hm: hmIn(this.timezone, d.at), kind: 'activity', text: d.activity, note: d.note })),
-    ].sort((a, b) => a.at - b.at);
+    const actual = actualForDate(eaten, play, z.date, this.timezone).filter((entry) => entry.at <= now);
     return {
       enabled: this.#lifeOn(), date: z.date, tomorrowDate: addDays(z.date, 1), nowMinute: z.minute, nowHm: z.hm,
-      nowItem: i >= 0 ? today.items[i] : null, nowKind: classifyItem(i >= 0 ? today.items[i] : null),
-      today, tomorrow, recent, upcoming: (today?.items ?? []).slice(i < 0 ? 0 : i + 1, (i < 0 ? 0 : i + 1) + 3),
-      actual, threads, storageIssues: issues,
+      timezone: this.timezone,
+      nowItem: i >= 0 ? { ...today.items[i], displayCategory: categoryOf(today.items[i]) } : null,
+      nowKind: classifyItem(i >= 0 ? today.items[i] : null),
+      today: this.#presentDay(today), tomorrow: this.#presentDay(tomorrow), recent,
+      upcoming: (today?.items ?? []).slice(i < 0 ? 0 : i + 1, (i < 0 ? 0 : i + 1) + 3)
+        .map((item) => ({ ...item, displayCategory: categoryOf(item) })),
+      freePlanSlots: this.#freePlanSlots(today, now),
+      fillFreePending: Boolean(today?.freePlanRequest && now - today.freePlanRequest.at < REWRITE_COOLDOWN_MS
+        && this.#freePlanSlots(today, now).length),
+      fillFreeAvailable: this.#freePlanSlots(today, now).length > 0
+        && (!today?.freePlanRequest || now - today.freePlanRequest.at >= REWRITE_COOLDOWN_MS),
+      actual, threads, journal, lifePresets: LIFE_PRESETS, canApplyLifePreset: Boolean(this.#persist), storageIssues: issues,
       pending: this.#stateLoaded ? this.#servedView() : null,
       together: this.#stateLoaded ? this.#togetherView() : null,
       planRetryAvailable: tomorrow?.source === 'pending' && now - tomorrow.generatedAt >= REWRITE_COOLDOWN_MS
         && now - (this.#lifeRewriteAt[tomorrow.date] ?? 0) >= REWRITE_COOLDOWN_MS,
-      mealSlots: this.cfg?.mealReminder === false ? [] : effectiveMealSlots(this.cfg, ownMeal),
+      mealSlots,
       mealSlotsByHer: ownMeal !== null,
+      reminders: {
+        meal: { status: mealStatus, slot: mealSlot, source: ownMeal ? 'her' : 'config' },
+        free: {
+          status: freeStatus,
+          slot: freeSlot?.hm ?? '',
+          lastSkipped: freeEnabled && latestFreeSkip ? { slot: latestFreeSkip[0], doing: latestFreeSkip[1].doing } : null,
+        },
+      },
+      workSchedulingEnabled,
+      workSchedulingError: issues.some((issue) => issue.key === 'workPolicy'),
       work: today?.work === true,
-      workConflicts: today?.work === false ? today.items.filter(isWorkEvent) : [],
+      workConflicts: today?.work === false ? todayWorkEvents : [],
+      retainedWork: {
+        today: Boolean(today?.items.length && (today.work || todayWorkEvents.length)),
+        tomorrow: Boolean(tomorrow?.items.length && (tomorrow.work || tomorrow.items.some(isWorkEvent))),
+      },
       workUndoAvailable: Boolean(today?.workUndo && today.workUndo.expected === workScheduleKey(today)),
       tomorrowWritten: Boolean(tomorrow?.items?.length),
       eatenToday: eaten.map((e) => ({ at: e.at, name: e.name || e.id, by: e.by, bite: e.bite === true })),
@@ -2639,6 +3013,10 @@ export class FeastWorld {
 
   async #invoke(panel, method, args) {
     this.#ensureStarted();
+    if (method === 'viewState' && ['today', 'menu', 'combo', 'history'].includes(panel)) {
+      const now = this.#now();
+      return { ok: true, scope: this.#uiScope, date: dayIn(this.timezone, now), timezone: this.timezone };
+    }
     if (!this.#stateLoaded && panel !== 'today') throw new Error('吃过的记录读取失败；请到今天面板恢复。');
     const p = panelText(this.language);
 
@@ -2764,7 +3142,7 @@ export class FeastWorld {
         case 'list': {
           const [filter] = args;
           const f = filter && typeof filter === 'object' ? filter : {};
-          const items = filterDishes(this.#lib, f);
+          const items = filterMenuDishes(this.#lib, this.#state, f, this.#now());
           // 上限跟着库走：面板一次要全部菜，库涨到 200/300 道时不该有一截被悄悄截掉。
           // 那个 400 是硬顶（面板一屏画不下这么多卡），不是默认值。
           const cap = clampInt(f.limit, 1, Math.max(400, items.length), items.length);
@@ -2793,9 +3171,14 @@ export class FeastWorld {
           if (!d) return { ok: false, message: `没有这道菜：${id}` };
           return { ok: true, dish: this.#panelDish(d), pending: this.#servedView() };
         }
+        case 'recommend': {
+          const [filter] = args;
+          const dishes = recommendMenuDishes(this.#lib, this.#state, { ...(filter && typeof filter === 'object' ? filter : {}), nowMs: this.#now(), rng: this.#random });
+          return { ok: true, items: dishes.map((dish) => ({ id: dish.id, name: dish.name, cuisine: dish.cuisine, category: dish.category })) };
+        }
         case 'random': {
           const [filter] = args;
-          const pool = filterDishes(this.#lib, filter && typeof filter === 'object' ? filter : {});
+          const pool = filterMenuDishes(this.#lib, this.#state, filter && typeof filter === 'object' ? filter : {}, this.#now());
           const d = pickOne(this.#lib, { rng: this.#random, pool });
           if (!d) return { ok: false, message: '这个筛选下没有菜。' };
           return { ok: true, dish: this.#panelDish(d) };
@@ -2861,6 +3244,14 @@ export class FeastWorld {
     if (panel === 'today') {
       switch (method) {
         case 'list': return await this.#todayData();
+        case 'calendar': {
+          try { return await this.#calendarMonth(args[0]); }
+          catch (err) { return { ok: false, message: msg(err) }; }
+        }
+        case 'review': return await this.#journalAction({ action: 'view', date: args[0] });
+        case 'journal': return await this.#journalAction(args[0]);
+        case 'style': return await this.#styleAction(args[0]);
+        case 'fillFree': return await this.#lifeFillFree();
         case 'recovery': return await this.#recovery(args[0]);
         case 'thread': {
           try { return await this.#threadAction(args[0]); }
@@ -2870,7 +3261,7 @@ export class FeastWorld {
           const [raw] = args;
           const date = this.#lifeDate(raw, this.#now());
           if (!date) return { ok: false, message: '日期用 today / tomorrow 或 YYYY-MM-DD。' };
-          return { ok: true, day: await readDay(this.dataDir, date) };
+          return { ok: true, day: this.#presentDay(await readDay(this.dataDir, date)) };
         }
         case 'plan': {
           if (!this.#lifeOn()) return { ok: false, message: '「她的一天」现在关着。' };
@@ -2878,9 +3269,22 @@ export class FeastWorld {
         }
         case 'adjust': {
           const [opts] = args;
-          // 主人这条路可以改过去的时段：他是在补记事实，不是她回头篡改自己。
+          // 主人可修正过去的计划；此操作不写入实际活动记录。
           const out = await this.#lifeAdjustTool(opts ?? {}, { fromOwner: true });
           return { ok: !out.failed, message: out.text };
+        }
+        case 'workPolicy': {
+          const enabled = args[0]?.enabled;
+          if (typeof enabled !== 'boolean') return { ok: false, message: '请指定是否启用工作排程。' };
+          try {
+            // 规则与每日记录分开保存：跨天、重启和清空日程都不会重置。
+            await this.#workSchedulingEnabled();
+            await mkdir(dirname(this.#workPolicyFile()), { recursive: true });
+            await writeStoredJson(this.#workPolicyFile(), { enabled });
+            return { ok: true, message: enabled
+              ? '已恢复工作类日型的原有权重，之后按原规则安排。'
+              : '已关闭工作排程：之后上班日、加班日、摸鱼日的权重为 0，直到重新开启。已有日程保留。' };
+          } catch (err) { return { ok: false, message: msg(err) }; }
         }
         case 'work': {
           // 面板上翻「今天上不上班」。走的是和她同一个窄口子（feast_life_day 那条路），
@@ -2893,6 +3297,10 @@ export class FeastWorld {
           const day = await readDay(this.dataDir, date);
           if (!day?.items?.length) return { ok: false, message: `${dateLabel(date)}还没有日程，可以先请她写，或等她写。` };
           if (raw.action === 'undo') {
+            if (await this.#workBlocked(date, this.#now())
+              && (day.workUndo?.work || day.workUndo?.items?.some((item) => this.#isScheduledWork(item)))) {
+              return { ok: false, message: '工作排程已关闭，请先重新开启，再恢复工作安排。' };
+            }
             if (!day.workUndo || day.workUndo.expected !== workScheduleKey(day)) {
               return { ok: false, message: '日程已有后续修改或没有可撤销的关闭操作，不能覆盖现在的安排。' };
             }
@@ -2923,6 +3331,7 @@ export class FeastWorld {
           const play = await this.#freePlay(this.#now());
           skipFreeToday(play);
           await writePlay(this.dataDir, play);
+          this.#invalidateCalendar(play.date);
           this.#host?.log?.info?.('鱼的每一天：主人替她把今天剩下的档停了');
           return { ok: true, message: '好了，今天剩下的档不叫了。她随时能自己动。' };
         }

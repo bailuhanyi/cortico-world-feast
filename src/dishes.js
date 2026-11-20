@@ -180,6 +180,80 @@ export function filterDishes(lib, { cuisine, category, keyword, query } = {}) {
   return out;
 }
 
+const MENU_RECENT_MS = 7 * 24 * 3600_000;
+
+/** 只读当前可用的过去记录；持久 counts 另作「吃过」依据，不猜被剪掉的日期。 */
+function menuEatenHistory(lib, state, nowMs) {
+  const history = new Map();
+  for (const e of Array.isArray(state?.eaten) ? state.eaten : []) {
+    if (!e || !lib.byId.has(e.id) || !Number.isFinite(e.at) || e.at > nowMs) continue;
+    const entry = history.get(e.id) ?? { lastAt: -Infinity, recentCount: 0 };
+    entry.lastAt = Math.max(entry.lastAt, e.at);
+    if (e.at >= nowMs - MENU_RECENT_MS) entry.recentCount += 1;
+    history.set(e.id, entry);
+  }
+  return history;
+}
+
+function menuDishTried(state, id, history) {
+  const count = Number(state?.counts?.[id]);
+  return (Number.isFinite(count) && count > 0) || history.has(id);
+}
+
+/**
+ * 菜单快捷筛选，与原菜系/类别/标签/自由词条件求交，不修改库或状态。
+ * quick 默认 all；liked 遵循口味画像的最新有效反馈，吃过不代表喜欢；
+ * untried 查持久 counts（兼顾仍在的过去记录）；recent 为 [now-7天, now]，最近吃的在前。
+ */
+export function filterMenuDishes(lib, state, filter = {}, nowMs = Date.now()) {
+  const pool = filterDishes(lib, filter);
+  if (filter.quick === 'liked') {
+    const liked = new Set(tasteProfile(lib, state).likedIds);
+    return pool.filter((d) => liked.has(d.id));
+  }
+  if (filter.quick === 'untried' || filter.quick === 'recent') {
+    const history = menuEatenHistory(lib, state, nowMs);
+    if (filter.quick === 'untried') return pool.filter((d) => !menuDishTried(state, d.id, history));
+    return pool.filter((d) => history.get(d.id)?.recentCount > 0)
+      .sort((a, b) => history.get(b.id).lastAt - history.get(a.id).lastAt);
+  }
+  return pool;
+}
+
+/**
+ * 在实际菜单筛选池内尝鲜，排除最新明确讨厌的菜，最多返回 3 道不同的原菜品对象。
+ * 分层随机：没吃过 > 最近 7 天未吃 > 近期一次 > 近期反复；不足才向后补，不突破筛选。
+ * limit 取非负整数并封顶 3；nowMs/rng 可注入，使调用与测试可复现。
+ */
+export function recommendMenuDishes(lib, state, {
+  limit = 3, nowMs = Date.now(), rng = Math.random, ...filter
+} = {}) {
+  const count = Math.max(0, Math.min(3, Math.floor(Number(limit) || 0)));
+  if (!count) return [];
+  const pool = filterMenuDishes(lib, state, filter, nowMs);
+  const disliked = new Set(tasteProfile(lib, state).dislikedIds);
+  const history = menuEatenHistory(lib, state, nowMs);
+  const tiers = [[], [], [], []];
+  const seen = new Set();
+  for (const d of pool) {
+    if (seen.has(d.id) || disliked.has(d.id)) continue;
+    seen.add(d.id);
+    const recentCount = history.get(d.id)?.recentCount ?? 0;
+    const tier = recentCount > 1 ? 3 : recentCount === 1 ? 2
+      : menuDishTried(state, d.id, history) ? 1 : 0;
+    tiers[tier].push(d);
+  }
+  const out = [];
+  for (const tier of tiers) {
+    while (tier.length && out.length < count) {
+      const index = Math.floor(rng() * tier.length);
+      out.push(tier.splice(index, 1)[0]);
+    }
+    if (out.length === count) break;
+  }
+  return out;
+}
+
 /** 取 n 道不重复的随机菜；avoidId 会被尽量避开（除非库里没别的了）。 */
 export function pickFew(lib, n, { avoidId, rng = Math.random, pool } = {}) {
   const source = pool ?? lib.dishes;
