@@ -2,10 +2,11 @@
 
 ## 当前补丁版本：0.12.1
 
-本版合并两个界面修复：
+本版合并三项界面调整：
 
 - 将「明天」标题放在明天计划状态之前，折叠时间线时仍显示标题，展开后不重复。
 - 实际记录使用 18px 原生复选框，修复宿主与插件样式叠加后勾号和选中色不可见的问题。
+- 套餐按钮由「看这一桌」改为「换一桌」，与原有重新搭配的行为对应；用户指南同步更新。
 
 计划生成时刻、日程与实际记录的数据格式、纪念卡限选 1–2 条等规则保持原样。线上版本、发布状态及校验结果记在 [HANDOFF-RELEASE.md](HANDOFF-RELEASE.md)；历史功能见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -29,8 +30,8 @@ git diff --check
 ## 打包核对
 
 ```powershell
-New-Item -ItemType Directory -Force '.tmp/release' | Out-Null
-npm.cmd pack --json --pack-destination .tmp/release --cache=.tmp/npm-release-cache
+New-Item -ItemType Directory -Force '.tmp/release/0.12.1-final' | Out-Null
+npm.cmd pack --json --pack-destination .tmp/release/0.12.1-final --cache=.tmp/npm-release-cache
 ```
 
 应包含运行源码、面板、图标、用户文档、自描述和 28 份菜品数据。不应包含测试、工具、运行记录、备份、凭据或 `.tmp`。按实际包清单及 integrity 核对，不复用旧版本归档。
@@ -63,4 +64,4 @@ npm.cmd view cortico-world-feast dist-tags --json --registry=https://registry.np
 
 核对实际发布版本、`latest` 和归档 integrity。正常提交并推送相关 Git 改动，不强制覆盖远端；npm 发布核对成功后才创建和推送 `v0.12.1` 标签。npm 发布成功不代表 Coo 市场索引已更新。
 
-在 Coo 中更新后完全退出再重新打开，使进程加载新面板资源。确认「明天」状态归属清楚、复选框可见且可取消、最多选择两条和保存纪念卡正常；不要改动已有用户数据。
+在 Coo 中更新后完全退出再重新打开，使进程加载新面板资源。确认「明天」状态归属清楚、复选框可见且可取消、最多选择两条和保存纪念卡正常，以及「换一桌」重配后实际端出的菜仍与卡片一致；不要改动已有用户数据。

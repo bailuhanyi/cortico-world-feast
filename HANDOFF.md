@@ -1,7 +1,7 @@
 # 鱼的每一天插件交接文档
 
 更新时间：2026-11-20（Asia/Shanghai）
-本轮补丁目标：`0.12.1`。2026-11-20 实时查询 npm 官方 registry 的 latest 已为 `0.12.0`，本地 package.json 已升为 `0.12.1`。本轮合并「明天」标题位置与实际记录复选框选中标记显示修复；完整状态见 [HANDOFF-RELEASE.md](HANDOFF-RELEASE.md) 顶部及 [PUBLISHING.md](PUBLISHING.md)。本轮回归合计601/601通过，0.12.1归档已生成；npm 身份检查返回E401，尚待恢复登录并完成实际发布及registry后验收。以下未明确标为本轮的历史验证与发布状态均只对应当时版本。
+本轮补丁目标：`0.12.1`。2026-11-20 实时查询 npm 官方 registry 的 latest 已为 `0.12.0`，本地 package.json 已升为 `0.12.1`。本轮合并「明天」标题位置、实际记录复选框选中标记显示，以及套餐按钮由「看这一桌」改为「换一桌」三项修改；完整状态见 [HANDOFF-RELEASE.md](HANDOFF-RELEASE.md) 顶部及 [PUBLISHING.md](PUBLISHING.md)。本轮回归合计601/601通过，0.12.1归档已生成；npm 身份检查返回E401，尚待恢复登录并完成实际发布及registry后验收。以下未明确标为本轮的历史验证与发布状态均只对应当时版本。
 插件包：`cortico-world-feast`
 工具总数：20 个 · 事件 7 个 · 配置项 42 个（`defaults()` 43 个键，含 `enabled`）· 面板 4 个
 

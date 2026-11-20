@@ -963,9 +963,9 @@ test('套餐面板：挂载后画出预设，每张卡带着现配出来的菜�
     const text = cards.map((c) => c.textContent).join('\n');
     assert.ok(text.includes('四菜一汤'), '缺四菜一汤那张');
     assert.ok(text.includes('清爽一餐'), '缺清爽一餐那张');
-    // 每张卡都该有「端这一桌」和「看这一桌」。
+    // 每张卡都该有「端这一桌」和「换一桌」。
     assert.ok(root.findByText('端这一桌'), '缺端这一桌按钮');
-    assert.ok(root.findByText('看这一桌'), '缺看这一桌按钮');
+    assert.ok(root.findByText('换一桌'), '缺换一桌按钮');
     // 预设是槽位现配的，端之前必须看得到具体是哪几道。
     assert.ok(root.querySelectorAll('.feast-set-dishes').length >= 8, '每张卡都该列出具体菜名');
   } finally {
@@ -999,7 +999,7 @@ test('套餐面板：点「端这一桌」会真的推过去，并带上等待�
 // 这两条钉的是同一件事：种子（也就是这一桌怎么配）必须在**画卡之前**就定好。
 // 以前卡上写死 `<id>|panel`、端的时候另生成一颗 `Date.now()`，于是"看到的"
 // 和"端过去的"是两桌菜——面板自己还写着"看到的这几道就是会端过去的那几道"。
-test('套餐面板：不先点「看这一桌」，直接端也是卡上列的那几道', async () => {
+test('套餐面板：不先点「换一桌」，直接端也是卡上列的那几道', async () => {
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('combo');
@@ -1023,7 +1023,7 @@ test('套餐面板：不先点「看这一桌」，直接端也是卡上列的�
   await world.stop();
 });
 
-test('套餐面板：点过「看这一桌」之后再端，端的是重配后卡上显示的那一桌', async () => {
+test('套餐面板：点过「换一桌」之后再端，端的是重配后卡上显示的那一桌', async () => {
   const { mount, invocations, world, panels } = await mountPanels();
   try {
     const root = await mount('combo');
@@ -1032,13 +1032,13 @@ test('套餐面板：点过「看这一桌」之后再端，端的是重配后�
     const before = withSeeds();
     assert.ok(before > 0, '一挂载就该带种子拉过一次数据');
 
-    card().findByText('看这一桌').click();
+    card().findByText('换一桌').click();
     await waitFor(() => {
       const latest = latestCall(invocations, 'list')?.result;
       const expected = latest?.presets?.find((entry) => entry.id === 'light-meal')?.dishes?.map((dish) => dish.name);
       const rendered = card()?.querySelector('.feast-set-dishes')?.querySelectorAll('span').map((node) => node.textContent);
       return withSeeds() > before && expected?.length && JSON.stringify(rendered) === JSON.stringify(expected)
-        && card().findByText('看这一桌')?.disabled === false;
+        && card().findByText('换一桌')?.disabled === false;
     }, '按新种子画出预览后的卡');
 
     const shown = card().querySelectorAll('.feast-set-dishes')[0].querySelectorAll('span').map((n) => n.textContent);
@@ -2618,11 +2618,11 @@ test('套餐重配保留旧 DOM 且防重复操作；跨面板较新读取与卸
   const cards = () => root.querySelectorAll('.feast-set');
   const snapshot = cards();
   delay = true;
-  cards()[0].findByText('看这一桌').click();
+  cards()[0].findByText('换一桌').click();
   const older = await waitFor(() => requests.queue[0], '第一桌重配请求');
   assert.equal(cards()[0], snapshot[0], '后续 loading 不摘除旧套餐卡');
-  assert.equal(cards()[1].findByText('看这一桌').disabled, true, '读取期间不能重复操作另一桌');
-  cards()[1].findByText('看这一桌').click();
+  assert.equal(cards()[1].findByText('换一桌').disabled, true, '读取期间不能重复操作另一桌');
+  cards()[1].findByText('换一桌').click();
   assert.equal(requests.queue.length, 1, '禁用入口不得产生额外重配');
   const oldResult = await older.next();
   delay = false;
@@ -2633,7 +2633,7 @@ test('套餐重配保留旧 DOM 且防重复操作；跨面板较新读取与卸
   await endTurn();
   assertUnchanged(root, shown, '旧挂载的预览不能覆盖当前套餐');
   delay = true;
-  cards()[0].findByText('看这一桌').click();
+  cards()[0].findByText('换一桌').click();
   const pending = await waitFor(() => requests.queue[1], '卸载前的套餐读取');
   const snapshotResult = await pending.next();
   setup.panels.lastHandle.dispose();

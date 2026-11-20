@@ -4,15 +4,18 @@
 
 ## 本轮补丁：0.12.1
 
-- 用户已授权将「明天」区块位置与实际记录复选框显示两个修复合并发布。
+- 用户已授权将「明天」区块位置、实际记录复选框显示和套餐按钮改名「换一桌」三项修改合并为 0.12.1 发布。
 - 2026-11-20 实时查询 npm 官方 registry，`latest` 已为 **0.12.0**，下方 0.12.0 发布前交接中的版本空缺与登录状态均不代表现状。本轮使用 **0.12.1**。
 - 「明天」标题移到状态提示上方并始终可见；折叠、展开和局部刷新都不再把明天状态挂在今天标题下，展开后不重复标题。中英文同步。
 - 实际记录复选框恢复原生绘制，固定 18px 并去掉文本输入框内边距，避免宿主 `appearance:none` 与插件 `background` 简写共同盖掉勾号。保留限选 1–2 条及原有保存行为。
+- 套餐中文按钮由「看这一桌」改为「换一桌」，保留同一重配处理、种子及上桌一致性；README、GUIDE 与现有面板回归同步更新。
 - 不修改自动生成时间、数据格式、已有日程或实际记录。
+- 原两项版 `.tmp/release/cortico-world-feast-0.12.1.tgz` 已过期，不能发布；最终三项版在 `.tmp/release/0.12.1-final/`，已重新通过面板 88/88、声明与在线发布检查。
+- Git：两项版已创建本地提交 `ec549d7`；正常推送被沙箱阻止凭据助手，随后提权推送请求被用户拒绝，已停止推送，不重试或绕过；尚未创建发布标签。
 - 新增明天区块的中英文、空白/等待/已生成、折叠/展开及后台刷新行为回归；真实 Coo GUI 验收与自动化 DOM 检查仍分别记录。
 - 验证：20 个测试文件合计 **601/601 通过**（其余 19 个文件 513 项通过，面板更新旧标题位置断言后 88/88 通过）；规范、824 道菜、自检 12 项、在线发布检查 18 项、源码与测试语法、声明同步及 diff 空白检查通过。明天区块新回归覆盖中英文与三种计划状态。真实 Coo GUI 验收尚未完成。
-- 归档：`.tmp/release/cortico-world-feast-0.12.1.tgz`，66 个文件，823,642 字节，解包 2,388,155 字节。SHA-1 `f1e2ba84fd618929e31702e3a95eb0de23a0d414`；npm pack integrity 为 `sha512-KC5DsSHuaWyBy3VJua8qY9S6/1kjqnhcUWzf1ktFLQt6P2yR5n4WhsDlMl/U1zISRBdsM2yChIjNZNegRxP0IQ==`。
-- 与经官方 integrity 核验的线上 0.12.0 比较：66 个发布文件中仅 `dist/webui.js`、`package.json`、`CHANGELOG.md`、`PUBLISHING.md` 四个不同；全部 `src/**` 与 `describe.json` 一致，无新业务逻辑。dist 只有复选框规则、明天标题位置及去除重复标题三个局部差异。
+- 最终归档：`.tmp/release/0.12.1-final/cortico-world-feast-0.12.1.tgz`，66 个文件，823,803 字节，解包 2,388,533 字节。SHA-1 `3977ff25beaf7e08fbbe524a34735bbcb3fb5831`；npm pack integrity 为 `sha512-b2Sjkq7pXpfKO//VP/hGJpM3zUPEylDNJBhcOBPe1NVqXjefAOUrgqTWBAO6F+v8qFCd+F0uz2wJdAE5WPEbIA==`。
+- 与经官方 integrity 核验的线上 0.12.0 比较：66 个发布文件中仅 `dist/webui.js`、`package.json`、`CHANGELOG.md`、`PUBLISHING.md`、`README.md`、`GUIDE.md` 六个不同；全部 `src/**` 与 `describe.json` 一致，无新业务逻辑。dist 差异仅上述三项界面修改与对应注释。
 - npm 身份校验返回 **E401 Unauthorized**，需要维护者恢复登录后继续实际发布及 registry 后验收；准备完成与生成 tgz 均不代表已发布。
 - 当前发布指令以 [PUBLISHING.md](PUBLISHING.md) 的 **0.12.1** 为准。
 

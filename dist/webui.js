@@ -388,7 +388,7 @@ const TABLE = {
     comboBuild: '攒一桌',
     comboNamePh: '给这一桌起个名字',
     comboPicked: (n, max) => `已选 ${n} / ${max} 道`,
-    comboPick: '看这一桌',
+    comboPick: '换一桌',
     comboServe: '端这一桌',
     comboPicking: '配菜中…',
     comboSaving: '存…',
@@ -3056,7 +3056,7 @@ const todayPanel = {
  * 一桌一桌地端。
  *
  * 分两半：上面是现成的套餐（预设 + 你攒的），下面是攒新的一桌。
- * 预设是「槽位现配」，每次配出来可能不一样，所以每张卡都带「看这一桌」——
+ * 预设是「槽位现配」，每次配出来可能不一样，所以每张卡都带「换一桌」——
  * 端之前得看得到具体是哪几道。
  */
 const comboPanel = {
