@@ -113,6 +113,7 @@ export const feastDefinition = {
   create: (ctx) => new FeastWorld({
     cfg: ctx.cfg,
     dataDir: ctx.dataDir,
+    botDir: ctx.botDir,
     timezone: ctx.timezone,
     persist: typeof ctx.persist === 'function' ? (patch) => ctx.persist(patch) : null,
     // 天气联网可注入（dry-mount / 测试用）；宿主正常挂载时不传，走全局 fetch。

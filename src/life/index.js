@@ -11,4 +11,5 @@ export * from './doings.js';
 export * from './wardrobe.js';
 export * from './funlink.js';
 export * from './maplink.js';
+export * from './storylink.js';
 export * from './threads.js';

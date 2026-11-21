@@ -11,7 +11,7 @@
  * 临时目录故意不删：见 life.test.mjs 末尾的说明（删目录会被沙箱当批量删除拦下）。
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -33,7 +33,7 @@ const NOON = Date.parse(`${DAY}T12:05:00+08:00`);
 /** 过默认 lifeGenerateAt（22:00），启动就会请她写明天。 */
 const NIGHT = Date.parse(`${DAY}T22:30:00+08:00`);
 
-async function makeWorld({ now = () => NOON, cfg = {}, dataDir: reuse = null } = {}) {
+async function makeWorld({ now = () => NOON, cfg = {}, dataDir: reuse = null, botDir, create = (opts) => new FeastWorld(opts) } = {}) {
   const dataDir = reuse ?? await mkdtemp(join(TMP_ROOT, 'lifew-'));
   const events = [];
   const ticks = [];
@@ -44,9 +44,10 @@ async function makeWorld({ now = () => NOON, cfg = {}, dataDir: reuse = null } =
       return { ...e, cursor: events.length, origin: e.origin ?? 'external' };
     },
   };
-  const world = new FeastWorld({
+  const world = create({
     cfg: { ...DEFAULTS, enabled: true, ...cfg },
     dataDir,
+    botDir,
     timezone: TZ,
     now,
     random: () => 0.5,
@@ -187,6 +188,127 @@ test('写日程和重写按当前配置独立联动小世界与娱乐时间', as
   } finally {
     await optOut.world.stop();
   }
+});
+
+test('D1 工厂把部署目录传给计划与自由时间联动', async () => {
+  const root = await mkdtemp(join(TMP_ROOT, 'd1-deployment-'));
+  const botDir = join(root, 'deployment');
+  const dataDir = join(root, 'legacy', 'data');
+  await mkdir(botDir);
+  await mkdir(dataDir, { recursive: true });
+  const stale = JSON.stringify({ worlds: { fun: { enabled: true }, map: { enabled: true } } });
+  await writeFile(join(dataDir, 'config.json'), stale);
+  await writeFile(join(root, 'legacy', 'config.json'), stale);
+  await writeFile(join(botDir, 'config.json'), JSON.stringify({ worlds: { fun: { enabled: false }, map: { enabled: true } } }));
+
+  const realNow = Date.now;
+  let setup;
+  try {
+    // 生产工厂不透传测试定时器，固定 Date.now 并由 finally 停止 World。
+    Date.now = () => NOON;
+    setup = await makeWorld({ botDir, dataDir, create: feastDefinition.create });
+    const { world, tools, lifeEvents } = setup;
+    const ui = world.webUi('zh');
+    assert.equal((await ui.invoke('today', 'plan', [])).ok, true);
+    const invite = lifeEvents(EVENT_LIFE_PLAN).at(-1);
+    assert.match(invite.text, /\bmap_places\b/);
+    assert.doesNotMatch(invite.text, /\bfun_(?:places|go|story)\b/);
+    const reply = await tools.feast_life_start({});
+    assert.ok(!reply.failed, reply.text);
+    assert.match(reply.text, /\bmap_places\b/);
+    assert.doesNotMatch(reply.text, /\bfun_(?:places|go|story)\b/);
+  } finally {
+    try { if (setup) await setup.world.stop(); }
+    finally { Date.now = realNow; }
+  }
+});
+
+test('D1 自由时间定时、工具和面板共用同一配置优先级', async () => {
+  const root = await mkdtemp(join(TMP_ROOT, 'd1-compatible-'));
+  const dataDir = join(root, 'data');
+  await mkdir(dataDir);
+  const current = join(dataDir, 'config.json');
+  await writeFile(join(root, 'config.json'), JSON.stringify({ worlds: { map: { enabled: true } } }));
+  await writeFile(current, JSON.stringify({ worlds: { fun: { enabled: true } } }));
+  const clock = { t: Date.parse(`${DAY}T21:02:00+08:00`) };
+  const { world, tools, runTick, lifeEvents } = await makeWorld({ dataDir, now: () => clock.t });
+  try {
+    await runTick();
+    const reminder = lifeEvents(EVENT_LIFE_FREE).at(-1);
+    assert.equal(reminder.meta.slot, '21:00');
+    assert.match(reminder.text, /\bfun_places\b/);
+    assert.doesNotMatch(reminder.text, /\bmap_places\b/);
+
+    const ui = world.webUi('zh');
+    await writeFile(current, '{截断');
+    const reply = await tools.feast_life_start({});
+    assert.ok(!reply.failed, reply.text);
+    assert.doesNotMatch(reply.text, /\b(?:fun|map)_places\b/);
+
+    await unlink(current);
+    const before = lifeEvents(EVENT_LIFE_FREE).length;
+    assert.equal((await ui.invoke('today', 'freeStart', [])).ok, true);
+    assert.equal(lifeEvents(EVENT_LIFE_FREE).length, before + 1);
+    const panelEvent = lifeEvents(EVENT_LIFE_FREE).at(-1);
+    assert.match(panelEvent.text, /\bmap_places\b/);
+    assert.doesNotMatch(panelEvent.text, /\bfun_places\b/);
+  } finally { await world.stop(); }
+});
+
+test('D1 故事候选只服务计划，显式记录保留实际游玩与中途暂停', async () => {
+  const dataDir = await mkdtemp(join(TMP_ROOT, 'd1-story-'));
+  const foreignState = ['fun', 'map'].map((id) => join(dataDir, id, 'state.json'));
+  for (const file of foreignState) {
+    await mkdir(dirname(file));
+    await writeFile(file, '{"fixture":"只供本测试核对"}');
+  }
+  await writeFile(join(dataDir, 'config.json'), JSON.stringify({ worlds: { fun: { enabled: true } } }));
+  const clock = { t: NOON };
+  const candidate = '和主人商量玩一篇已安装的短故事';
+  const example = '闲下来时翻翻剪贴册';
+  const { world, tools, runTick, lifeEvents } = await makeWorld({
+    dataDir,
+    now: () => clock.t,
+    cfg: { lifeDayType: 'workday', lifeDoings: `- 通用候选：整理抽屉\n上班日：\n- ${candidate}`, lifeFreeMenu: `- ${example}` },
+  });
+  try {
+    const ui = world.webUi('zh');
+    const tomorrow = addDays(DAY, 1);
+    assert.equal((await ui.invoke('today', 'plan', [])).ok, true);
+    const invite = lifeEvents(EVENT_LIFE_PLAN).at(-1);
+    assert.ok(invite.text.includes(candidate));
+    assert.doesNotMatch(invite.text, /整理抽屉|闲下来时翻翻剪贴册|\bfun_story\b/);
+    const draft = await readDay(dataDir, tomorrow);
+    assert.equal(draft.source, 'pending');
+    assert.deepEqual(draft.items, []);
+    const plan = planPayload(tomorrow);
+    plan.items[1] = { ...plan.items[1], activity: candidate };
+    const saved = await tools.feast_life_plan(plan);
+    assert.ok(!saved.failed, saved.text);
+    const day = await readDay(dataDir, tomorrow);
+    assert.ok(day.items.some((item) => item.activity === candidate));
+    assert.ok(day.items.every((item) => !item.activity.includes(example)));
+
+    clock.t = Date.parse(`${DAY}T21:02:00+08:00`);
+    await runTick();
+    const reminder = lifeEvents(EVENT_LIFE_FREE).at(-1);
+    assert.ok(reminder.text.includes(example));
+    assert.doesNotMatch(reminder.text, /\bfun_story\b/);
+    clock.t = Date.parse(`${DAY}T23:05:00+08:00`);
+    await runTick();
+    assert.deepEqual((await readPlay(dataDir, DAY))?.done ?? [], []);
+    assert.deepEqual((await readPlay(dataDir, tomorrow))?.done ?? [], []);
+    assert.deepEqual((await ui.invoke('today', 'list', [])).actual, []);
+
+    const activity = '和主人玩了一个短故事';
+    const note = '玩到木桥后先暂停，故事还没结束';
+    const logged = await tools.feast_life_play({ activity, note });
+    assert.ok(!logged.failed, logged.text);
+    const { done } = await readPlay(dataDir, DAY);
+    assert.deepEqual(done.map(({ activity, note }) => ({ activity, note })), [{ activity, note }]);
+    assert.deepEqual(await readDay(dataDir, tomorrow), day);
+    for (const file of foreignState) assert.equal(await readFile(file, 'utf8'), '{"fixture":"只供本测试核对"}');
+  } finally { await world.stop(); }
 });
 
 test('她写好明天之后再点「请她写明天」：不覆盖、只推一次重写邀请', async () => {

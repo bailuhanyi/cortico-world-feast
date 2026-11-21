@@ -8,6 +8,7 @@
 import { cleanDay } from './store.js';
 import { dateLabel } from './time.js';
 import { doingsLines } from './doings.js';
+import { storyPlanHint } from './storylink.js';
 
 /**
  * 事件正文：给她的写作要求（她看得到），也是工具参数的格式说明。
@@ -28,7 +29,7 @@ import { doingsLines } from './doings.js';
  */
 export function planEventText({
   date, type, recent = '', mealSlots = '11:30,18:00', who = {}, wardrobe = '', doings = [],
-  rewrite = false, mealByHer = false, mapOn = false, funOn = false, noWork = false,
+  rewrite = false, mealByHer = false, mapOn = false, funOn = false, storyOn = false, noWork = false,
 } = {}) {
   const name = who.name || '她';
   const lines = [
@@ -43,12 +44,13 @@ export function planEventText({
   }
   // 主人备的「能做的事」：紧跟在日型后面，让她写每一段时手边有具体的事可选。
   lines.push(...doingsLines(doings));
-  if (mapOn || funOn) {
-    lines.push('如果想安排外出，交回日程前先按需查一下要去的地方：');
+  if (storyOn) lines.push(storyPlanHint());
+  if (!storyOn && (mapOn || funOn)) {
+    lines.push('如果想安排外出，且当前会话确实提供相应工具，交回日程前可按需查地点（启用配置不等于工具权限，也不证明新地点或故事接口可用）：');
     if (mapOn) lines.push('- 附近散步、去常去的地方或回家：用 map_places 找登记地点，需要详情时用 map_look，location 用地图正名。');
     if (funOn) lines.push('- 想安排一趟娱乐出游：用 fun_places 查场所和可逛项目，按计划时段参考营业时间，location 写实际打算去的场所正名，activity / detail 写想做的事。现在只做计划，到了那天真要出发时再用 fun_go。');
     if (mapOn && funOn) lines.push('- 如果 map_look 提到娱乐时间里相近的场所，先用 fun_places 核对。选定去哪儿，location 就写哪一处的正名。');
-    lines.push('没有合适的地点，或想在家休息，就照自己的想法排。');
+    lines.push('没有相应工具、没有合适地点或想在家休息，就保留弹性安排。这里只写计划，不开始故事、不移动当前位置，也不登记实际经历。');
   }
   if (recent) lines.push(`最近几天：\n${recent}`);
   if (wardrobe) lines.push(wardrobe);

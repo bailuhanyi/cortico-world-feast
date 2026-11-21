@@ -17,6 +17,7 @@
  */
 import { hmIn } from '../state.js';
 import { classifyItem } from './kind.js';
+import { STORY_RECORD_TAIL } from './storylink.js';
 
 const text = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const clampInt = (v, min, max, fallback) => {
@@ -190,7 +191,7 @@ export function isFreeActivity(item) {
  */
 export function freeEventText({
   slot, kind = 'free', play, cfg = {}, where = '', menu = '', nowHm = '', tz = 'Asia/Shanghai',
-  weatherShort = '', weatherHint = '',
+  weatherShort = '', weatherHint = '', storyOn = false,
 } = {}) {
   const tag = slot === '补' ? '' : ` · ${slot}`;
   const done = `今天已经玩过：${freeDoneText(play, tz)}。`;
@@ -221,8 +222,10 @@ export function freeEventText({
 
   const lines = [head];
   if (where) {
-    // 日程那一段的名字本身就叫「自己的时间」时，拼「你在自己的时间里」很别扭——这种情况只报地点。
-    if (/自己的时间|自由/.test(where)) {
+    // 新故事路径不能把一段计划当成外部世界中的实际位置。
+    if (storyOn) {
+      lines.push(`日程原本安排：${where}；实际所在地点以核实为准。`);
+    } else if (/自己的时间|自由/.test(where)) {
       const place = /（(.+)）/.exec(where)?.[1];
       if (place) {
         lines.push(place === '家'
@@ -243,7 +246,7 @@ export function freeEventText({
     if (weatherHint) lines.push(weatherHint);
   }
   const tail = [];
-  tail.push('想记就用 feast_life_play 记一笔；不记也没关系。');
+  tail.push(storyOn ? STORY_RECORD_TAIL : '想记就用 feast_life_play 记一笔；不记也没关系。');
   if (askReport) tail.push('聊到时告诉主人一句即可。');
   tail.push('不想动就忽略这条，今天不再催。');
   lines.push(tail.join(''));

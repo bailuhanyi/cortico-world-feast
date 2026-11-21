@@ -36,7 +36,7 @@ import {
   momentLine, newPlay, nextFreeSlotText, normalizePlan, nowText, parseClock, parseDoings, parseSlots, pendingDay,
   pickDayType, planEventText, planFreeTick, playDoneText, readDay, readFunEnabled, readMapEnabled, readPlay,
   removeWorkEvents, isWorkEvent, workScheduleKey, categoryOf, validCategory, ACTIVITY_CATEGORIES, clock,
-  recentSummary, recordPlay, segmentKey, skipFreeToday, templateDay, withFunLine, withMapLine, writeDay, writePlay,
+  recentSummary, recordPlay, segmentKey, skipFreeToday, templateDay, linkedMenu, storyLinkOn, STORY_RECORD_TAIL, writeDay, writePlay,
   zonedNow,
 } from './life/index.js';
 import {
@@ -423,6 +423,8 @@ export class FeastWorld {
   #weatherFetch = null;
   /** 宿主传入的配置段，可能已合并默认值。 */
   #inputCfg = null;
+  /** 宿主部署目录：可选联动配置的权威来源，不交给前端或其他 World。 */
+  #botDir;
   /** UI 只读上下文隔离标识：只返回 hash，不把 dataDir 暴露给前端。 */
   #uiScope;
   /** 月历摘要按月缓存 30 秒；写入相关日期时精准失效。 */
@@ -435,6 +437,7 @@ export class FeastWorld {
     this.#inputCfg = opts.cfg ?? {};
     this.cfg = { ...DEFAULTS, ...this.#inputCfg };
     this.dataDir = opts.dataDir ?? process.cwd();
+    this.#botDir = opts.botDir;
     this.#uiScope = createHash('sha256').update(`${resolve(this.dataDir)}\u0000${this.id}`).digest('hex');
     this.language = 'zh';
     this.timezone = opts.timezone || 'Asia/Shanghai';
@@ -647,7 +650,7 @@ export class FeastWorld {
   async #refreshFunInstalled() {
     if (!this.#funLinkOn()) { this.#funInstalled = false; return; }
     try {
-      this.#funInstalled = await readFunEnabled(this.dataDir);
+      this.#funInstalled = await readFunEnabled(this.dataDir, { botDir: this.#botDir });
     } catch {
       this.#funInstalled = false;
     }
@@ -662,7 +665,7 @@ export class FeastWorld {
   async #refreshMapInstalled() {
     if (!this.#mapLinkOn()) { this.#mapInstalled = false; return; }
     try {
-      this.#mapInstalled = await readMapEnabled(this.dataDir);
+      this.#mapInstalled = await readMapEnabled(this.dataDir, { botDir: this.#botDir });
     } catch {
       this.#mapInstalled = false;
     }
@@ -1957,8 +1960,8 @@ export class FeastWorld {
     const doings = doingsFor(parseDoings(this.cfg?.lifeDoings), type);
     // 写日程的地点联动不依赖自由时间提醒。
     const [mapOn, funOn] = await Promise.all([
-      this.cfg?.lifeFreeMapOn !== false && readMapEnabled(this.dataDir),
-      this.cfg?.lifeFreeFunOn !== false && readFunEnabled(this.dataDir),
+      this.cfg?.lifeFreeMapOn !== false && readMapEnabled(this.dataDir, { botDir: this.#botDir }),
+      this.cfg?.lifeFreeFunOn !== false && readFunEnabled(this.dataDir, { botDir: this.#botDir }),
     ]);
     let continuation = '';
     try { continuation = threadHint(await readThreads(this.dataDir)); }
@@ -1971,6 +1974,7 @@ export class FeastWorld {
       ts: new Date(now).toISOString(),
       text: [planEventText({
         date, type, recent, mealSlots: slots, wardrobe, doings, rewrite, noWork, mapOn, funOn,
+        storyOn: storyLinkOn(funOn, this.cfg),
         mealByHer: this.cfg?.mealSlotsByHer !== false && this.#lifeOn(),
       }), continuation].filter(Boolean).join('\n\n'),
       meta: { date, dayType: type.id, ...(rewrite ? { rewrite: true } : {}) },
@@ -2421,14 +2425,13 @@ export class FeastWorld {
     if (!host?.pushEvent) throw new Error('宿主没有 pushEvent');
     const z = zonedNow(this.timezone, now);
     let menu = '';
+    const storyOn = kind !== 'busy' && storyLinkOn(this.#funInstalled, this.cfg);
     if (kind !== 'busy') {
       const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
-        ? this.cfg.lifeFreeMenu.trim()
+        ? this.cfg.lifeFreeMenu
         : String(DEFAULTS.lifeFreeMenu);
-      // 娱乐时间装了才把「出门去逛逛」那一行接上去；关了开关、没装、或她自己抄过 fun_*
-      // 都原样返回——绝不让她看到指向不存在工具的例子。
-      // 小地图接在后面，两行互不打架（各按自己的前缀去重）。
-      menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
+      // 新路径仅在明确选择时引导主会话核对能力；旧路径保留各自的自动行和去重。
+      menu = linkedMenu(rawMenu, this.#funInstalled, this.#mapInstalled, this.cfg);
     }
     await host.pushEvent({
       type: EVENT_LIFE_FREE,
@@ -2443,6 +2446,7 @@ export class FeastWorld {
         cfg: this.cfg,
         where,
         menu,
+        storyOn,
         nowHm: z.hm,
         tz: this.timezone,
         // 天气：出门那句提醒跟着真实天气走，取不到就整段不出现。忙着的时候不提出门。
@@ -2458,16 +2462,21 @@ export class FeastWorld {
     if (!this.#freeOn()) return { text: '「她的一天」现在关着。', failed: true };
     const now = this.#now();
     const z = zonedNow(this.timezone, now);
-    const play = await this.#freePlay(now);
+    const current = await this.#freePlay(now);
     let entry;
+    let next;
     try {
-      entry = recordPlay(play, { nowMs: now, activity: args?.activity, note: args?.note });
+      // Build a detached candidate first: a failed atomic write must not mutate the live cache.
+      next = { ...current, done: [...(current.done ?? [])] };
+      entry = recordPlay(next, { nowMs: now, activity: args?.activity, note: args?.note });
+      await writePlay(this.dataDir, next);
     } catch (err) {
       return { text: `[记账失败] ${msg(err)}`, failed: true };
     }
-    await writePlay(this.dataDir, play);
+    this.#play = next;
+    if (this.#freePendingSave === current) this.#freePendingSave = null;
     this.#invalidateCalendar(z.date);
-    return { text: playDoneText({ entry, play, cfg: this.cfg, nowHm: z.hm }) };
+    return { text: playDoneText({ entry, play: next, cfg: this.cfg, nowHm: z.hm }) };
   }
 
   /** feast_life_skip：今天剩下的档不叫了。 */
@@ -2499,13 +2508,13 @@ export class FeastWorld {
     const play = await this.#freePlay(now);
     const { item, kind, where } = this.#lifeNow(now);
     const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
-      ? this.cfg.lifeFreeMenu.trim()
+      ? this.cfg.lifeFreeMenu
       : String(DEFAULTS.lifeFreeMenu);
     // 和叫醒事件同一条路径：装了娱乐时间才加那一行。这里是工具调用（异步），
     // 现读一次比等 tick 更稳——刚装完娱乐时间她就能看到它。
     await this.#refreshFunInstalled();
     await this.#refreshMapInstalled();
-    const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
+    const menu = linkedMenu(rawMenu, this.#funInstalled, this.#mapInstalled, this.cfg);
     const done = play.done.length;
     const mood = typeof args?.mood === 'string' && args.mood.trim() ? `（${args.mood.trim().slice(0, 60)}）` : '';
     const wshort = weatherShort(this.#weather);
@@ -2525,7 +2534,7 @@ export class FeastWorld {
       '下面只是个例子，不照着也行；想到什么就做什么，什么都不做也可以：',
       menu,
       ...(whint ? [whint] : []),
-      '做完随手用 feast_life_play 记一笔。不记也没关系，记只是给你自己攒。',
+      storyLinkOn(this.#funInstalled, this.cfg) ? STORY_RECORD_TAIL : '做完随手用 feast_life_play 记一笔。不记也没关系，记只是给你自己攒。',
     ];
     return { text: lines.join('\n') };
   }
@@ -3342,12 +3351,12 @@ export class FeastWorld {
           const play = await this.#freePlay(now);
           const { item, kind, where } = this.#lifeNow(now);
           const rawMenu = typeof this.cfg?.lifeFreeMenu === 'string' && this.cfg.lifeFreeMenu.trim()
-            ? this.cfg.lifeFreeMenu.trim()
+            ? this.cfg.lifeFreeMenu
             : String(DEFAULTS.lifeFreeMenu);
           // 面板这条通道也不等 tick：现读一次再拼，免得刚装完娱乐时间这里还没刷新。
           await this.#refreshFunInstalled();
           await this.#refreshMapInstalled();
-          const menu = withMapLine(withFunLine(rawMenu, this.#funInstalled, this.cfg), this.#mapInstalled, this.cfg);
+          const menu = linkedMenu(rawMenu, this.#funInstalled, this.#mapInstalled, this.cfg);
           const wshort = weatherShort(this.#weather);
           const whint = weatherFreeHint(this.#weather?.ok ? this.#weather.kind : null);
           // 主人替她开口，也不能替她撒谎：周一下午三点说「现在是你自己的时间」，
@@ -3371,7 +3380,7 @@ export class FeastWorld {
               '想做什么都行，下面只是个例子，不照着也行：',
               menu,
               ...(whint ? [whint] : []),
-              '做完随手用 feast_life_play 记一笔。',
+              storyLinkOn(this.#funInstalled, this.cfg) ? STORY_RECORD_TAIL : '做完随手用 feast_life_play 记一笔。',
             ].join('\n'),
             meta: { reason: 'owner-start', kind },
           }, { deliver: true, trigger: 'flush' });

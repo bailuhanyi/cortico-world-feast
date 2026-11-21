@@ -2,9 +2,9 @@
 
 先给她一天，再给她一桌饭。
 
-本次版本说明：`0.12.0`。在持续工作排程与首页提醒优化基础上，补充生活回顾、手动标题与文字纪念卡、菜单快捷入口和尝鲜推荐、可预览确认的生活提醒预设，以及首页视觉与键盘交互整理。发布状态以 npm registry 为准。
+当前发布版本为 `0.13.0`（待发）：D1 的联动配置读取与候选说明、D2 的「明确选择娱乐时间为地点和故事来源」（新增 `lifeStoryOn`，默认关闭），连同未单独发布的 `0.12.1` 三项界面修复一起发布，详见 [CHANGELOG.md](CHANGELOG.md)。此前 `0.12.0` 加入生活回顾、手动标题与文字纪念卡、菜单快捷入口和尝鲜推荐、可预览确认的生活提醒预设，以及首页视觉与键盘交互整理。
 
-新增两条工具：`feast_life_journal` 按日期回看实际记录、设手动标题、从实际 ID 保存或导出文字卡；`feast_life_style` 列出/预览/按用户明确要求应用三套提醒预设。面板与工具共用实现。记录与日程始终分开，不自动生成纪念卡、完成小事或调用模型；预设只改七项已有提醒设置。当前为 20 个工具、7 个事件，配置项和面板数量不变，详细操作见使用指南。
+新增两条工具：`feast_life_journal` 按日期回看实际记录、设手动标题、从实际 ID 保存或导出文字卡；`feast_life_style` 列出/预览/按用户明确要求应用三套提醒预设。面板与工具共用实现。记录与日程始终分开，不自动生成纪念卡、完成小事或调用模型；预设只改七项已有提醒设置。当前为 20 个工具、7 个事件、43 项配置（默认值含 `enabled` 共 44 键），面板数量不变，详细操作见使用指南。
 
 本轮还补齐日期条与按需月历、独立往期阅读、跨面板浏览记忆、仅会话保留的文字草稿，以及就地反馈和稳定局部刷新。浏览偏好按实例隔离；计划、事实、保存结果和读取结果分别说明。UI只读接口不增加模型工具或提醒，详细交互见使用指南。
 
@@ -12,21 +12,29 @@
 
 记录正常更新时保留一份上次有效内容的 `.bak`。损坏记录在首页显示异常，支持重新读取；有有效备份才显示恢复，恢复前另存原文件为 `.corrupt-时间戳-标识`。主记录损坏时仍能打开首页恢复，吃饭相关写入暂停。等待她写明天超过十分钟后，可以手动重发邀请，原日程保留。
 
-> **只想学会怎么用？** 看 [`GUIDE.md`](GUIDE.md)：三分钟上手、四个面板怎么点、一起吃饭怎么玩、42 项配置（分 6 张卡）、常见情况。
+> **只想学会怎么用？** 看 [`GUIDE.md`](GUIDE.md)：三分钟上手、四个面板怎么点、一起吃饭怎么玩、43 项配置（分 6 张卡；默认值含 `enabled` 共 44 键）、常见情况。
 > 这一份 README 讲的是"里面有什么、为什么这么做"。
 
 0.7.0 起她有自己的日子：每晚到点请她自己写明天怎么过，第二天按它过；主人能在「今天」面板看此刻她在哪儿、临时改掉某一段。下面「[她的一天](#她的一天)」一节讲这个。0.7.3 起她会看**真实天气**（默认关：填了你自己城市的名字才提，见下面「天气」一节）。
 
-**能和三个扩展联动，都是一个开关的事，不装就整段不出现、绝不报错**：
+**可选扩展联动**：
 
 | 扩展 | 联动内容 | 开关 |
 | --- | --- | --- |
 | 「生图工作室」`cortico-world-imggen` | 写日程时列出衣柜/场景，发图时穿着、地点对得上 | `lifeWardrobeOn` |
-| 「娱乐时间」`cortico-world-fun` | 写日程时可查场所、营业时段和可逛项目，「自己的时间」里也会提示她去逛 | `lifeFreeFunOn` |
-| 「鱼的小世界」`cortico-world-map` | 写日程时可查登记地点并沿用正名，「自己的时间」里也会提示她看看周围 | `lifeFreeMapOn` |
-| 「鱼的每一天」（别的扩展反过来用它） | 它们通过 `lifeFreeMenu` 这个官方配置槽被叫到 | — |
+| 「娱乐时间」`cortico-world-fun` | 保留旧出游提示；主动选择 D2 后，按需查询合并后的地点与故事 | `lifeFreeFunOn`、`lifeStoryOn` |
+| 「鱼的小世界」`cortico-world-map` | 旧路径按需查登记地点；D2 生效时仅省略自动行 | `lifeFreeMapOn` |
+| 「鱼的每一天」（别的扩展反过来用它） | 可在 `lifeFreeMenu` 里手写自由时间的例子 | — |
 
-前三个都是**自动检测**：读 `config.json` 里对方那一个 `enabled` 字段，没装就不提；详情见下面各自那一节。
+鱼的小世界已停止独立维护，地点、住所、画风、封面和浏览能力将并入娱乐时间。`lifeStoryOn` 默认 `false`，需由用户明确选择娱乐时间作为地点与故事来源；生效还要求 `lifeFreeFunOn !== false` 与 `worlds.fun.enabled === true`。开关、启用字段和包版本都不证明当前会话有工具或权限。D2 仅省略自动生成的旧 fun/map 行，保留用户候选、菜单、排序与两个独立开关；关闭后回到原有追加与去重路径。两边仍是独立来源，不自动合并两个“家”或迁移住所。
+
+旧用户无需卸载小世界，新用户无需为迁移额外安装旧插件。指定故事只能由用户在娱乐时间故事面板确认开始；计划、到点和普通 `fun_go` 都不等于指定故事开局。用户明确选择记生活后，才用 `feast_life_play(activity,note)` 留下实际摘要；保存成功才算记下。暂停、试玩、未完成不自动完成或记账，复制摘要不等于同步，也没有 `sourceRef` 幂等保证。操作见[使用指南](GUIDE.md#从计划到游玩记录)，准确接口见[D2 开发说明](#d2-故事查询契约开发说明)。
+
+### D2 migration (English)
+
+`worlds.feast.lifeStoryOn` defaults to `false`. Opt in to choose Fun Time for places and stories; this also requires `lifeFreeFunOn !== false` and `worlds.fun.enabled === true`. Switches and package versions do not prove tool access in the current session. Only generated legacy fun/map hints are omitted: your text, order and both independent switches remain. Turn D2 off to restore the legacy hint path. The two place sources remain separate; their homes are never merged automatically.
+
+A specific story starts only after you confirm it in Fun Time's story panel. `fun_go` does not launch a specified story; there is no `fun_story_start`, and the management tool `fun_story` is not a query or launch substitute. Match a saved recap to the target trip ID or run ID; the most recent saved recap may be about an earlier trip. A free-time invitation is not consent to record. Record actual play only when you explicitly choose to, using `feast_life_play(activity,note)`. Its receipt is plain `text`; claim success only after saving succeeds. Paused, unfinished and playtest runs are never automatically completed or recorded. Copying a recap is not a sync, and repeated writes have no `sourceRef` idempotency guarantee. See the [developer contract notes](#d2-故事查询契约开发说明) for exact tools and version evidence.
 
 桌上是 824 道菜（28 个菜系组），每道都有九维口味分值、上桌的样子、香气、口感、余韵，和一段 40-400 字的实吃描写。她能自己按菜系挑着吃，主人也能从面板把一道菜端到她面前，或者整桌端过去；还能**和她一起吃一顿**——邀请她、互相喂一口，你吃了什么她也知道。**同一道菜每次吃到的都不一样**——温度、状态、配的那口都会变，所以连着吃三次不会说三遍同一句话。吃过什么、对什么反应、攒出来的口味画像跨天留着。饭点提醒默认开着，可以在配置里一键关掉。
 
@@ -174,7 +182,7 @@
 
 那段正文的措辞写死是「从里面挑也行、自己另想也行、一件都不挑也行」——它是**例子**，不是待办；不进系统前缀，只在那一条邀请里出现。
 
-**要写扩展工具就把工具名和调用写法写清，而且只写你真装了的。** 这里不做自动检测：`lifeFreeMenu` 那两行能自动判断装没装（读 `worlds.fun.enabled` / `worlds.map.enabled`），但任意工具没法从配置里判断。写了一个她那里没有的工具，她会照着做但做不成。
+如果在 `lifeDoings` 或 `lifeFreeMenu` 里写了具体工具，使用前请确认当前会话确实提供该工具。未提供时可以改用通用说法或另作安排。
 
 ### 提醒恢复与配置默认值
 
@@ -270,37 +278,25 @@ Cortico 的 `envPromptVars()` **只在前缀重建时重算**，不是每轮请�
 - 发一条空间动态（qq_qzone action=post）
 ```
 
-### 和「娱乐时间」联动（0.7.4）
+### 和「娱乐时间」联动（0.7.4，旧路径）
 
-装了 `cortico-world-fun`（娱乐时间）并且它**启用着**，这一行会自动接在例子末尾，不用你手抄：
+未选择 D2 或其前提不满足时，「娱乐时间」（`cortico-world-fun`）的 `worlds.fun.enabled` 为 `true` 且 `lifeFreeFunOn` 未关闭，例子末尾可追加原有提示：
 
 ```
 - 出门去逛逛：fun_places 看今天能去哪 → fun_go 进门 → fun_wander 逛一处 → fun_home 收摊
 ```
 
-**自动检测，不需要配置路径**：读 `<数据目录>/../config.json` 里的 `worlds.fun.enabled`（只读这一个字段，不调它的工具、不读它的状态/日程——读配置文件不算 World 间依赖）。
+鱼的每一天只读取启用字段。菜单已提到 `fun_*` 时跳过追加。关闭 `lifeFreeFunOn` 只停自动追加，手写内容仍保留。
 
-三种情况**这一行整段不出现**，她绝不会看到指向不存在工具的例子：
+### 和「鱼的小世界」联动（0.7.5，旧路径）
 
-- 娱乐时间**没装**；
-- 装了但**在配置里停用**（`worlds.fun.enabled` 不是 `true`）；
-- 你自己已经在 `lifeFreeMenu` 里抄过 `fun_*`（判据是「提到 fun_ 开头的工具」，怎么措辞随你，不会叠第二条）。
-
-想关掉这个自动追加、但保留你手写的内容：配置 →「她自己的时间」→ `lifeFreeFunOn` 关掉（默认开）。它只追加一行，**从不改写你原有的任何一条例子**。
-
-### 和「鱼的小世界」联动（0.7.5）
-
-装了 `cortico-world-map`（显示名「鱼的小世界」）并且它**启用着**，例子里会多一行（和上面那行可以并存）：
+D2 未生效时，旧的「鱼的小世界」（`cortico-world-map`）的 `worlds.map.enabled` 为 `true` 且 `lifeFreeMapOn` 未关闭，例子里可追加原有提示：
 
 ```
 - 看看周围、去个常去的地方：map_places 看有哪些地方 → map_look 看这一处长什么样
 ```
 
-**不点名具体地点**：它的地点库是每个主人自己的（有人家在小区、有人家在森林里），她调 `map_places` 自己看有哪些地方。
-
-判据和上面完全同构——读 `<数据目录>/../config.json` 的 `worlds.map.enabled` 一个字段；没装 / 停用 / 你手抄过 `map_*` 都不加（`map_` 与 `fun_` 两个前缀各判各的，不会互相误伤）。开关：配置 →「她自己的时间」→ `lifeFreeMapOn`。
-
-两行都在时顺序固定：**娱乐时间在前、鱼的小世界在后**。两行各有各的开关，关一个不影响另一个。
+菜单已提到 `map_*` 时跳过追加。两行可并存，娱乐时间在前。开关各自控制对应的自动提示，工具能否调用以当前会话为准。
 
 
 **记账单独存一份** `<数据目录>/feast/life/play-YYYY-MM-DD.json`，不写进日程：`feast_life_plan` 会整个重写一天，记进去她下次交回就覆盖了。计划和事实的生命周期不同，就该分开存。
@@ -409,7 +405,7 @@ Cortico 的 `envPromptVars()` **只在前缀重建时重算**，不是每轮请�
 - 应用 15:00 才打开这种：一天一档都没叫过的话，补最近过去的那一顿，不让一整天白过
 - 上一顿挂太久（2 小时）就放掉，但**同一拍还会看下一档**——午饭没吃不该把晚饭一起吞掉
 
-配置项（`worlds.feast.*`，全是热改）：
+配置项（`worlds.feast.*`，全是热改）：配置卡 43 项，`DEFAULTS` 含宿主管理的 `enabled` 共 44 键。
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
@@ -448,8 +444,9 @@ Cortico 的 `envPromptVars()` **只在前缀重建时重算**，不是每轮请�
 | `lifeFreeBusyCall` | `false` | **忙着的时候也叫**（0.8.0）。开=上班/通勤/开会那几档照样叫，但换成报备措辞；关=不叫、面板留痕。睡觉永远不叫 |
 | `lifeFreeMenu` | 4 条通用说法 | 叫醒时贴给她的菜单。**默认不点名任何别的扩展的工具**；要用具体工具自己填 |
 | `lifeFreeAskReport` | `true` | 做完要不要提醒她跟主人说一句 |
-| `lifeFreeFunOn` | `true` | **出门逛逛那一行**（0.7.4）。装了「娱乐时间」并启用着才加；没装/停用/你自己抄过 `fun_*` 都不加。关掉=不自动加 |
-| `lifeFreeMapOn` | `true` | **看看周围那一行**（0.7.5）。装了「鱼的小世界」并启用着才加；没装/停用/你自己抄过 `map_*` 都不加。关掉=不自动加 |
+| `lifeFreeFunOn` | `true` | **出门逛逛那一行**。旧路径中，娱乐时间配置启用且菜单未提到 `fun_*` 时追加旧提示；D2 同样要求此项未设为 `false`。关闭不删手写内容，配置启用不证明工具能力 |
+| `lifeFreeMapOn` | `true` | **看看周围那一行**。旧路径中，旧小世界配置启用且菜单未提到 `map_*` 时追加旧提示；D2 生效时省略自动行，但保留开关值与手写内容 |
+| `lifeStoryOn` | `false` | **用娱乐时间的地点和故事**。用户明确选择新来源；还需 `lifeFreeFunOn !== false` 和 `worlds.fun.enabled === true`。仅省略自动旧 fun/map 行，保留文本、排序和独立开关；关闭回旧路径，开关与版本不证明会话能力 |
 | `lifeWardrobeOn` | `true` | **生图联动总开关**：扫素材库、列给她、自动补穿着、提示词互指 |
 | `lifeWardrobeDir` | 空 | 素材库目录。留空自动跟 imggen 的 `libraryRoot`，再降级到 `<数据目录>/imggen-library`。配置页上有原生选目录按钮 |
 | `lifeWardrobeAutoOutfit` | `true` | 自动补 outfit（情境穿搭 > 情境默认 > 延续上一段 > 场景默认 > 默认服饰） |
@@ -492,7 +489,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -CooRoot "C:\Users\asus\C
 
 ## 从市场装
 
-这个包也发在 npm（`cortico-world-feast`），Coo 的市场会收录它。从市场装的话不用跑上面的脚本：市场会把包装进 `data\extensions\node_modules`，启用后在世界的配置里能看到同样那 39 项（分成 6 张卡）。
+这个包也发在 npm（`cortico-world-feast`），Coo 的市场会收录它。从市场装的话不用跑上面的脚本：市场会把包装进 `data\extensions\node_modules`，启用后在世界的配置里能看到同样的 43 项配置（分成 6 张卡；默认值含 `enabled` 共 44 键）。
 
 包名和收录的细节、发版步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
@@ -511,6 +508,25 @@ Remove-Item "$ext\vendor\cortico-world-feast" -Recurse -Force
 ---
 
 ## 开发
+
+### D2 故事查询契约（开发说明）
+
+本票采用的独立 [F3–F5 契约](STORY-QUERY-CONTRACT-F3-F5.md) 将最低支持构建明确为 `cortico-world-fun@0.3.2-story.2`，六个公开方法均声明 `read,snapshot`。本票另获提供的 Fun Time 源码快照，其包版本是 `0.3.2`、锁文件版本为 `0.3.2-story.2`；没有提供原验收 tgz，不能证明与验收包相同。不能用快照版本替代独立契约的最低版本，也不能据任一材料宣称宿主已安装或本次已验证可用。使用前仍需核对当前会话的实际工具声明与权限。
+
+| 只读工具 | 参数 | 用途 |
+| --- | --- | --- |
+| `fun_story_places` | `{}` 或 `{"id":"地点ID"}` | 地点索引；带 ID 查详情 |
+| `fun_story_candidates` | `{}` | 无剧透候选及当前可用原因 |
+| `fun_story_detail` | `{"id":"故事ID"}` | 单篇公开卡片与当前条件 |
+| `fun_story_current` | `{}` | `none/active/draft` 或当前行程的实际状态，不推进选择 |
+| `fun_story_recap` | `{}` 或 `{"id":"实际行程ID或runId"}` | 最近或指定行程的已发生摘要 |
+| `fun_story_schedule` | `{}` 或 `{"id":"故事ID"}` | 可复制候选文字，不写日程、不开始故事 |
+
+查询按需由宿主主会话模型调用；每一天代码不调用 fun 工具、不读对方业务文件、不加载整库或增加轮询。标准回执为 `{text:"JSON", failed?:true}`，解析外层 `text` 获取 JSON；其中 schedule 的 `text` 仍只是候选。先检查外层 `failed`，且仅 `ok === true` 视为查询成功；故事卡还要同时 `enabled === true`、`available === true` 才视为当前可用。`failed:true`、`ok:false`、缺失/畸形 `text`、无候选、过期或权限不明都不能推断成功，可重新读取或退回通用邀请。已知存档异常时，其他成功查询不代表可出发。缺版本、作者、条件或时长就说明未知，不从节点数估时，不补未来剧情或私有资料；当前可用不保证目标时段可用。
+
+指定故事仅支持用户在故事面板确认 `start`，面板复核当前 `startStamp`、`packId`、`revision`。普通 `fun_go` 不是指定故事开局，没有 `fun_story_start`；管理工具 `fun_story` 不用于查询或替代开局，鱼不替用户完成 owner 或 joint 中的用户份额。目标行程的已存回顾带目标行程 ID 或 run ID，并核对 `memory.id`/`memory.runId`；无 ID 的回顾只指最近一次已存行程，不可据此推断本局结果。生活记录另行明确选择，沿用 `feast_life_play(activity,note)` 的普通 `text` 回执，保存成功才记账；没有 `sourceRef` 幂等或跨日防重保证。
+
+下面是项目原有开发命令，不代表本轮已执行：
 
 ```powershell
 node tools/validate-dishes.mjs   # 校验菜品库（字段、九维、类别、套话、菜系与文件名一致、全库 id 唯一）

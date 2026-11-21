@@ -17,8 +17,7 @@
  *     绝不让她看到指向不存在工具的例子；
  *   · 任何异常都吞掉，**绝不抛错**（抛错会把整个 World 卸载）。
  */
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readLinkedWorldEnabled } from './linked-config.js';
 
 /**
  * 要拼进「例子」的那一行。
@@ -42,33 +41,11 @@ export const FUN_LINE = '- 出门去逛逛：fun_places 看今天能去哪 → f
 const HAS_FUN_RE = /fun_[a-z]+/;
 
 /**
- * 读娱乐时间的安装/启用状态。
- *
- * 宿主的 config 路径按 `dataDir` 的父目录找（`<dataDir>/../config.json`），
- * 和 `wardrobe.js` 的 `readImggenRoot` 一致——数据目录是 `…/home/companion`，
- * config.json 在它的上一层。
- *
- * `config.json` 是 Coo **整份重写**的（改任何配置项都会重写一次），存在「读到写了
- * 一半的文件」的窗口。解析失败时**等 200ms 重试一次**，再失败才判成「没装」——
- * 否则用户改配置的那一瞬间正好触发叫醒，会误判成「没装娱乐时间」而漏掉那一行。
- *
- * @returns {Promise<boolean>} 装并且启用了才 true；其余一律 false（静默降级）。
+ * 只读娱乐时间的 enabled。宿主 botDir 优先；旧入口兼容数据目录内与父目录配置，
+ * 权威顺序和有限重试统一在 linked-config.js 中。true 不证明版本或工具权限。
  */
-export async function readFunEnabled(dataDir) {
-  const tryOnce = async () => {
-    try {
-      const raw = JSON.parse(await readFile(join(dataDir, '..', 'config.json'), 'utf8'));
-      // 只认 `enabled`：那是宿主的 World 总开关，用户关掉世界页就是它在变。
-      return raw?.worlds?.fun?.enabled === true;
-    } catch {
-      return null; // 区分「读不到/解析失败」(null) 和「读到了但没这个段」(false)
-    }
-  };
-  const first = await tryOnce();
-  if (first !== null) return first;
-  await new Promise((r) => setTimeout(r, 200));
-  const second = await tryOnce();
-  return second === true;
+export async function readFunEnabled(dataDir, options = {}) {
+  return readLinkedWorldEnabled(dataDir, 'fun', options);
 }
 
 /**

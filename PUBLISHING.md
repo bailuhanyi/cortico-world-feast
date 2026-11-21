@@ -1,6 +1,12 @@
 # 发布到 Coo 扩展市场
 
-## 当前补丁版本：0.12.1
+> **当前发布版本：0.13.0（待发）**。D1（联动配置读取与候选说明）与 D2（新增 `lifeStoryOn`，明确选择娱乐时间为地点和故事来源，默认关闭）已并入工作区；未单独发布的 0.12.1 三项界面修复随本版一起发布。2026-11-21 实时查询 npm 官方 registry：`latest` 为 `0.12.0`，`0.13.0` 未被占用。此前 `.tmp/release/0.12.1-final/` 只含三项界面修复，不含 D1/D2，不能用旧归档或旧校验结果代表当前源码。本机准备阶段只跑离线检查与在线版本占用查询，不含安装或发布；`npm publish` 与 `git push` 由维护者本人执行。
+
+D2 新增 `lifeStoryOn`，默认 `false`；配置卡当前 43 项，默认值含宿主管理的 `enabled` 共 44 键。用户明确选择后还需 `lifeFreeFunOn !== false` 与 `worlds.fun.enabled === true`，只省略自动旧 fun/map 行，保留手写内容、排序与独立开关，关闭后回旧路径；不自动合并两处住所。指定故事由用户在故事面板确认，生活记录另行选择且保存成功才算记账，无 `sourceRef` 幂等保证。
+
+接口和回执约定见 [README 的 D2 开发说明](README.md#d2-故事查询契约开发说明) 及独立 [F3–F5 契约](STORY-QUERY-CONTRACT-F3-F5.md)：最低构建是 `cortico-world-fun@0.3.2-story.2`；另有 `0.3.2` 源码快照，两者都不能证明本次已安装或当前会话有能力。六个只读查询不会开局，普通 `fun_go` 不能指定故事，没有 `fun_story_start`，也不用管理工具 `fun_story` 替代。将来发布前需核对声明、配置计数和新旧路径兼容，并如实记录当次验证；本段没有宣称本轮测试通过。
+
+## 三项界面修复的历史补丁版本：0.12.1（未单独发布，随 0.13.0 发布）
 
 本版合并三项界面调整：
 
@@ -12,7 +18,7 @@
 
 ## 发布前检查
 
-版本已在 [package.json](package.json) 和更新日志中同步为 0.12.1。正式发布前仍须查询 npm 官方 registry；已存在的版本不能覆盖，网络错误也不能当作版本空缺。
+版本已在 [package.json](package.json) 和更新日志中同步为 0.13.0。正式发布前仍须查询 npm 官方 registry；已存在的版本不能覆盖，网络错误也不能当作版本空缺。
 
 ```powershell
 Set-Location 'E:\deep seek\feed-world'
@@ -30,8 +36,8 @@ git diff --check
 ## 打包核对
 
 ```powershell
-New-Item -ItemType Directory -Force '.tmp/release/0.12.1-final' | Out-Null
-npm.cmd pack --json --pack-destination .tmp/release/0.12.1-final --cache=.tmp/npm-release-cache
+New-Item -ItemType Directory -Force '.tmp/release/0.13.0-final' | Out-Null
+npm.cmd pack --json --pack-destination .tmp/release/0.13.0-final --cache=.tmp/npm-release-cache
 ```
 
 应包含运行源码、面板、图标、用户文档、自描述和 28 份菜品数据。不应包含测试、工具、运行记录、备份、凭据或 `.tmp`。按实际包清单及 integrity 核对，不复用旧版本归档。
@@ -58,10 +64,10 @@ npm.cmd publish --access public --tag latest --registry=https://registry.npmjs.o
 ## 发布后核对
 
 ```powershell
-npm.cmd view cortico-world-feast@0.12.1 version dist.integrity --json --registry=https://registry.npmjs.org
+npm.cmd view cortico-world-feast@0.13.0 version dist.integrity --json --registry=https://registry.npmjs.org
 npm.cmd view cortico-world-feast dist-tags --json --registry=https://registry.npmjs.org
 ```
 
-核对实际发布版本、`latest` 和归档 integrity。正常提交并推送相关 Git 改动，不强制覆盖远端；npm 发布核对成功后才创建和推送 `v0.12.1` 标签。npm 发布成功不代表 Coo 市场索引已更新。
+核对实际发布版本、`latest` 和归档 integrity。正常提交并推送相关 Git 改动，不强制覆盖远端；npm 发布核对成功后才创建和推送 `v0.13.0` 标签。npm 发布成功不代表 Coo 市场索引已更新。
 
-在 Coo 中更新后完全退出再重新打开，使进程加载新面板资源。确认「明天」状态归属清楚、复选框可见且可取消、最多选择两条和保存纪念卡正常，以及「换一桌」重配后实际端出的菜仍与卡片一致；不要改动已有用户数据。
+在 Coo 中更新后完全退出再重新打开，使进程加载新面板资源。除 0.12.1 的三项界面修复外，重点看 D2：默认 `lifeStoryOn` 关闭时行为与旧版一致；打开后「写明天」和自由时间邀请改用娱乐时间的地点与故事提示，手写的菜单/候选/排序不丢，关闭后回旧路径；故事只能由用户在娱乐时间故事面板开始，生活记录仍需另行确认且成功回执才显示记下。

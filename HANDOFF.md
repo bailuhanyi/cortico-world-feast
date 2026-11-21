@@ -1,11 +1,20 @@
 # 鱼的每一天插件交接文档
 
 更新时间：2026-11-20（Asia/Shanghai）
+
+**当前发布版本：0.13.0（待发）。** D1（联动配置读取与候选说明）与 D2（新增 `lifeStoryOn`，默认关闭，明确选择娱乐时间为地点和故事来源）已并入工作区；未单独发布的 0.12.1 三项界面修复随本版一起发布。实现与边界见 [HANDOFF-D1.md](HANDOFF-D1.md)，发布步骤见 [PUBLISHING.md](PUBLISHING.md) 与根目录《发布操作单-鱼的每一天-0.13.0.md》。npm 官方 registry 的 `latest` 仍为 `0.12.0`，`0.13.0` 未被占用；本机未执行安装、`npm publish` 或 `git push`。
+
+本机复核（2026-11-21）：`npm test` 22 个文件 **651/651** 通过；`verify-spec`、`make-describe --check`（20 工具 / 7 事件）、`node --check dist/webui.js`、824 道菜校验、`selfcheck`（12 项）、`check-install`（44/44）、`git diff --check` 全部通过；`publish-check --online` 18 项通过、3 条提示（工具数/token 黄档、无截图、解包约 2.3MB），发布清单 69 个文件。真实 Coo GUI 与真实模型仍未验收。
+
+**D2 的前置依赖**：故事协作要求 `cortico-world-fun` **≥ 0.3.2-story.2**；npm 上娱乐时间当前 `latest` 仍是 `0.3.1`，本地 0.3.3 尚未发布。`lifeStoryOn` 默认关闭，缺工具时按现有降级路径处理，因此先后顺序不影响本版可安装性，只影响打开开关后能否真查到故事。
+
+以下为此前 0.12.1 三项界面补丁的历史交接（该版本未单独发布，内容已随 0.13.0 发布）：
+
 本轮补丁目标：`0.12.1`。2026-11-20 实时查询 npm 官方 registry 的 latest 已为 `0.12.0`，本地 package.json 已升为 `0.12.1`。本轮合并「明天」标题位置、实际记录复选框选中标记显示，以及套餐按钮由「看这一桌」改为「换一桌」三项修改；完整状态见 [HANDOFF-RELEASE.md](HANDOFF-RELEASE.md) 顶部及 [PUBLISHING.md](PUBLISHING.md)。本轮回归合计601/601通过，新增换桌文案后面板88/88再次通过，最终0.12.1归档已生成并核验；npm身份检查返回E401。用户于2026-11-20选择「稍后发布」，当前npm未发布、Git未推送且无版本标签，等待用户明确要求继续。以下未明确标为本轮的历史验证与发布状态均只对应当时版本。
 插件包：`cortico-world-feast`
 工具总数：20 个 · 事件 7 个 · 配置项 42 个（`defaults()` 43 个键，含 `enabled`）· 面板 4 个
 
-## 1. 当前状态
+## 1. D1 以前的历史状态与验证
 
 **发布交接请先读 [HANDOFF-RELEASE.md](HANDOFF-RELEASE.md)。** 其中包含当前状态、600项验证、版本冲突处理及可复制的PowerShell指令。旧0.11.1已占用，不能用于本轮发布；CHANGELOG已准备0.12.0节，需先执行文档中的版本修改。
 

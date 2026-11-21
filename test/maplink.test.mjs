@@ -43,9 +43,9 @@ const FREE_SLOT = Date.parse(`${DAY}T21:05:00+08:00`);
 /**
  * 造一个「数据目录」：`<root>/data/home/companion`。
  *
- * `readMapEnabled` 按 `<dataDir>/../config.json` 找（照 wardrobe.js 的 `readImggenRoot`），
- * 所以 config 要落在 `<root>/data/home/config.json`。真机就是这个形状：
- * `E:\Coopanion\data\home\companion` 是数据目录，config 在 `…\data\home\config.json`。
+ * 此 fixture 专门保留旧父目录布局：config 落在 `<root>/data/home/config.json`。
+ * 真正宿主优先传 botDir/config.json；未传时还支持 dataDir/config.json，
+ * 只有同级文件缺失才兼容这里的父目录路径，不能把这份 fixture 当作唯一部署布局。
  */
 async function makeDataDir(configWorlds = null) {
   const root = await mkdtemp(join(TMP_ROOT, 'maplink-'));
